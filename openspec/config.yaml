@@ -1,5 +1,20 @@
 schema: spec-driven
 
+context: |
+  Public repo. Never put a real enterprise's schema, workflows, hostnames or credentials in it;
+  examples target PUB400 or invented data. Real packs live in private repos.
+  packages/screen and packages/source are imported Apache-2.0 code (git subtree from SH4RKKK);
+  keep their LICENSE and NOTICE, keep changes small so upstream fixes can still be pulled.
+  Must run without Docker on Windows, macOS and Linux with Node >= 18.
+  The IBM i user profile is the real safety boundary; the kit's guards are a second layer only.
+
+rules:
+  proposal:
+    - State what is out of scope
+    - Name the MCP tools added or changed, with their read-only or destructive annotation
+  design:
+    - Prefer fewer, well-described MCP tools with structured output over many narrow ones
+
 # Project context (optional)
 # Add only constraints that should guide OpenSpec artifacts and workflows.
 # Include constraints an agent cannot infer by reading the code.
