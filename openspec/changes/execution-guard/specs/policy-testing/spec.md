@@ -31,15 +31,6 @@ fails.
 - **WHEN** a policy edit makes a case that expected `deny` now `allow`
 - **THEN** the command names the case, the rule that now matches, and exits non-zero
 
-### Requirement: Verb cases decide what the verb would send
-A test case with `verb` and `args` SHALL decide every statement the verb would send, nested verbs
-and cleanup included. Its verb SHALL be found in `.ibmi-kit/verbs/` in the working directory or
-`verbs/` beside the policy file; a person's own verbs SHALL NOT be read.
-
-#### Scenario: Team verb in CI
-- **WHEN** a case runs `verb: FIX-ORDERS` as an analyst on an enforcing partition and the verb writes a library the analyst's rules deny
-- **THEN** the case's decision is `deny`, naming the verb's step
-
 ### Requirement: policy_check accepts a candidate policy and identity
 `policy_check` SHALL accept an optional `policy` path and `as` identity, and then decide offline
 against that policy and identity instead of the loaded policy and signed-on user.

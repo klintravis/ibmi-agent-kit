@@ -48,10 +48,14 @@ type Row = Record<string, unknown>;
 // A box: answers the guard's own identity and catalog queries, and records every verb statement
 // that reaches it with the job generation it ran on. Like the backend, a send checks the job
 // generation before sending. `resetOn` drops the job once, as the statement is about to be sent.
-// `curlib`: the current library each time it is asked, the last repeating.
-function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: string) => Row[]; fail?: string[]; resetOn?: string; readOnly?: boolean; blockedTables?: string[]; curlib?: string[] } = {}) {
+// `curlib`: the current library each time it is asked, the last repeating. `dieOn`: the connection
+// dies as that statement is sent, as the real backend sees it: the statement fails, and the
+// generation moves on the next send (the reconnect), which the check then refuses. `hangOn`: a
+// query that never returns.
+function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: string) => Row[]; fail?: string[]; resetOn?: string; dieOn?: string; hangOn?: string; readOnly?: boolean; blockedTables?: string[]; curlib?: string[] } = {}) {
   const sent: string[] = [];
   let curlibAsked = 0;
+  let died = false;
   const own = (sql: string): Row[] | undefined => {
     if (sql.startsWith("SELECT CURRENT SERVER")) return [{ RDB: o.rdb ?? "DEVRDB", USR: o.user ?? "JDOE" }];
     if (sql.includes("QSYS2.USER_INFO")) return [{ G: o.group ?? "GRPDEV", S: "" }];
@@ -60,9 +64,17 @@ function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: stri
     return undefined;
   };
   const send = (text: string, generation?: number) => {
+    if (died) {
+      died = false;
+      conn.generation!++;
+    }
     if (o.resetOn && conn.generation === 0 && text.includes(o.resetOn)) conn.generation!++;
     if (generation !== undefined && generation !== conn.generation) throw new Error("the connection to the IBM i was reset after this was decided; not sent");
     sent.push(`${conn.generation}: ${text}`);
+    if (o.dieOn && conn.generation === 0 && text.includes(o.dieOn)) {
+      died = true;
+      throw new Error("connection to box lost: the ssh session closed. The next call reconnects automatically.");
+    }
     if (o.fail?.some((f) => text.includes(f))) throw new Error(`SQL0803 duplicate key: ${text}`);
   };
   const conn: Conn = {
@@ -72,6 +84,7 @@ function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: stri
       const mine = own(sql);
       if (mine) return { rows: mine, columns: [], truncated: false };
       send(sql, generation);
+      if (o.hangOn && sql.includes(o.hangOn)) await new Promise<never>(() => {});
       return { rows: (o.rows?.(sql) ?? []).slice(0, maxRows), columns: [], truncated: false };
     },
     async execute(sql, _params, _reporter, generation) {
@@ -92,7 +105,7 @@ function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: stri
 const YES = async (): Promise<ElicitResult> => ({ action: "accept", content: { confirm: true } });
 
 // The kit server with the guard's real wiring around a stub box, and a client.
-async function kit(o: { set?: VerbSet; policy?: Policy; box?: ReturnType<typeof box>; elicit?: (req: any) => Promise<ElicitResult>; deps?: ServerDeps } = {}) {
+async function kit(o: { set?: VerbSet; policy?: Policy; box?: ReturnType<typeof box>; elicit?: (req: any) => Promise<ElicitResult>; deps?: ServerDeps; sqlTimeLimitMs?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "kit-verb-runs-"));
   const b = o.box ?? box();
   const k = createServer({
@@ -102,7 +115,7 @@ async function kit(o: { set?: VerbSet; policy?: Policy; box?: ReturnType<typeof 
     runLogDir: dir,
     notice: () => {},
     confirmTimeoutMs: 5000,
-    sqlTimeLimitMs: 5000,
+    sqlTimeLimitMs: o.sqlTimeLimitMs ?? 5000,
     ...(o.set ? { verbs: () => o.set as VerbSet } : {}),
     ...o.deps,
   });
@@ -240,17 +253,52 @@ cleanup:
   assert.deepEqual(r2.s.results[0].statements.slice(3).map((s: any) => s.outcome.slice(0, 6)), ["failed", "ok, 1 "]);
 });
 
-test("verb_run: a reset refuses the next send on the old job; cleanup is decided again and runs on the new job", async () => {
+const RESET = /connection reset; nothing more was sent; cleanup not run: /;
+
+test("verb_run: a reset mid-step sends nothing more, cleanup included, and lists the cleanup not run", async () => {
   const { set } = verbs({ "s.yaml": SEEDED });
-  const r = await run({ set, box: box({ resetOn: "UPDATE TLIB.T SET S = 'X'", rows: holds }) }, { verb: "SEEDED" });
+  const r = await run({ set, box: box({ dieOn: "UPDATE TLIB.T SET S = 'X'", rows: holds }) }, { verb: "SEEDED" });
   assert.equal(r.s.failed, 1);
-  assert.deepEqual(r.sent, ["0: SELECT 1 FROM TLIB.T WHERE K = ?", "0: INSERT INTO TLIB.T (K) VALUES (?)", "1: DELETE FROM TLIB.T WHERE K = ?"]);
-  assert.match(r.s.results[0].error, /steps\.0: the connection to the IBM i was reset after this was decided; not sent/);
-  assert.match(r.s.results[0].notes.join("\n"), /new job that has lost QTEMP and the library list/);
-  // the run log holds the verb's call and the cleanup decided again as a call of its own
-  const calls = [...new Set(r.log.map((l) => l.call))];
-  assert.equal(calls.length, 2);
-  assert.match(r.log.find((l) => l.call === calls[1]).notes.join("\n"), /cleanup of proj:SEEDED decided again after a connection reset/);
+  assert.deepEqual(r.sent, ["0: SELECT 1 FROM TLIB.T WHERE K = ?", "0: INSERT INTO TLIB.T (K) VALUES (?)", "0: UPDATE TLIB.T SET S = 'X' WHERE K = ?"]);
+  assert.match(r.s.results[0].error, /^proj:SEEDED steps\.0: connection to box lost.*; connection reset; nothing more was sent; cleanup not run: proj:SEEDED cleanup\.0: DELETE FROM TLIB\.T WHERE K = \?$/);
+  assert.match(r.s.results[0].notes.join("\n"), /nothing more was sent, cleanup included/);
+  assert.match(r.log[0].notes.join("\n"), /nothing more was sent/);
+  // a reset seen right away (the job already moved on) refuses before sending, the same way
+  const moved = await run({ set, box: box({ resetOn: "UPDATE TLIB.T SET S = 'X'", rows: holds }) }, { verb: "SEEDED" });
+  assert.deepEqual(moved.sent, ["0: SELECT 1 FROM TLIB.T WHERE K = ?", "0: INSERT INTO TLIB.T (K) VALUES (?)"]);
+  assert.match(moved.s.results[0].error, RESET);
+});
+
+test("verb_run: a reset in a nested verb sends neither its cleanup nor the outer verb's", async () => {
+  const { set } = verbs({
+    "outer.yaml": verb("OUTER", "setup:\n  - { id: o, sql: INSERT INTO TLIB.O VALUES 1 }\nsteps:\n  - verb: INNER\ncleanup:\n  - { undoes: o, sql: DELETE FROM TLIB.O }\n"),
+    "inner.yaml": verb("INNER", "setup:\n  - { id: i, sql: INSERT INTO TLIB.I VALUES 1 }\nsteps:\n  - sql: UPDATE TLIB.I SET X = 1\ncleanup:\n  - { undoes: i, sql: DELETE FROM TLIB.I }\n"),
+  });
+  const r = await run({ set, box: box({ dieOn: "UPDATE TLIB.I" }) }, { verb: "OUTER" });
+  assert.deepEqual(r.sent, ["0: INSERT INTO TLIB.O VALUES 1", "0: INSERT INTO TLIB.I VALUES 1", "0: UPDATE TLIB.I SET X = 1"]);
+  assert.match(r.s.results[0].error, /cleanup not run: proj:INNER cleanup\.0: DELETE FROM TLIB\.I; proj:OUTER cleanup\.0: DELETE FROM TLIB\.O$/);
+});
+
+test("verb_run: a reset in a suite's first verb sends nothing of the later verbs", async () => {
+  const { set } = verbs({
+    "s1.yaml": verb("S1", "tags: [smoke]\nsteps:\n  - sql: UPDATE TLIB.A SET X = 1\n"),
+    "s2.yaml": verb("S2", "tags: [smoke]\nsteps:\n  - sql: UPDATE TLIB.B SET X = 1\n"),
+    "s3.yaml": verb("S3", "tags: [smoke]\nsteps:\n  - sql: UPDATE TLIB.C SET X = 1\n"),
+  });
+  const r = await run({ set, box: box({ dieOn: "TLIB.A" }) }, { tag: "smoke" });
+  assert.deepEqual(r.sent, ["0: UPDATE TLIB.A SET X = 1"]);
+  assert.deepEqual([r.s.passed, r.s.failed], [0, 3]);
+  assert.match(r.s.results[0].error, /^proj:S1 steps\.0: connection to box lost/);
+  // the lost job shows at the next send, which the generation check refuses before sending
+  assert.match(r.s.results[1].error, /^proj:S2 steps\.0: the connection to the IBM i was reset after this was decided; not sent; connection reset; nothing more was sent; cleanup not run: none$/);
+  assert.equal(r.s.results[2].error, "not sent: the connection was reset during an earlier verb of this call");
+});
+
+test("verb_run: a SELECT step takes the query time limit; past it the session is reset and nothing more is sent", async () => {
+  const { set } = verbs({ "q.yaml": verb("Q", "setup:\n  - { id: s, sql: INSERT INTO TLIB.T VALUES 1 }\nsteps:\n  - sql: SELECT * FROM TLIB.T\ncleanup:\n  - { undoes: s, sql: DELETE FROM TLIB.T }\n") });
+  const r = await run({ set, box: box({ hangOn: "SELECT * FROM TLIB.T" }), sqlTimeLimitMs: 50 }, { verb: "Q" });
+  assert.deepEqual(r.sent, ["0: INSERT INTO TLIB.T VALUES 1", "0: SELECT * FROM TLIB.T"]);
+  assert.match(r.s.results[0].error, /^proj:Q steps\.0: gave up after 0\.05s and reset the session.*cleanup not run: proj:Q cleanup\.0: DELETE FROM TLIB\.T$/);
 });
 
 test("verb_run: what is sent is what was decided: CL continuation lines arrive folded", async () => {
@@ -348,6 +396,102 @@ test("verb tools: a tag suite continues after a failure, counts each outcome and
     assert.deepEqual(k.sent, ["0: DELETE FROM TLIB.BAD", "0: DELETE FROM TLIB.B", "0: DELETE FROM TLIB.C"]);
     assert.match((await k.call("verb_run", { verb: "B", tag: "smoke" })).text, /give exactly one of verb and tag/);
     assert.match((await k.call("verb_run", { tag: "none" })).text, /no verb has the tag none/);
+  } finally {
+    await k.close();
+  }
+});
+
+test("verb tools: a suite is decided as one script, so one verb cannot set up a way past the guard for the next", async () => {
+  const dev = { group: "GRPDEV", rdb: "PRODRDB" }; // dev on prod, which the example enforces
+  const alias = verbs({
+    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - sql: CREATE ALIAS QTEMP.A FOR LVORD.ORD\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM QTEMP.A\n"),
+  });
+  const r = await run({ set: alias.set, policy: D4, box: box(dev) }, { tag: "smoke" });
+  assert.deepEqual(r.sent, ["0: CREATE ALIAS QTEMP.A FOR LVORD.ORD"]);
+  assert.deepEqual(r.s.results.map((x: any) => x.status), ["passed", "failed"]);
+  assert.match(r.s.results[1].error, /^nothing was sent: proj:B steps\.0 is denied: .*LVORD\.ORD/);
+  assert.equal(new Set(r.log.map((l) => l.call)).size, 1, "one run-log call, as decided");
+  const curlib = verbs({
+    "c.yaml": verb("C", "tags: [smoke]\nsteps:\n  - cl: CHGCURLIB CURLIB(LVORD)\n"),
+    "d.yaml": verb("D", "tags: [smoke]\nsteps:\n  - cl: CLRPFM FILE(*CURLIB/ORD)\n"),
+  });
+  const c = await run({ set: curlib.set, policy: D4, box: box({ ...dev, curlib: ["DVORD"] }) }, { tag: "smoke" });
+  assert.deepEqual(c.sent, ["0: CHGCURLIB CURLIB(LVORD)"]);
+  assert.match(c.s.results[1].error, /^nothing was sent: proj:D steps\.0 is denied/);
+});
+
+test("verb tools: policy_check shows a requires_absent query that writes as deny, live and offline", async () => {
+  const { set } = verbs({ "s.yaml": SEEDED.replace("SELECT 1 FROM TLIB.T WHERE K = :k", "SELECT * FROM OLD TABLE (DELETE FROM TLIB.T WHERE K = :k)") });
+  const k = await kit({ set });
+  try {
+    const live = await k.call("policy_check", { verb: "SEEDED" });
+    assert.deepEqual([live.s.statements[0].effective, live.s.statements[0].where], ["deny", "setup.0.requires_absent"]);
+    assert.match(live.s.statements[0].refused, /a requires_absent query must only read, but it is write TLIB\.T/);
+    assert.match(live.text, /^statement 1 \(proj:SEEDED setup\.0\.requires_absent\): deny \(proj:SEEDED setup\.0\.requires_absent: a requires_absent query must only read/);
+    const off = await k.call("policy_check", { verb: "SEEDED", as: { user: "JDOE" } });
+    assert.equal(off.error, false, off.text);
+    assert.deepEqual([off.s.statements[0].decision, off.s.statements[0].effective], ["deny", "deny"]);
+    assert.match(off.text, /^statement 1: deny \(proj:SEEDED setup\.0\.requires_absent: a requires_absent query must only read/);
+    assert.deepEqual(k.sent, []);
+  } finally {
+    await k.close();
+  }
+});
+
+test("verb tools: a suite asks once; declined, none of its verbs runs; the log marks confirmed only what was asked", async () => {
+  const { set } = verbs({
+    "x.yaml": verb("X", "tags: [smoke]\nsteps:\n  - sql: UPDATE LVLIB.U SET A = 1\n"),
+    "y.yaml": verb("Y", "tags: [smoke]\nsteps:\n  - sql: UPDATE LVLIB.T SET A = 1\n  - sql: DELETE FROM PAYLIB.T\n"),
+    "z.yaml": verb("Z", "tags: [smoke]\nsteps:\n  - sql: UPDATE TLIB.T SET A = 1\n"),
+  });
+  const asked: string[] = [];
+  const no = await run({ set, elicit: async (req) => (asked.push(req.params.message), { action: "decline" }) }, { tag: "smoke" });
+  assert.equal(asked.length, 1);
+  assert.deepEqual(no.sent, []);
+  assert.deepEqual(no.s.results.map((x: any) => x.status), ["failed", "failed", "failed"]);
+  const yes = await run({ set, elicit: YES }, { tag: "smoke" });
+  assert.deepEqual(yes.sent, ["0: UPDATE LVLIB.U SET A = 1", "0: UPDATE TLIB.T SET A = 1"]);
+  // Y was refused, so its UPDATE (a confirm) was never in the question
+  assert.deepEqual(yes.log.map((l) => [l.text, l.confirmed]), [
+    ["UPDATE LVLIB.U SET A = 1", true],
+    ["UPDATE LVLIB.T SET A = 1", undefined],
+    ["DELETE FROM PAYLIB.T", undefined],
+    ["UPDATE TLIB.T SET A = 1", undefined],
+  ]);
+});
+
+test("verb tools: a person's verb overrides the team's: verb_list marks it, a bare name runs it, a suite skips the hidden one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "kit-verbs-layers-"));
+  const user = join(root, "home", ".ibmi-agent-kit", "verbs");
+  const proj = join(root, "repo", ".ibmi-kit", "verbs");
+  mkdirSync(user, { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(join(user, "r.yaml"), verb("RESET-DATA", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM TLIB.MINE\n"));
+  writeFileSync(join(proj, "r.yaml"), verb("RESET-DATA", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM TLIB.TEAM\n"));
+  const set = loadVerbs({ home: join(root, "home"), cwd: join(root, "repo") });
+  const k = await kit({ set });
+  try {
+    const listed = await k.call("verb_list", {});
+    assert.deepEqual(listed.s.verbs.map((v: any) => [v.address, v.overridden]), [["proj:RESET-DATA", true], ["user:RESET-DATA", false]]);
+    assert.match(listed.text, /proj:RESET-DATA \(overridden\)/);
+    await k.call("verb_run", { verb: "RESET-DATA" });
+    assert.deepEqual(k.sent, ["0: DELETE FROM TLIB.MINE"]);
+    const s = await k.call("verb_run", { tag: "smoke" });
+    assert.deepEqual(s.s.results.map((x: any) => [x.verb, x.status]), [["proj:RESET-DATA", "skipped"], ["user:RESET-DATA", "passed"]]);
+    assert.match(s.s.results[0].error, /^overridden/);
+    assert.deepEqual(k.sent, ["0: DELETE FROM TLIB.MINE", "0: DELETE FROM TLIB.MINE"]);
+  } finally {
+    await k.close();
+  }
+});
+
+test("verb tools: a relative IBMI_KIT_VERBS folder is refused", async () => {
+  const k = await kit({ deps: { profileEnv: () => ({ IBMI_KIT_VERBS: "verbs" }) } });
+  try {
+    const r = await k.call("verb_list", {});
+    assert.equal(r.error, true);
+    assert.match(r.text, /profile default: IBMI_KIT_VERBS folders must be absolute paths, not verbs/);
   } finally {
     await k.close();
   }

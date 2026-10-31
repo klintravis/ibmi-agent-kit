@@ -35,7 +35,7 @@ export { decide, detectPartition, environmentOf, rolesOf } from "./decide.js";
 export type { Decision, Identity, OperationDecision, RoleSource } from "./decide.js";
 export { bindArgs, callArgs, loadVerbs, MAX_VERB_DEPTH, resolveVerb, substitute } from "./verbs.js";
 export type { CleanupStep, Layer, SetupStep, Substituted, TemplateKind, Value, Values, Verb, VerbParam, VerbSet, VerbSources, VerbStep } from "./verbs.js";
-export { decideVerb, isPlannedVerb, plannedStatements, planVerb } from "./verbplan.js";
+export { decidePlans, decideVerb, isPlannedVerb, plannedStatements, planVerb } from "./verbplan.js";
 export type { DecidedStatement, Planned, PlannedRole, PlannedVerb } from "./verbplan.js";
 export { RunLog,recordLookups, redact, runLogLines, statedLookups, statementRule } from "./runlog.js";
 export type { Answers, CallRecord, LoggedOperation, PartitionNames, RunLogLine } from "./runlog.js";

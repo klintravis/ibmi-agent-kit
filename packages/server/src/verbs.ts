@@ -1,12 +1,15 @@
 // Verbs on the server (project-verbs design D2, D3, D5): verb_list, verb_run and policy_check's
-// verb input. Every statement of a run, nested verbs and cleanup included, is planned and decided
-// by the guard before the first is sent, and one confirmation covers every `confirm`. The decision
-// context, profile guards, confirmation and run log are run_script's (guarded.ts verbContext).
+// verb input. Every statement of a call, every verb of a suite with its nested verbs and cleanup,
+// is planned and decided by the guard as one script before the first is sent, and one
+// confirmation covers every `confirm`. The decision context, profile guards, confirmation and run
+// log are run_script's (guarded.ts verbContext).
 import { homedir } from "node:os";
+import { delimiter, isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Msg } from "@ibmi-agent-kit/core";
 import {
+  decidePlans,
   decideVerb,
   isPlannedVerb,
   loadVerbs,
@@ -28,7 +31,7 @@ import {
   type Verdict,
 } from "@ibmi-agent-kit/guard";
 
-// What runs the statements, on the job the verb was decided against: any other job refuses
+// What runs the statements, on the job the call was decided against: any other job refuses
 // before sending, and `stale` says the job is gone.
 export interface Executor {
   query(sql: string, params: unknown[], maxRows: number): Promise<{ rows: Record<string, unknown>[] }>;
@@ -53,7 +56,6 @@ export interface VerbContext {
   confirm(needs: ConfirmItem[]): Promise<string | undefined>; // why not, or undefined for a yes
   recheck?(answers: Answers): Promise<string | undefined>; // after a yes: a looked-up current library that changed
   log?(call: Pick<CallRecord, "tool" | "lookups" | "notes" | "statements">): void; // the run log
-  renew?(): Promise<VerbContext>; // the same on the connection's current job, after a reset
 }
 
 export interface StatementResult {
@@ -86,12 +88,14 @@ export interface RunReport {
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const at = (p: Planned) => `${p.verb} ${p.where}`;
 const show = (v: unknown) => (typeof v === "string" ? JSON.stringify(v) : v === undefined ? "nothing" : String(v));
-const RESET_NOTE = "the connection was reset during the verb: nothing more was sent on the old job, and cleanup was decided again and run on a new job that has lost QTEMP and the library list";
+// As run_script tells a query from a change: queries take the time limit.
+const QUERY = /^\s*(\(|SELECT\b|VALUES\b|WITH\b)/i;
+const RESET_NOTE = "the connection was reset: nothing more was sent, cleanup included, on the old job or a new one; QTEMP and the library list of the old job are gone, so clean up by hand";
 
 // Why each statement may not run: the verb's read-only rule, the profile's guards, the policy.
-function refusalsOf(ctx: VerbContext, ds: DecidedStatement[], readOnly: string[]): string[] {
+function refusalsOf(ctx: VerbContext, ds: DecidedStatement[]): string[] {
   return [
-    ...readOnly,
+    ...ds.flatMap((d) => (d.refusal ? [d.refusal] : [])),
     ...ds.flatMap((d) => {
       const r = ctx.refusal?.(d.statement);
       return r ? [`${at(d.planned)}: ${r}`] : [];
@@ -107,42 +111,17 @@ interface Prepared {
   file?: string;
   plan?: PlannedVerb;
   decided: DecidedStatement[];
-  answers: Answers;
-  notes: string[];
   error?: string;
   skip?: string;
 }
 
-async function prepare(ctx: VerbContext, set: VerbSet, ref: string, args?: Record<string, unknown>): Promise<Prepared> {
-  const rec = recordLookups(ctx.lookups);
-  const p: Prepared = { verb: ref, decided: [], answers: rec.answers, notes: [] };
-  try {
-    const v = resolveVerb(set, ref);
-    p.verb = v.address;
-    p.file = v.file;
-    p.plan = planVerb(set, ref, args);
-    const r = await decideVerb(p.plan, ctx.identity, ctx.policy, rec.lookups);
-    p.decided = r.statements;
-    p.notes = r.notes;
-    const refusals = refusalsOf(ctx, r.statements, r.refusals);
-    if (refusals.length) p.error = `nothing was sent: ${refusals.join("; ")}`;
-  } catch (e) {
-    p.error = `nothing was sent: ${errText(e)}`;
-  }
-  return p;
-}
-
-const needs = (ds: DecidedStatement[]): ConfirmItem[] =>
-  ds.filter((d) => d.decision.effective === "confirm").map((d) => ({ label: at(d.planned), decision: d.decision, display: d.statement.display }));
-
 // --- running ---
 
 interface RunState {
-  ctx: VerbContext; // replaced by a renewed one after a reset
+  exec: Executor;
   out: Map<Planned, string>;
-  reset: boolean;
-  confirmed: boolean; // whether the call's confirmation was given
-  log: Prepared[]; // cleanup decided again after a reset, logged as calls of their own
+  reset: boolean; // once set, nothing more is sent in this call
+  undone: Planned[]; // eligible cleanup that a reset kept from running
 }
 
 // An expectation that does not hold, in words; undefined when it holds.
@@ -170,9 +149,16 @@ function same(got: unknown, want: string | number | boolean | null): boolean {
   return String(got).trimEnd() === want;
 }
 
-// Send one statement and record its outcome; returns why it failed, or undefined.
+// Send one statement and record its outcome; returns why it failed, or undefined. After a reset
+// nothing is sent. A reset shows as a stale job: right away after a time limit, or on the next
+// send after a lost connection, which the job generation check refuses before sending.
 async function one(s: Planned, run: RunState): Promise<string | undefined> {
-  const exec = run.ctx.exec;
+  const exec = run.exec;
+  if (run.reset || exec.stale?.()) {
+    run.reset = true;
+    run.out.set(s, "not sent: connection reset");
+    return "connection reset";
+  }
   try {
     if (s.role === "requires_absent") {
       const { rows } = await exec.query(s.text, s.params, 1);
@@ -191,6 +177,11 @@ async function one(s: Planned, run: RunState): Promise<string | undefined> {
       run.out.set(s, `ok${msgs ? `: ${msgs}` : ""}`);
       return undefined;
     }
+    if (QUERY.test(s.text)) {
+      const { rows } = await exec.query(s.text, s.params, 100);
+      run.out.set(s, `ok, ${rows.length} row(s)`);
+      return undefined;
+    }
     const r = await exec.execute(s.text, s.params);
     run.out.set(s, `ok, ${r.rowsAffected} rows affected${r.messages.length ? `: ${r.messages.map((m) => m.text).join("; ")}` : ""}`);
     return undefined;
@@ -201,31 +192,9 @@ async function one(s: Planned, run: RunState): Promise<string | undefined> {
   }
 }
 
-// After a reset: decide `cleanup` again on the connection's new job (its QTEMP, library list and
-// current library are new) and switch the run to it. Returns why entries may not run there.
-async function renew(p: PlannedVerb, cleanup: Planned[], run: RunState): Promise<Map<Planned, string>> {
-  const blocked = new Map<Planned, string>();
-  const prev = run.ctx;
-  try {
-    if (!prev.renew) throw new Error("this context cannot open a new one");
-    run.ctx = await prev.renew();
-    const rec = recordLookups(run.ctx.lookups);
-    const r = await decideVerb({ ...p, setup: [], steps: [], cleanup }, run.ctx.identity, run.ctx.policy, rec.lookups);
-    for (const d of r.statements) {
-      const why = run.ctx.refusal?.(d.statement) ?? (d.decision.effective === "deny" ? "denied" : d.decision.effective === "confirm" && !run.confirmed ? "it now needs a confirmation that was not asked" : undefined);
-      if (why) blocked.set(d.planned, `not sent: on the new connection ${why}`);
-    }
-    run.log.push({ verb: p.verb.address, file: p.verb.file, decided: r.statements, answers: rec.answers, notes: [`cleanup of ${p.verb.address} decided again after a connection reset`, ...r.notes] });
-  } catch (e) {
-    run.ctx = prev;
-    for (const c of cleanup) blocked.set(c, `not sent: cleanup could not be decided on a new connection: ${errText(e)}`);
-  }
-  return blocked;
-}
-
 // Setup (each requires_absent just before its own statement) → steps → cleanup for the setup ids
-// that succeeded. Cleanup is always attempted and its failures are collected. Returns why the
-// verb failed, or undefined.
+// that succeeded. Cleanup is always attempted, unless the connection was reset, and its failures
+// are collected. Returns why the verb failed, or undefined.
 async function runPlanned(p: PlannedVerb, run: RunState): Promise<string | undefined> {
   const done = new Set<string>();
   let error: string | undefined;
@@ -250,15 +219,16 @@ async function runPlanned(p: PlannedVerb, run: RunState): Promise<string | undef
         break;
       }
     }
-  const eligible = p.cleanup.filter((c) => done.has(c.undoes as string));
-  for (const c of p.cleanup) if (!eligible.includes(c)) run.out.set(c, `not run: setup ${c.undoes} did not succeed`);
-  const blocked = eligible.length && run.ctx.exec.stale?.() ? await renew(p, eligible, run) : new Map<Planned, string>();
   const cleanupErrors: string[] = [];
-  for (const c of eligible) {
-    const why = blocked.get(c);
-    if (why) run.out.set(c, why);
-    const failed = why ?? (await one(c, run));
-    if (failed) cleanupErrors.push(`${at(c)}: ${failed}`);
+  for (const c of p.cleanup) {
+    if (!done.has(c.undoes as string)) {
+      run.out.set(c, `not run: setup ${c.undoes} did not succeed`);
+      continue;
+    }
+    const failed = await one(c, run);
+    if (!failed) continue;
+    if (run.reset) run.undone.push(c);
+    else cleanupErrors.push(`${at(c)}: ${failed}`);
   }
   return [error, ...cleanupErrors].filter(Boolean).join("; ") || undefined;
 }
@@ -269,54 +239,90 @@ export interface VerbCall {
   skip?: string; // why a suite skips it
 }
 
-function logCall(ctx: VerbContext, p: Prepared, notes: string[], outcome: (d: DecidedStatement) => string, confirmed: boolean | undefined): void {
-  if (!p.decided.length) return;
-  ctx.log?.({
-    tool: "verb_run",
-    lookups: p.answers,
-    notes: [`verb ${p.verb} from ${p.file}`, ...notes],
-    statements: p.decided.map((d) => ({ statement: d.statement, decision: d.decision, ...(d.decision.effective === "confirm" && confirmed !== undefined ? { confirmed } : {}), outcome: outcome(d) })),
-  });
-}
-
-// Decide every verb of the call first, ask one confirmation for all of them, then run each. A
-// declined confirmation runs none; a refused verb fails and the others still run.
+// Plan every verb of the call, decide them all as one script in run order, ask one confirmation,
+// then run each. A declined confirmation runs none; a refused verb fails and the others still run;
+// after a connection reset nothing more is sent.
 export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]): Promise<RunReport> {
-  const prepared: Prepared[] = [];
-  for (const c of calls) prepared.push(c.skip !== undefined ? { verb: c.ref, decided: [], answers: {}, notes: [], skip: c.skip } : await prepare(ctx, set, c.ref, c.args));
-  const ready = prepared.filter((p) => !p.skip && !p.error);
-  const asked = needs(ready.flatMap((p) => p.decided));
+  const prepared = calls.map((c): Prepared => {
+    if (c.skip !== undefined) return { verb: c.ref, decided: [], skip: c.skip };
+    const p: Prepared = { verb: c.ref, decided: [] };
+    try {
+      const v = resolveVerb(set, c.ref);
+      p.verb = v.address;
+      p.file = v.file;
+      p.plan = planVerb(set, c.ref, c.args);
+    } catch (e) {
+      p.error = `nothing was sent: ${errText(e)}`;
+    }
+    return p;
+  });
+  const planned = prepared.filter((p) => p.plan && !p.error);
+  const rec = recordLookups(ctx.lookups);
+  const notes: string[] = [];
+  try {
+    const r = await decidePlans(planned.map((p) => p.plan as PlannedVerb), ctx.identity, ctx.policy, rec.lookups);
+    notes.push(...r.notes);
+    planned.forEach((p, i) => {
+      p.decided = r.statements[i];
+      const refusals = refusalsOf(ctx, p.decided);
+      if (refusals.length) p.error = `nothing was sent: ${refusals.join("; ")}`;
+    });
+  } catch (e) {
+    for (const p of planned) p.error = `nothing was sent: ${errText(e)}`;
+  }
+
+  const ready = planned.filter((p) => !p.error);
+  const asked = ready.flatMap((p) => p.decided).filter((d) => d.decision.effective === "confirm");
   let confirmed: boolean | undefined;
   if (asked.length) {
-    let no = await ctx.confirm(asked);
+    let no = await ctx.confirm(asked.map((d) => ({ label: at(d.planned), decision: d.decision, display: d.statement.display })));
     confirmed = no === undefined;
-    // One confirmation covers the call, so a current library that moved for one verb runs none.
-    for (const p of ready) no ??= await ctx.recheck?.(p.answers);
+    // One confirmation covers the call, so a current library that moved stops all of it.
+    no ??= await ctx.recheck?.(rec.answers);
     if (no !== undefined) for (const p of ready) p.error = `nothing was sent: ${no}`;
   }
+
+  const run: RunState = { exec: ctx.exec, out: new Map(), reset: false, undone: [] };
   const results: VerbResult[] = [];
   for (const p of prepared) {
     if (p.skip !== undefined) {
       results.push({ verb: p.verb, status: "skipped", error: p.skip, notes: [], statements: [] });
       continue;
     }
-    const run: RunState = { ctx, out: new Map(), reset: false, confirmed: confirmed === true, log: [] };
-    const error = p.error ?? (p.plan ? await runPlanned(p.plan, run) : undefined);
-    const notes = [...p.notes, ...(run.reset ? [RESET_NOTE] : [])];
-    const outcome = (d: DecidedStatement) => run.out.get(d.planned) ?? "not run";
+    const verbNotes: string[] = [];
+    let error = p.error;
+    if (!error && run.reset) error = "not sent: the connection was reset during an earlier verb of this call";
+    else if (!error && p.plan) {
+      run.undone = [];
+      error = await runPlanned(p.plan, run);
+      if (run.reset) {
+        error = `${error ?? "the connection was lost"}; connection reset; nothing more was sent; cleanup not run: ${run.undone.map((c) => `${at(c)}: ${c.text}`).join("; ") || "none"}`;
+        verbNotes.push(RESET_NOTE);
+      }
+    }
     const statements = p.decided.map((d): StatementResult => {
-      const r: StatementResult = { verb: d.planned.verb, where: d.planned.where, kind: d.planned.kind, text: d.statement.display, decision: d.decision.decision, effective: d.decision.effective, outcome: outcome(d) };
+      const r: StatementResult = { verb: d.planned.verb, where: d.planned.where, kind: d.planned.kind, text: d.statement.display, decision: d.decision.decision, effective: d.decision.effective, outcome: run.out.get(d.planned) ?? "not run" };
       const rule = statementRule(d.decision);
       if (rule) r.rule = rule;
       return r;
     });
-    logCall(ctx, p, notes, outcome, confirmed);
-    for (const again of run.log) logCall(run.ctx, again, again.notes, outcome, confirmed);
-    const r: VerbResult = { verb: p.verb, status: error ? "failed" : "passed", notes, statements };
+    const r: VerbResult = { verb: p.verb, status: error ? "failed" : "passed", notes: verbNotes, statements };
     if (p.file) r.file = p.file;
     if (error) r.error = error;
     results.push(r);
   }
+
+  // One run-log call, as decided: every verb's statements in run order. `confirmed` only on the
+  // statements that were in the question.
+  const inQuestion = new Set(asked);
+  const logged = planned.filter((p) => p.decided.length);
+  if (logged.length)
+    ctx.log?.({
+      tool: "verb_run",
+      lookups: rec.answers,
+      notes: [...logged.map((p) => `verb ${p.verb} from ${p.file}`), ...notes, ...(run.reset ? [RESET_NOTE] : [])],
+      statements: logged.flatMap((p) => p.decided).map((d) => ({ statement: d.statement, decision: d.decision, ...(inQuestion.has(d) && confirmed !== undefined ? { confirmed } : {}), outcome: run.out.get(d.planned) ?? "not run" })),
+    });
   const count = (s: VerbResult["status"]) => results.filter((r) => r.status === s).length;
   return { passed: count("passed"), failed: count("failed"), skipped: count("skipped"), results };
 }
@@ -333,26 +339,30 @@ export function suite(set: VerbSet, tag: string): VerbCall[] {
     });
 }
 
-// policy_check for a verb: every statement decided, with why it may not run. Sends only lookups.
+// policy_check for a verb: every statement decided, with why it may not run (the verb's read-only
+// rule or the profile's guards). Sends only lookups.
 export async function checkVerb(ctx: VerbContext, set: VerbSet, ref: string, args?: Record<string, unknown>) {
   const plan = planVerb(set, ref, args);
   const r = await decideVerb(plan, ctx.identity, ctx.policy, ctx.lookups);
   return {
     verb: plan.verb.address,
     file: plan.verb.file,
-    refusals: r.refusals,
-    statements: r.statements.map((d) => ({ ...d, refused: ctx.refusal?.(d.statement) })),
+    statements: r.statements.map((d) => ({ ...d, refused: d.refusal ?? ctx.refusal?.(d.statement) })),
   };
 }
 
-// The server's verbs, loaded once per server on first use and never reloaded: IBMI_KIT_VERBS and
-// IBMI_KIT_POLICY (the org layer sits beside it) are that server's profile settings.
+// The server's verbs, loaded once per server on its first verb call and never reloaded:
+// IBMI_KIT_VERBS and IBMI_KIT_POLICY (the org layer sits beside it) are that server's profile
+// settings. Like IBMI_KIT_POLICY, IBMI_KIT_VERBS folders must be absolute: a relative one would
+// depend on the client's working folder.
 export function verbLoader(profileEnv: (server: string) => Record<string, string>): (server: string) => VerbSet {
   const cache = new Map<string, VerbSet>();
   return (server) => {
     let set = cache.get(server);
     if (!set) {
       const env = profileEnv(server);
+      const relative = (env.IBMI_KIT_VERBS ?? "").split(delimiter).map((d) => d.trim()).filter((d) => d && !isAbsolute(d));
+      if (relative.length) throw new Error(`profile ${server}: IBMI_KIT_VERBS folders must be absolute paths, not ${relative.join(", ")}`);
       set = loadVerbs({ home: homedir(), cwd: process.cwd(), extra: env.IBMI_KIT_VERBS, policyFile: env.IBMI_KIT_POLICY?.trim() || undefined });
       cache.set(server, set);
     }
@@ -411,7 +421,7 @@ export function registerVerbTools(mcp: McpServer, deps: { verbs(server: string):
     {
       title: "Run a verb",
       description:
-        "Run one verb with arguments, or with `tag` every verb carrying that tag as a suite (each with its defaults, continuing after failures). Every statement, nested verbs and cleanup included, is decided by the execution policy as the signed-on user before anything runs: any deny runs nothing, and one confirmation covers every statement that needs one. Cleanup undoes only setup steps that succeeded.",
+        "Run one verb with arguments, or with `tag` every verb carrying that tag as a suite (each with its defaults, continuing after failures). Every statement of the call, nested verbs and cleanup included, is decided by the execution policy as the signed-on user before anything runs: a denied verb runs nothing, and one confirmation covers every statement that needs one. Cleanup undoes only setup steps that succeeded. After a connection reset nothing more is sent, cleanup included, and the result lists the cleanup left to do by hand.",
       inputSchema: { server: serverArg, verb: z.string().optional().describe("the verb to run: NAME (closest layer), user:NAME, proj:NAME or org:NAME"), args: argsArg, tag: z.string().optional().describe("run every verb with this tag instead of one verb") },
       annotations: { title: "Run a verb", readOnlyHint: false, destructiveHint: true },
     },

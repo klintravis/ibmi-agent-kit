@@ -9,10 +9,14 @@ personal or reviewed in a repository — and run them through the guard so shari
 
 ### Requirement: Verbs are YAML files in three layers
 A verb SHALL be one YAML file with `name`, `description`, optional `tags` and `params`, and lists
-`setup`, `steps` and `cleanup`. Verbs SHALL load at startup from `~/.ibmi-agent-kit/verbs` (layer
-`user`), from `.ibmi-kit/verbs/` in the working directory and from folders in `IBMI_KIT_VERBS`
-(layer `proj`), and from `verbs/` beside the policy file (layer `org`). A file with an unknown key
-SHALL be refused naming the file and key; other verbs still load.
+`setup`, `steps` and `cleanup`, loaded from `~/.ibmi-agent-kit/verbs` (layer `user`), from
+`.ibmi-kit/verbs/` in the working directory and the profile's `IBMI_KIT_VERBS` folders (layer
+`proj`), and from `verbs/` beside the profile's policy file (layer `org`). A file with an unknown
+key SHALL be refused naming the file and key; other verbs still load.
+
+#### Scenario: Loaded on the first verb call
+- **WHEN** the first verb tool call names a server
+- **THEN** that server's verbs load once and are not reloaded; a relative `IBMI_KIT_VERBS` folder is refused
 
 #### Scenario: Unknown key
 - **WHEN** a verb file contains `step:` instead of `steps:`
@@ -51,9 +55,14 @@ SHALL refuse the verb at load.
 - **THEN** the call fails before anything is sent
 
 ### Requirement: Every statement is decided by the guard as the signed-on user
-Before running, every `setup`, `steps` and `cleanup` statement SHALL be substituted, classified
-and decided for the signed-on user, server and partition, and one confirmation SHALL cover every
-`confirm` operation. Any deny or a declined confirmation SHALL run nothing.
+Before running, every `setup`, `steps` and `cleanup` statement of every verb in the call SHALL be
+substituted, classified as one script in run order and decided for the signed-on user, server and
+partition, and one confirmation SHALL cover every `confirm` operation. A verb with a deny SHALL run
+nothing, and a declined confirmation SHALL run no verb of the call.
+
+#### Scenario: Suite cannot set up a way past the guard
+- **WHEN** a `smoke` suite's first verb creates `QTEMP.A` as an alias of a live table and the next deletes from `QTEMP.A`
+- **THEN** the second verb is denied as a write to the live table and sends nothing
 
 #### Scenario: Verb cannot widen access
 - **WHEN** an analyst runs a project verb whose steps write a library the analyst's rules deny
@@ -82,8 +91,8 @@ expected and actual values, and later steps SHALL NOT run.
 
 ### Requirement: Cleanup undoes only what setup did
 After the steps finish or fail, each cleanup entry SHALL run only if the setup step it names in
-`undoes` succeeded. Cleanup entries SHALL all be attempted even when one fails, and the result
-SHALL report each.
+`undoes` succeeded. Cleanup entries SHALL all be attempted even when one fails, unless the
+connection was reset, and the result SHALL report each.
 
 #### Scenario: Setup failed
 - **WHEN** a setup insert fails
@@ -95,7 +104,7 @@ SHALL report each.
 
 #### Scenario: Connection reset mid-verb
 - **WHEN** the SQL connection is reset during a verb
-- **THEN** the verb fails, cleanup is attempted on a new connection, and the result says QTEMP and the library list were lost
+- **THEN** the verb fails, nothing more is sent (cleanup and later verbs of the call included, on any job), and the result lists the cleanup statements not run so the user can clean up by hand
 
 ### Requirement: Nested verbs are bounded
 A `verb` step SHALL call another verb by address with arguments. A cycle SHALL be refused at load
@@ -115,7 +124,8 @@ continue after failures, and report passed, failed and skipped counts with each 
 - **THEN** the other two still run and the report gives one failed and the others' outcomes
 
 ### Requirement: No tool writes verb files
-No tool SHALL create, change or delete a verb file. Verbs SHALL load at startup only.
+No tool SHALL create, change or delete a verb file. Verbs SHALL load only from files, once per
+server.
 
 #### Scenario: Tool list
 - **WHEN** the kit's tools are listed

@@ -47,17 +47,25 @@ cleanup:
 `verb_run` substitutes all three lists (and nested verbs, at most 5 verbs in one call chain, the top one counted), classifies and decides every
 statement, gathers every `confirm` into one elicitation, and only then runs setup (each step's
 requires_absent just before it, so it can query a table an earlier setup step created) → steps →
-cleanup through `run_script`'s executor. `requires_absent` and `expect` queries must classify as
-reads only. A `tag` suite decides every verb first and asks once; a declined confirmation runs none.
+cleanup through `run_script`'s executor, with its time limit on queries (SELECT, VALUES and WITH
+steps too). `requires_absent` and `expect` queries must classify as reads only. A `tag` suite plans
+every verb and decides them all as ONE script in run order, so one verb cannot set up what lets the
+next past the guard (a QTEMP alias, `CHGCURLIB`); it asks once, and a declined confirmation runs
+none. The call is one run-log call, as decided.
 
 ### D3. Cleanup bookkeeping and resets
 The runner records succeeded setup ids; a cleanup entry runs iff its `undoes` id is in that set.
-Cleanup failures are collected, never thrown. On a transport reset the verb fails, cleanup runs
-on a fresh connection, and the result notes lost QTEMP and library list state.
+Cleanup failures are collected, never thrown. Every send carries the job generation the call was
+decided on. After a connection reset nothing more is sent, cleanup and later verbs included, on
+the old job or a new one: the result says "connection reset; nothing more was sent; cleanup not
+run:" with the cleanup statements left undone, for the user to run by hand.
+- *Why not clean up on a new job:* its QTEMP, library list and current library differ, so the
+  cleanup would need deciding again on state the verb never saw; a person cleaning up knows more.
 
-### D4. Loading and layers
-At startup: `~/.ibmi-agent-kit/verbs` (`user`), `<cwd>/.ibmi-kit/verbs` and `IBMI_KIT_VERBS`
-(`proj`), `<policy dir>/verbs` (`org`). Strict zod schemas; cycle and depth checks across layers.
+### D4. Loading and layers, on a server's first verb call
+`~/.ibmi-agent-kit/verbs` (`user`), `<cwd>/.ibmi-kit/verbs` and the profile's `IBMI_KIT_VERBS`
+folders, which must be absolute (`proj`), `<policy dir>/verbs` beside the profile's
+`IBMI_KIT_POLICY` (`org`). Strict zod schemas; cycle and depth checks across layers.
 Bare names resolve `user` → `proj` → `org`.
 - *Why closest-wins rather than refusing collisions:* a person can try a variant of a team verb
   without editing the shared file; `verb_list` makes the override visible.
@@ -66,9 +74,10 @@ Bare names resolve `user` → `proj` → `org`.
   directory) and `org` (beside the policy under test), so CI never depends on a person's verbs.
 
 ### D5. Fewer tools
-`verb_check` folds into `policy_check` (`verb`, `args`); `verb_test` folds into `verb_run` (`tag`).
-A `tag` suite skips a verb a closer layer overrides (a bare name never reaches it), and reports it
-as skipped.
+`verb_check` folds into `policy_check` (`verb`, `args`, live or offline with `as`), where a
+`requires_absent` or `expect` query that does more than read shows as deny; `verb_test` folds into
+`verb_run` (`tag`). A `tag` suite skips a verb a closer layer overrides (a bare name never reaches
+it), and reports it as skipped.
 
 ## Risks / Trade-offs
 

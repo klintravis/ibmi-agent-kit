@@ -69,7 +69,7 @@ export interface TestResult {
   name: string;
   ok: boolean;
   expected: Verdict | Verdict[];
-  statements: { text: string; decision: Decision }[];
+  statements: { text: string; decision: Decision; refused?: string }[];
 }
 
 // Each case decided offline; `expect` is compared with the policy's decision, not the effective
@@ -101,8 +101,11 @@ export async function runPolicyTests(policy: Policy, cases: PolicyTest[], verbs?
       } catch (e) {
         throw new Error(`case "${t.name}": ${(e as Error).message}`);
       }
-      if (r.refusals.length) throw new Error(`case "${t.name}": ${r.refusals.join("; ")}`);
-      statements = r.statements.map((s) => ({ text: `${s.planned.verb} ${s.planned.where}: ${s.statement.display}`, decision: s.decision }));
+      // A requires_absent or expect query that does more than read is refused in every mode: deny.
+      statements = r.statements.map((s) => ({
+        text: `${s.planned.verb} ${s.planned.where}: ${s.statement.display}`,
+        ...(s.refusal ? { decision: { ...s.decision, decision: "deny" as const, effective: "deny" as const, enforced: true }, refused: s.refusal } : { decision: s.decision }),
+      }));
     } else {
       const { classification, decisions } = await decideStatements(t.script as string, identity, policy, statedLookups(answers));
       statements = classification.statements.map((s, i) => ({ text: s.display, decision: decisions[i] }));
@@ -121,6 +124,7 @@ export function describeFailure(r: TestResult): string {
   r.statements.forEach((s, i) => {
     const rule = statementRule(s.decision);
     lines.push(`  statement ${i + 1}: ${s.text}`, `    ${s.decision.decision}${rule ? ` by rule ${rule}` : ""} (roles ${s.decision.roles.join(", ") || "none"})`);
+    if (s.refused) lines.push(`    - ${s.refused}`);
     for (const o of s.decision.operations) lines.push(`    - ${o.message}`);
     if (!s.decision.operations.length) lines.push(`    - ${s.decision.reason}`);
   });

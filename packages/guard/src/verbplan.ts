@@ -90,6 +90,7 @@ export interface DecidedStatement {
   planned: Planned;
   statement: ClassifiedStatement;
   decision: Decision;
+  refusal?: string; // a requires_absent or expect query that does more than read: refused in every mode
 }
 
 const what = (o: Operation) => `${o.class}${o.object ? ` ${[o.object.rdb, o.object.lib, o.object.name].filter(Boolean).join(".")}` : ""}`;
@@ -98,24 +99,34 @@ const what = (o: Operation) => `${o.class}${o.object ? ` ${[o.object.rdb, o.obje
 // seen by later ones, and decide each statement. `refusals` holds requires_absent and expect
 // queries the classifier finds doing more than reading: they are refused in every mode.
 export async function decideVerb(plan: PlannedVerb, identity: Identity, policy: Policy, lookups: Lookups): Promise<{ statements: DecidedStatement[]; notes: string[]; refusals: string[] }> {
-  const list = plannedStatements(plan);
+  const r = await decidePlans([plan], identity, policy, lookups);
+  return { statements: r.statements[0], notes: r.notes, refusals: r.statements[0].flatMap((s) => (s.refusal ? [s.refusal] : [])) };
+}
+
+// Several verbs run in one call (a tag suite), decided as ONE script in run order, so a verb
+// cannot set up what lets the next one past the guard (a QTEMP alias, CHGCURLIB). The decisions
+// come back per verb.
+export async function decidePlans(plans: PlannedVerb[], identity: Identity, policy: Policy, lookups: Lookups): Promise<{ statements: DecidedStatement[][]; notes: string[] }> {
+  const per = plans.map(plannedStatements);
+  const list = per.flat();
   const script = list.map((s) => (s.kind === "cl" ? `CL: ${s.text}\n` : `${s.text}\n;\n`)).join("");
   const c = await classify(script, { lookups, commands: policy.commands, rdbs: policy.rdbs });
   if (c.statements.length !== list.length || c.statements.some((s, i) => s.kind !== list[i].kind))
-    throw new Error(`${plan.verb.address}: its ${list.length} statements read back as ${c.statements.length} in one script, so they cannot be decided`);
+    throw new Error(`${plans.map((p) => p.verb.address).join(", ")}: ${list.length} statements read back as ${c.statements.length} in one script, so they cannot be decided`);
   // What is sent must be what was decided: CL goes as the classifier read it, continuation lines
   // folded and comments stripped (as run_script sends it); SQL must read back unchanged.
   list.forEach((s, i) => {
     if (s.kind === "cl") s.text = c.statements[i].display;
     else if (c.statements[i].text !== s.text) throw new Error(`${s.verb} ${s.where}: reads back as different text in one script, so it cannot be decided`);
   });
-  const refusals: string[] = [];
-  const statements = list.map((planned, i) => {
+  const decided = list.map((planned, i): DecidedStatement => {
     const statement = c.statements[i];
+    const d: DecidedStatement = { planned, statement, decision: decide(statement.operations, identity, policy) };
     const more = statement.operations.filter((o) => o.class !== "read");
     if ((planned.role === "requires_absent" || planned.role === "expect") && more.length)
-      refusals.push(`${planned.verb} ${planned.where}: a ${planned.role} query must only read, but it is ${more.map(what).join(", ")}`);
-    return { planned, statement, decision: decide(statement.operations, identity, policy) };
+      d.refusal = `${planned.verb} ${planned.where}: a ${planned.role} query must only read, but it is ${more.map(what).join(", ")}`;
+    return d;
   });
-  return { statements, notes: c.notes, refusals };
+  let at = 0;
+  return { statements: per.map((p) => decided.slice(at, (at += p.length))), notes: c.notes };
 }

@@ -43,7 +43,8 @@ reviewed like code, and every one must run through the guard so sharing it grant
 - `verbs`: verb files, layers, parameters, steps, expectations, cleanup, and the verb tools.
 
 ### Modified Capabilities
-- None. (`guarded-tools` gains `policy_check` verb input in this change's tasks; that requirement
+- `policy-testing` (from `execution-guard`): test cases may name a verb and arguments instead of a
+  script. (`guarded-tools` gains `policy_check` verb input in this change's tasks; that requirement
   already names it.)
 
 ## Impact

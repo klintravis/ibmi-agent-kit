@@ -23,6 +23,7 @@ import {
   environmentOf,
   loadPolicy,
   loadVerbs,
+  decidePlans,
   decideVerb,
   plannedStatements,
   planVerb,
@@ -1463,6 +1464,29 @@ test("policy tests: a verb case decides every statement the verb would send", as
   assert.equal(wrong.ok, false);
   assert.match(describeFailure(wrong), /statement 2: proj:W setup\.0: INSERT INTO INORD\.T \(K\) VALUES \(\?\)\n    deny/);
   await assert.rejects(runPolicyTests(D4, parsePolicyTests("- { name: bad, as: { user: X }, verb: W, args: { k: two }, expect: allow }\n", "t.yaml"), set), /case "bad": proj:W: k: "two" is not an integer/);
+  // a requires_absent query that writes is a deny, whatever the rules say
+  const sneaky = loadVerbs({ cwd: verbRoot({ [P + "w.yaml"]: W_VERB.replace("SELECT 1 FROM INORD.T WHERE K = :k", "SELECT * FROM OLD TABLE (DELETE FROM INORD.T WHERE K = :k)"), [P + "inner.yaml"]: INNER_VERB }).src.cwd });
+  const [ro] = await runPolicyTests(D4, parsePolicyTests("- { name: ro, as: { user: JDOE, groups: [GRPDEV], partition: dev }, verb: W, expect: allow }\n", "t.yaml"), sneaky);
+  assert.equal(ro.ok, false);
+  assert.match(describeFailure(ro), /statement 1: proj:W setup\.0\.requires_absent: .*\n    deny .*\n    - proj:W setup\.0\.requires_absent: a requires_absent query must only read, but it is write INORD\.T/);
+});
+
+test("verbs: verbs decided together see what earlier ones set up: a QTEMP alias, a changed current library", async () => {
+  const set = loadVerbs(
+    verbRoot({
+      [P + "a.yaml"]: verbYaml("A", "  - sql: CREATE ALIAS QTEMP.A FOR LVORD.ORD"),
+      [P + "b.yaml"]: verbYaml("B", "  - sql: DELETE FROM QTEMP.A"),
+      [P + "c.yaml"]: verbYaml("C", "  - cl: CHGCURLIB CURLIB(LVORD)"),
+      [P + "d.yaml"]: verbYaml("D", "  - cl: CLRPFM FILE(*CURLIB/ORD)"),
+    }).src,
+  );
+  const who = as("dev", "prod");
+  const alone = await decideVerb(planVerb(set, "B"), who, D4, lookups());
+  assert.equal(alone.statements[0].decision.effective, "allow", "alone, QTEMP.A is only a scratch table");
+  const r = await decidePlans([planVerb(set, "A"), planVerb(set, "B")], who, D4, lookups());
+  assert.deepEqual(r.statements.map((v) => v.map((s) => s.decision.effective)), [["allow"], ["deny"]]);
+  const cur = await decidePlans([planVerb(set, "C"), planVerb(set, "D")], who, D4, lookups({ curlib: "DVORD" }));
+  assert.deepEqual(cur.statements.map((v) => v.map((s) => s.decision.effective)), [["allow"], ["deny"]]);
 });
 
 // --- run log (run-log spec; task 4.1) ---

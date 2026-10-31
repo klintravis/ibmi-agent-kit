@@ -311,8 +311,8 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
     withTimeLimit(work, deps.sqlTimeLimitMs, () => void conn.close().catch(() => {}), `gave up after ${deps.sqlTimeLimitMs / 1000}s and reset the session, so the query may still be running on the box`);
 
   // What verbs (project-verbs) decide and run with: the same identity, lookups, profile guards,
-  // confirmation and run log as run_script, and sends checked against the job the verb was decided
-  // on. `renew` decides again on whatever job the connection has now, for cleanup after a reset.
+  // confirmation and run log as run_script, and sends checked against the job the verbs were
+  // decided on: after a reset nothing more is sent.
   async function verbContext(server: string): Promise<VerbContext> {
     const { policy, runLog } = deps.policyFor(server);
     const conn = deps.conn(server);
@@ -334,7 +334,6 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
       },
       log: (call) =>
         runLog.record({ ...call, server, identity: who.identity, ...(Object.keys(who.names).length ? { names: who.names } : {}), notes: [...who.notes, ...(call.notes ?? [])], secret: conn.profile.password }),
-      renew: () => verbContext(server),
     };
   }
 
@@ -480,7 +479,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
           const input = verb !== undefined ? { verb, ...(args ? { args } : {}) } : { script };
           const [t] = await runPolicyTests(used, [{ name: "policy_check", as, ...input, expect: "allow" }], verb !== undefined ? deps.verbs(key(server)) : undefined);
           head = { policy: used.source, as, offline: true };
-          statements = t.statements.map((x, i) => report({ statement: { display: x.text }, decision: x.decision }, i));
+          statements = t.statements.map((x, i) => report({ statement: { display: x.text }, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i));
         } else {
           if (candidate) throw new Error("a candidate `policy` is decided offline: state the identity in `as` too");
           let identity: Identity;
@@ -490,9 +489,9 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
             const r = await checkVerb(ctx, deps.verbs(key(server)), verb, args);
             identity = ctx.identity;
             roles = r.statements[0]?.decision.roles ?? [];
-            // A verb's read-only rule for requires_absent and expect refuses like a profile guard.
-            statements = r.statements.map((x, i) => ({ ...report({ ...x, ...(x.refused ? { refused: x.refused } : {}) }, i), verb: x.planned.verb, where: x.planned.where }));
-            head = { verb: r.verb, file: r.file, ...(r.refusals.length ? { refusals: r.refusals } : {}) };
+            // A verb's read-only rule for requires_absent and expect refuses like a profile guard: deny.
+            statements = r.statements.map((x, i) => ({ ...report({ statement: x.statement, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i), verb: x.planned.verb, where: x.planned.where }));
+            head = { verb: r.verb, file: r.file };
           } else {
             const { plan: p } = await plan(key(server), script as string);
             identity = p.identity;
@@ -505,7 +504,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
         }
         const lines = statements.map((r) => {
           const ops = (r.operations as { message: string }[]).map((o) => `    - ${o.message}`);
-          return [`statement ${r.index}${r.where ? ` (${r.verb} ${r.where})` : ""}: ${r.effective}${r.effective !== r.decision ? ` (policy: ${r.decision}, not enforced)` : ""}${r.refused ? ` (${r.refused})` : ""}`, `    ${String(r.text).split("\n")[0]}`, ...ops].join("\n");
+          return [`statement ${r.index}${r.where ? ` (${r.verb} ${r.where})` : ""}: ${r.effective}${r.effective !== r.decision && !r.refused ? ` (policy: ${r.decision}, not enforced)` : ""}${r.refused ? ` (${r.refused})` : ""}`, `    ${String(r.text).split("\n")[0]}`, ...ops].join("\n");
         });
         return result({ ...head, statements, limits: LIMITS }, `${lines.join("\n")}\n\n${LIMITS}`);
       } catch (e) {
