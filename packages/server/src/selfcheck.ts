@@ -293,7 +293,7 @@ type Row = Record<string, unknown>;
 // A box: answers the guard's own queries, records every script statement that reaches it. Like the
 // backend, a send checks the job generation after connecting and before sending.
 function stubConn(
-  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean } = {},
+  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string } = {},
 ) {
   const sent: string[] = [];
   const queries: string[] = [];
@@ -325,6 +325,7 @@ function stubConn(
       if (rows) return { rows, columns: [], truncated: false };
       queries.pop();
       send(sql, generation);
+      if (o.hangOn && sql.includes(o.hangOn)) await new Promise<never>(() => {}); // a query that never returns
       const data = [{ A: 1 }, { A: 2 }, { A: 3 }];
       return { rows: data.slice(0, maxRows), columns: [{ name: "A" }], truncated: data.length > maxRows };
     },
@@ -343,7 +344,7 @@ function stubConn(
   return { conn, sent, queries };
 }
 
-async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number } = {}) {
+async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number; sqlTimeLimitMs?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "kit-runs-"));
   const notices: string[] = [];
   const stub = o.stub ?? stubConn();
@@ -354,6 +355,7 @@ async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubCon
     systemName: () => o.system,
     runLogDir: dir,
     confirmTimeoutMs: o.timeoutMs ?? 5000,
+    sqlTimeLimitMs: o.sqlTimeLimitMs ?? 5000,
     notice: (m) => notices.push(m),
   });
   const client = new Client({ name: "selfcheck", version: "0" }, o.elicit ? { capabilities: { elicitation: { form: {} } } } : undefined);
@@ -600,6 +602,20 @@ test("5.2: a connection reset after the script was decided: the statement after 
   }
 });
 
+test("5.2: a query past the time limit resets the session, and the next statement is not sent", async () => {
+  const k = await guardedKit({ stub: stubConn({ hangOn: "MYLIB.HANG" }), sqlTimeLimitMs: 50 });
+  try {
+    const r = await k.call("run_script", { script: "SELECT * FROM MYLIB.HANG;\nINSERT INTO MYLIB.B VALUES 1" });
+    assert.equal(r.error, true);
+    assert.equal(k.stub.conn.generation, 1, "the session was reset");
+    assert.deepEqual(k.stub.sent, ["SELECT * FROM MYLIB.HANG"]);
+    assert.deepEqual(r.s.statements.map((x: any) => x.outcome), ["failed", "not sent"]);
+    assert.match(r.s.statements[0].error, /gave up after 0\.05s and reset the session/);
+  } finally {
+    await k.close();
+  }
+});
+
 test("5.2: *CURLIB after CHGCURLIB in the script is refused although the box answers JDOE", async () => {
   const k = await guardedKit({ stub: stubConn({ curlib: ["JDOE"] }) });
   try {
@@ -645,6 +661,7 @@ test("5.3: observe mode with a confirm rule and no elicitation runs without aski
 test("5.1: supplemental groups as ten-character slots, full or padded, and blank-separated", async () => {
   assert.deepEqual(supplementalGroups("GRPDEV0001GRPQA00001"), ["GRPDEV0001", "GRPQA00001"]);
   assert.deepEqual(supplementalGroups("GRPDEV0001GRPQA     "), ["GRPDEV0001", "GRPQA"]);
+  assert.deepEqual(supplementalGroups("GRPDEV0001GRPQA"), ["GRPDEV0001", "GRPQA"], "the last slot trimmed");
   assert.deepEqual(supplementalGroups("GRPDEV GRPQA"), ["GRPDEV", "GRPQA"]);
   assert.deepEqual(supplementalGroups(""), []);
   const k = await guardedKit({ policy: D4, stub: stubConn({ userInfo: { G: "*NONE", S: "GRPDEV0001GRPQA     " } }) });

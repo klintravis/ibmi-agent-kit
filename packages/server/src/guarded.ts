@@ -4,7 +4,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Msg } from "@ibmi-agent-kit/core";
-import { assertNotRunaway, SQL_TIME_LIMIT_MS, withTimeLimit } from "@ibmi-agent-kit/source/tools";
+import { assertNotRunaway, withTimeLimit } from "@ibmi-agent-kit/source/tools";
 import {
   decideStatements,
   detectPartition,
@@ -39,6 +39,7 @@ export interface GuardDeps {
   profileEnv(server: string): Record<string, string>; // the profile file, for IBMI_PARTITION
   systemName(server: string): string | undefined; // the 5250 sign-on System name, once a session read it
   confirmTimeoutMs: number;
+  sqlTimeLimitMs: number; // run_script queries, as run_sql
   notice(message: string): void; // stderr
 }
 
@@ -91,11 +92,13 @@ interface Box {
   notes: string[];
 }
 
-// SUPPLEMENTAL_GROUP_LIST, as returned (untrimmed): ten-character slots, so a full name runs into
-// the next; a length that is no multiple of ten is read as blank-separated (unverified on a live
-// box: tasks 8.2 checks it on PUB400).
-export const supplementalGroups = (list: string): string[] =>
-  (list.length % 10 === 0 ? (list.match(/.{10}/g) ?? []) : [list]).flatMap((s) => s.split(/\s+/)).filter(Boolean);
+// SUPPLEMENTAL_GROUP_LIST: ten-character slots (a full name runs into the next, the last may be
+// trimmed), read as slots only when every padded slot is one name; otherwise blank-separated
+// (unverified on a live box: tasks 8.2 checks it on PUB400).
+export function supplementalGroups(list: string): string[] {
+  const slots = list.padEnd(Math.ceil(list.length / 10) * 10).match(/.{10}/g) ?? [];
+  return (slots.every((s) => /^\S+ *$/.test(s)) ? slots : list.split(/\s+/)).map((s) => s.trim()).filter(Boolean);
+}
 
 // These lookups are the kit's own and are not decided. Only the first failing is fatal: without
 // the user nothing can be decided.
@@ -155,6 +158,7 @@ interface Plan {
   server: string;
   policy: Policy;
   runLog: RunLog; // the policy's, kept from the decision so logging never reads the profile again
+  generation?: number; // the job the script was decided against
   identity: Identity;
   names?: PartitionNames;
   statements: Planned[];
@@ -231,6 +235,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
   async function plan(server: string, script: string): Promise<{ plan: Plan; conn: Conn }> {
     const { policy, runLog } = deps.policyFor(server);
     const conn = deps.conn(server);
+    const generation = conn.generation; // before any lookup: every answer must come from this job
     const who = await identityOf(server, conn, policy);
     const { lookups, answers } = recordLookups(sqlLookups(conn));
     const { classification, decisions } = await decideStatements(script, who.identity, policy, lookups);
@@ -240,7 +245,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
       if (refused) p.refused = refused;
       return p;
     });
-    return { conn, plan: { server, policy, runLog, identity: who.identity, names: who.names, statements, lookups: answers, notes: [...who.notes, ...classification.notes] } };
+    return { conn, plan: { server, policy, runLog, generation, identity: who.identity, names: who.names, statements, lookups: answers, notes: [...who.notes, ...classification.notes] } };
   }
 
   function log(p: Plan, conn: Conn, outcomes: string[], confirmed?: boolean): void {
@@ -321,7 +326,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
         return fail(e);
       }
       const { plan: p, conn } = planned;
-      const generation = conn.generation; // the job the script was decided against
+      const { generation } = p;
       const summary = { server: s, partition: p.identity.partition, roles: p.statements[0]?.decision.roles ?? [] };
 
       const stopped = p.statements.filter(stopping);
@@ -359,9 +364,10 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
       const outcomes: string[] = [];
       const done: Record<string, unknown>[] = [];
       let stop: string | undefined;
-      // Like run_sql: past the limit the session is reset, which the next statement's generation check sees.
+      // Queries only, as run_sql: past the limit the session is reset, which the next statement's
+      // generation check sees. DML and CL run to the end: cutting one off leaves it half-done.
       const limited = <T>(work: Promise<T>) =>
-        withTimeLimit(work, SQL_TIME_LIMIT_MS, () => void conn.close().catch(() => {}), `gave up after ${SQL_TIME_LIMIT_MS / 1000}s and reset the session, so it may still be running on the box`);
+        withTimeLimit(work, deps.sqlTimeLimitMs, () => void conn.close().catch(() => {}), `gave up after ${deps.sqlTimeLimitMs / 1000}s and reset the session, so the query may still be running on the box`);
       for (const [i, x] of p.statements.entries()) {
         const r = report(x, i);
         if (stop) {
@@ -372,7 +378,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
         try {
           if (x.statement.kind === "cl") {
             // The comment-stripped command: blanks outside quotes collapse, quoted values are kept.
-            const c = await limited(conn.cl(x.statement.display, undefined, generation));
+            const c = await conn.cl(x.statement.display, undefined, generation);
             r.messages = c.messages;
             if (!c.ok) throw new Error(c.messages.map((m) => (m.id ? `[${m.id}] ${m.text}` : m.text)).join(" ") || "the command failed");
             outcomes.push("ok");
@@ -382,7 +388,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
             Object.assign(r, { columns: q.columns.map((c) => c.name), rows: q.rows, truncated: q.truncated });
             outcomes.push(`${q.rows.length} row(s)${q.truncated ? `, truncated at ${cap}` : ""}`);
           } else {
-            const e = await limited(conn.execute(x.statement.text, undefined, undefined, generation));
+            const e = await conn.execute(x.statement.text, undefined, undefined, generation);
             Object.assign(r, { rowsAffected: e.rowsAffected, messages: e.messages });
             outcomes.push(`${e.rowsAffected} row(s) affected`);
           }

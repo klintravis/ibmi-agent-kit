@@ -143,7 +143,9 @@ text; each line also stores the identity and the lookup answers used, so it can 
   at startup (a missing or invalid one refuses to start), a profile added later on first use; with
   none, the built-in observe policy, which still denies `danger` and `unqualified`. A connection
   reset after the script was decided (the backend's job generation, checked after connecting and before each send) stops `run_script`
-  without sending that statement; `run_script` statements take `run_sql`'s time limit and runaway refusal, and after a confirmation a looked-up current library is read again and must not have changed. The profile's own guards (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`)
+  without sending that statement (the generation is taken before the first lookup); `run_script`
+  queries take `run_sql`'s time limit (past it the session is reset, so nothing more is sent),
+  DML and CL run to the end with no limit, every statement takes `run_sql`'s runaway refusal, and after a confirmation a looked-up current library is read again and must not have changed. The profile's own guards (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`)
   refuse in every mode, observe included.
 
 ### D9. Policy tests and replay as a CLI on the server package

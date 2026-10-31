@@ -5,7 +5,7 @@ import { CONFIG_DIRS, listServers, resolveProfileEnv } from "@ibmi-agent-kit/cor
 import { loadPolicy, RunLog, type Policy } from "@ibmi-agent-kit/guard";
 import { CONFIRM_TIMEOUT_MS, registerGuarded, type GuardDeps } from "./guarded.js";
 import { KEYS, register as registerScreen } from "@ibmi-agent-kit/screen/tools";
-import { register as registerSource } from "@ibmi-agent-kit/source/tools";
+import { register as registerSource, SQL_TIME_LIMIT_MS } from "@ibmi-agent-kit/source/tools";
 
 export interface Engine {
   shutdown(): Promise<void>;
@@ -59,6 +59,7 @@ export function createServer(deps: ServerDeps = {}): KitServer {
     profileEnv,
     systemName: deps.systemName ?? (() => undefined), // group 6: the screen engine's sign-on System field
     confirmTimeoutMs: deps.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS,
+    sqlTimeLimitMs: deps.sqlTimeLimitMs ?? SQL_TIME_LIMIT_MS,
     notice,
   });
 
