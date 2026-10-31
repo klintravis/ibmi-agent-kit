@@ -14,9 +14,12 @@ import {
   classifyCl,
   builtinPolicy,
   customClasses,
+  detectPartition,
+  environmentOf,
   loadPolicy,
   mergeCommands,
   parsePolicy,
+  rolesOf,
   parseCommandFile,
   splitScript,
   type Classification,
@@ -635,4 +638,84 @@ test("policy shadows: a rule after a catch-all warns", () => {
 test("policy shadows: the D4 example and the built-in policy load without warnings", () => {
   assert.deepEqual(loadPolicy(EXAMPLE).warnings, []);
   assert.deepEqual(builtinPolicy().warnings, []);
+});
+
+// --- environments, partitions and roles (task 2.3) ---
+
+const D4 = loadPolicy(EXAMPLE);
+
+test("Shared entry: PAYLIB is blocked on every partition", () => {
+  for (const part of ["dev", "qa", "prod"]) assert.equal(environmentOf("PAYLIB", part, "JDOE", D4), "blocked");
+});
+
+test("Order decides overlap: on qa QTORD is test and QSYS2 is system; elsewhere QTORD is system", () => {
+  assert.equal(environmentOf("QTORD", "qa", "JDOE", D4), "test");
+  assert.equal(environmentOf("QSYS2", "qa", "JDOE", D4), "system");
+  assert.equal(environmentOf("QTORD", "dev", "JDOE", D4), "system");
+  assert.equal(environmentOf("QTORD", "prod", "JDOE", D4), "system");
+});
+
+test("Personal library: JDOE is personal for JDOE and JDOEX is not", () => {
+  assert.equal(environmentOf("JDOE", "dev", "JDOE", D4), "personal");
+  assert.equal(environmentOf("JDOE_T1", "dev", "jdoe", D4), "personal");
+  assert.equal(environmentOf("JDOEX", "dev", "JDOE", D4), "unmatched");
+  assert.equal(environmentOf("JDOE", "dev", "ASMITH", D4), "unmatched");
+  assert.equal(environmentOf("JDOE", "qa", "JDOE", D4), "unmatched", "personal is limited to dev");
+});
+
+test("environments: case, system names only, $ and # in names, partition filter, no partition", () => {
+  assert.equal(environmentOf("qtemp", "dev", "JDOE", D4), "scratch");
+  assert.equal(environmentOf("ORDER_HISTORY", "dev", "JDOE", D4), "unmatched", "a long schema name never matches");
+  assert.equal(environmentOf("DVORD", "dev", "JDOE", D4), "devlibs");
+  assert.equal(environmentOf("DVORD", "qa", "JDOE", D4), "unmatched");
+  assert.equal(environmentOf("DVORD", undefined, "JDOE", D4), "unmatched", "a partition-limited entry needs a partition");
+  assert.equal(environmentOf("LVORD", undefined, "JDOE", D4), "live");
+  const p = parsePolicy("version: 1\nenvironments:\n  - { name: personal, match: [\"${USER}\"] }\n  - { name: hash, match: [\"A#*\"] }\nrules: []\n", "p.yaml");
+  assert.equal(environmentOf("J$DOE", undefined, "J$DOE", p), "personal");
+  assert.equal(environmentOf("JXDOE", undefined, "J$DOE", p), "unmatched", "$ in a user name is literal");
+  assert.equal(environmentOf("A#1", undefined, "JDOE", p), "hash");
+});
+
+test("Profile named after the wrong box: the RDB decides", () => {
+  assert.deepEqual(detectPartition(D4, { rdb: "PRODRDB" }), { partition: "prod" });
+});
+
+test("IASP database name: QAIASP1 is qa", () => {
+  assert.deepEqual(detectPartition(D4, { rdb: "qaiasp1" }), { partition: "qa" });
+});
+
+test("Names disagree: System dev and RDB qa is a conflict naming both", () => {
+  const r = detectPartition(D4, { system: "DEVBOX", rdb: "QARDB" });
+  assert.equal(r.partition, undefined);
+  assert.match(r.conflict ?? "", /dev and qa/);
+});
+
+test("partitions: agreement, a declaration, an unknown box", () => {
+  assert.deepEqual(detectPartition(D4, { system: "QABOX", rdb: "QAIASP1", declared: "qa" }), { partition: "qa" });
+  assert.match(detectPartition(D4, { rdb: "PRODRDB", declared: "dev" }).conflict ?? "", /dev and prod|prod and dev/);
+  assert.match(detectPartition(D4, { declared: "test" }).conflict ?? "", /IBMI_PARTITION test is not a partition/);
+  assert.deepEqual(detectPartition(D4, { system: "OTHERBOX", rdb: "OTHERRDB" }), { partition: "prod" }, "unknown_partition");
+  assert.deepEqual(detectPartition(D4, { system: "OTHERBOX", rdb: "QARDB" }), { partition: "qa" }, "an unmapped name does not disagree");
+  assert.deepEqual(detectPartition(builtinPolicy(), { rdb: "ANY" }), {}, "no partitions: none");
+});
+
+test("Dev and QA: a user in both groups holds both roles", () => {
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPDEV", "grpqa"], authlists: [] }, D4).sort(), ["dev", "qa"]);
+});
+
+test("Per-user exception: users: [JDOE] gives JDOE the role", () => {
+  const p = parsePolicy("version: 1\nroles:\n  - { name: dev, groups: [GRPDEV], users: [JDOE] }\n  - { name: analyst, groups: [GRPANL] }\ndefault_role: analyst\nrules: []\n", "p.yaml");
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: [] }, p), ["dev"]);
+  assert.deepEqual(rolesOf({ user: "ASMITH", groups: [], authlists: [] }, p), ["analyst"]);
+});
+
+test("Lookup not permitted: default_role; user patterns still match", () => {
+  assert.deepEqual(rolesOf({ user: "JDOE" }, D4), ["analyst"]);
+  assert.deepEqual(rolesOf({ user: "CTR01" }, D4), ["contractor"], "a contractor stays a contractor");
+});
+
+test("roles: authorization lists and supplemental groups", () => {
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: ["AUTLQA"] }, D4), ["qa"]);
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPANL", "GRPDEV"] }, D4).sort(), ["analyst", "dev"]);
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: [] }, builtinPolicy()), [], "no roles and no default");
 });
