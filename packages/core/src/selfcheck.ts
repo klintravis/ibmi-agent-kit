@@ -108,7 +108,7 @@ test("Environment cannot lift a guard", () => {
   for (const k of [
     "IBMI_RESTRICTED", "IBMI_READ_ONLY", "IBMI_ALLOWED_CL", "IBMI_BLOCKED_CL", "IBMI_BLOCKED_TABLES",
     "IBMI_SQL_TRANSPORT", "IBMI_5250_TLS_INSECURE", "IBMI_USER", "IBMI_PASSWORD", "IBMI_SSH_PORT",
-    "IBMI_MAPEPIRE_PORT", "IBMI_PARTITION", "IBMI_KIT_POLICY",
+    "IBMI_MAPEPIRE_PORT", "IBMI_PARTITION", "IBMI_KIT_POLICY", "IBMI_KIT_VERBS",
   ]) process.env[k] = "false";
   process.env.IBMI_HOST = "evil";
   const env = resolveProfileEnv("dev");
