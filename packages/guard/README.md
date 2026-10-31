@@ -9,7 +9,7 @@ Status: the guard decides `run_script` and `policy_check` only. It is not yet wi
 ## How a statement is decided
 
 1. **Split and classify.** A script is split into SQL statements and CL commands (`CL:` lines). `classify` turns each into operations: a class (`read`, `write`, `ddl`, `compile`, `call`, `liblist`, `promote`, `danger`, or a custom class), the object, and the library. It follows aliases and views to their base tables, resolves long schema names, and looks inside `QCMDEXC`, `RUNSQL` and similar. Anything it cannot read safely is `danger`.
-2. **CL command table.** `src/commands.yaml` lists the CL commands the guard knows and how to classify them. A command not in the table is `danger` (in observe mode an unqualified unknown command is only logged; see below). A policy can add or extend entries with `command_files` and `commands`, including `class_by_param` (for example one class per promotion level). Format: [docs/policy.md](../../docs/policy.md#command-tables).
+2. **CL command table.** `src/commands.yaml` lists the CL commands the guard knows and how to classify them. A command not in the table is `danger` (in observe mode an unqualified unknown command is only logged, unless it names a command or program to run (`CMD`, `PGM`, `RQSDTA`, `TRGPGM`, `CLASS`), which is denied in every mode; see below). A policy can add or extend entries with `command_files` and `commands`, including `class_by_param` (for example one class per promotion level). Format: [docs/policy.md](../../docs/policy.md#command-tables).
 3. **Identity.** The user, group profile, supplemental groups, authorization lists and partition. Roles come from the policy's `roles` entries.
 4. **Decide.** `decide` finds each operation's environment from its library, then the first matching rule gives `allow`, `confirm` or `deny`. No match is `deny`. A statement takes its most restrictive operation.
 
@@ -18,7 +18,7 @@ Status: the guard decides `run_script` and `policy_check` only. It is not yet wi
 | Mode | Behaviour |
 |---|---|
 | `enforce` | Decisions apply. This is the default for a policy file. |
-| `observe` | Decisions are logged and the statement runs as if allowed. `danger`, `unqualified` and partition-conflict operations are still denied. The built-in policy (used when a profile sets no `IBMI_KIT_POLICY`) is observe with one `allow` rule. |
+| `observe` | Decisions are logged and the statement runs as if allowed. `danger`, `unqualified` and partition-conflict operations are still denied, as is an unknown command that names a command or program to run (`CMD`, `PGM`, `RQSDTA`, `TRGPGM`, `CLASS`). The built-in policy (used when a profile sets no `IBMI_KIT_POLICY`) is observe with one `allow` rule. |
 
 Mode can be set per partition. Known limit while observing: the command table's `danger` entries are the boundary, so an IBM command missing from the table runs. An unqualified unknown command is logged as a denied-but-not-enforced `unknown_command`, and after `ADDLIBLE` it can resolve to a command in the added library.
 

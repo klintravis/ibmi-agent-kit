@@ -20,7 +20,7 @@ A missing or invalid policy stops the server at startup and names the file. A re
 ## Rollout
 
 1. Start with `mode: observe`: everything is decided and logged, nothing extra is blocked.
-2. Read the run log (the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` is set), write `policy test` cases, and run `policy replay <candidate>` (see [Test a policy](#test-a-policy)) to see which logged statements would change.
+2. Read the run log (the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`) is set), write `policy test` cases, and run `policy replay <candidate>` (see [Test a policy](#test-a-policy)) to see which logged statements would change.
 3. Switch partitions to `enforce` one at a time with the per-partition `mode` map.
 
 ## Fields
@@ -184,7 +184,7 @@ Before enforcing, replay the run log under the candidate:
 node <repo>/packages/server/dist/index.js policy replay candidate.yaml --since 14
 ```
 
-It prints each logged statement whose decision changes, and a count. It reads the run log in the first folder in `CONFIG_DIRS()` (`~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` is set).
+It prints each logged statement whose decision changes, and a count. It reads the run log in the first folder in `CONFIG_DIRS()` (`~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`) is set).
 
 To check one script without a connection from an agent, call `policy_check` with `as` and, optionally, `policy`.
 
