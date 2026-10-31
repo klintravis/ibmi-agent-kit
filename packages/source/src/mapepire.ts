@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public query(), execute() and cl().
+// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public query(), execute(), cl() and a job generation counter.
 import type { Msg } from "@ibmi-agent-kit/core";
 import type { CompileError, CompileOpts, CompileResult, LibraryListAction, LibraryListChange, LibraryListEntry, MemberMeta, MemberRef, Profile, Reporter, SearchMatch, SearchOpts, SearchResult, SqlColumn } from "./types.js";
 import { NOOP_REPORTER } from "./types.js";
@@ -61,9 +61,12 @@ export class MapepireBackend {
   // minted once and kept across a reconnect, so a dropped job's held spool stays reachable
   private readonly splfTag = ("MCP" + Math.random().toString(36).slice(2).toUpperCase() + "0000000").slice(0, 10);
   private spoolReady = false;
+  // bumped whenever the job is lost or reset, so the kit's run_script can tell QTEMP, the library
+  // list and *CURLIB may no longer be what its statements were decided against
+  generation = 0;
 
   constructor(readonly profile: Profile, private transport: Transport = transportFor(profile)) {
-    transport.onReconnect = () => { this.spoolReady = false; }; // ovrprtf was job scoped, the new job needs it again
+    transport.onReconnect = () => { this.spoolReady = false; this.generation++; }; // ovrprtf was job scoped, the new job needs it again
   }
 
   // --- job plumbing ---
@@ -452,5 +455,6 @@ export class MapepireBackend {
   async close(): Promise<void> {
     await this.transport.close();
     this.spoolReady = false;
+    this.generation++;
   }
 }

@@ -621,7 +621,7 @@ test("a reconnect re-arms the job scoped spool override", async () => {
   const sqls: string[] = [];
   const jobs: any[] = [];
   const open = async () => {
-    const job: any = { status: "ready", query: (sql: string) => ({ execute: async () => (sqls.push(sql), { success: true, has_results: false }), close: async () => {} }) };
+    const job: any = { status: "ready", close: async () => {}, query: (sql: string) => ({ execute: async () => (sqls.push(sql), { success: true, has_results: false }), close: async () => {} }) };
     jobs.push(job);
     return job;
   };
@@ -632,6 +632,9 @@ test("a reconnect re-arms the job scoped spool override", async () => {
   await be.holdSpool();
   assert.equal(jobs.length, 2);
   assert.equal(sqls.filter((s) => s.includes("ovrprtf")).length, 2, "the new job needs ovrprtf again");
+  assert.equal(be.generation, 1, "a reconnect bumps the job generation");
+  await be.close();
+  assert.equal(be.generation, 2, "so does a reset");
 });
 
 // --- mountable tools ---
