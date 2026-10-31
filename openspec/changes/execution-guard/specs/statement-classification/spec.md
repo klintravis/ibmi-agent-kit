@@ -112,7 +112,9 @@ CL SHALL be classified only by a command table giving each command a class (`rea
 `ddl`, `compile`, `call`, `liblist`, `promote`, `danger`), the parameters that name objects or
 libraries, and optionally the partition a parameter's library belongs to. The kit ships common IBM
 commands; a policy MAY add or override commands. A command not in the table, or qualified to a
-library other than `QSYS`, `QSYS2` or one the table names, SHALL classify as `danger`.
+library other than `QSYS`, `QSYS2` or one the table names, SHALL classify as `danger`. A command
+missing from the table and unqualified (or qualified `*LIBL`/`*NLVLIBL`) SHALL carry the reason
+`unknown_command`; a qualified one SHALL not, so the qualifier rule wins.
 
 #### Scenario: Display with an outfile
 - **WHEN** a command is `DSPOBJD OBJ(A/*ALL) OBJTYPE(*FILE) OUTPUT(*OUTFILE) OUTFILE(B/OUT)`
@@ -122,6 +124,10 @@ library other than `QSYS`, `QSYS2` or one the table names, SHALL classify as `da
 - **WHEN** the policy adds `PRMOBJ` with class `promote` and parameter `TOLIB` on partition `qa`
 - **THEN** `PRMOBJ OBJ(X) TOLIB(QTORD)` run on the dev partition classifies as `promote` into
   `QTORD` matched against partition `qa`'s environments
+
+#### Scenario: Unknown command
+- **WHEN** a command is `FROBCMD X`
+- **THEN** it classifies as `danger` with reason `unknown_command`
 
 #### Scenario: Look-alike command
 - **WHEN** a command is `MYLIB/DSPOBJD OBJ(A/X) OBJTYPE(*FILE)`

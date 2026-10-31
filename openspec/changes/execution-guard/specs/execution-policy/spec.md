@@ -39,7 +39,11 @@ and roles SHALL NOT be includable.
 `mode` SHALL be `observe`, `enforce`, or a map of partition names to modes with a `default`
 (default `enforce` for a policy file). In observe mode operations are decided and logged and run
 as if allowed, except that `danger` and `unqualified` operations and anything the engines' own
-checks refuse SHALL still be denied. The built-in policy SHALL be in observe mode.
+checks refuse SHALL still be denied. The one exception is a `danger` operation whose only cause is
+an unqualified (or `*LIBL`/`*NLVLIBL`) CL command missing from the command table (reason
+`unknown_command`): in observe mode it is logged as `decision: deny, enforced: false` with that
+reason and runs. A statement runs only if every operation in it runs. The built-in policy SHALL be
+in observe mode.
 
 #### Scenario: Observe a would-be deny
 - **WHEN** in observe mode a statement would be denied
@@ -48,6 +52,22 @@ checks refuse SHALL still be denied. The built-in policy SHALL be in observe mod
 #### Scenario: Danger still blocked while observing
 - **WHEN** in observe mode `run_script` sends `CL: PWRDWNSYS OPTION(*IMMED)`
 - **THEN** it is denied
+
+#### Scenario: Unknown command observed
+- **WHEN** in observe mode `run_script` sends `CL: FROBCMD X`
+- **THEN** it runs, and the run log records `decision: deny, enforced: false, reason: unknown_command`
+
+#### Scenario: Unknown command enforced
+- **WHEN** in enforce mode `run_script` sends `CL: FROBCMD X`
+- **THEN** it is denied
+
+#### Scenario: Qualified unknown command still blocked while observing
+- **WHEN** in observe mode `run_script` sends `CL: MYLIB/FROBCMD X`
+- **THEN** it is denied
+
+#### Scenario: Unknown command next to a danger command
+- **WHEN** in observe mode `run_script` sends `CL: FROBCMD X` and `CL: PWRDWNSYS OPTION(*IMMED)`
+- **THEN** the script is denied and nothing is sent
 
 #### Scenario: One partition enforced
 - **WHEN** `mode: { default: observe, prod: enforce }` and a denied write targets the prod partition
@@ -58,7 +78,7 @@ checks refuse SHALL still be denied. The built-in policy SHALL be in observe mod
 - **THEN** every pre-existing tool behaves as before this change, and decisions are logged
 
 ### Requirement: Partitions are identified by system name and RDB name
-Each partition SHALL list `systems` (matched against the 5250 sign-on System name) and/or `rdbs`
+Each partition SHALL list `systems` (matched against the 5250 sign-on System name, which some sign-on screens label "Server name") and/or `rdbs`
 (matched against SQL `CURRENT SERVER`, including IASP database names). A profile MAY declare
 `IBMI_PARTITION`. Detected names, and any declaration, SHALL agree on one partition; if they map
 to different partitions every guarded operation on that server SHALL be denied naming them. No
