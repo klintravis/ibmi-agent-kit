@@ -4,7 +4,7 @@ The execution guard's pure half: it classifies SQL statements and CL commands, l
 
 The guard catches mistakes, it is not a security boundary. It classifies only the text it is given. It does not see what called programs, triggers, application menu options or prompted fields do, and options typed on a list screen are not command lines. IBM i object authority stays the real boundary.
 
-Status: the guard decides `run_script` and `policy_check` only. It is not yet wired into `run_sql`, `compile_member`, the source tools or the 5250 tools, which keep their own checks. The catalog queries it uses (`USER_INFO`, `AUTHORIZATION_LIST_USER_INFO`, `SYSSCHEMAS`, `SYSVIEWDEP`, `SYSTABLES`, `LIBRARY_LIST_INFO`) and the format of the supplemental group list are not yet verified on a live IBM i.
+Status: the guard decides `run_script`, `verb_run` and `policy_check` only. It is not yet wired into `run_sql`, `compile_member`, the source tools or the 5250 tools, which keep their own checks. The catalog queries it uses (`USER_INFO`, `AUTHORIZATION_LIST_USER_INFO`, `SYSSCHEMAS`, `SYSVIEWDEP`, `SYSTABLES`, `LIBRARY_LIST_INFO`) and the format of the supplemental group list are not yet verified on a live IBM i.
 
 ## How a statement is decided
 
@@ -24,7 +24,7 @@ Mode can be set per partition. Known limit while observing: the command table's 
 
 ## Run log
 
-Each `run_script` statement is decided, confirmed if the policy says so, and appended as one JSON line to `<profile folder>/runs/YYYY-MM-DD.jsonl` (UTC date; the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` by default). A line holds the time, server, tool, identity, roles, mode, policy hash, redacted statement text, each operation's class and decision, the rule number, `decision` (what the policy says) and `effective` (what happened), whether it was confirmed, the outcome, and the catalog answers the decision used. Passwords in CL parameters and SQL clauses, and the profile's own password, are replaced by `***`. The log is a local record the user can edit, not an audit trail. A write failure warns once on stderr and does not stop the call.
+Each `run_script` and `verb_run` statement is decided, confirmed if the policy says so, and appended as one JSON line to `<profile folder>/runs/YYYY-MM-DD.jsonl` (UTC date; the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` by default). A line holds the time, server, tool, identity, roles, mode, policy hash, redacted statement text, each operation's class and decision, the rule number, `decision` (what the policy says) and `effective` (what happened), whether it was confirmed, the outcome, and the catalog answers the decision used. Passwords in CL parameters and SQL clauses, and the profile's own password, are replaced by `***`. The log is a local record the user can edit, not an audit trail. A write failure warns once on stderr and does not stop the call.
 
 ## Offline: `policy test` and `policy replay`
 
@@ -37,12 +37,12 @@ node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--si
 
 `npm link -w packages/server` makes `ibmi-agent-kit` available on PATH, so `ibmi-agent-kit policy test …` works too.
 
-- `policy test` decides each case in a YAML test file for a stated identity and lookup answers, and compares with `expect`. Exit 0 all passed, 1 a case failed, 2 usage or load error. See [examples/three-partitions.tests.yaml](../../examples/three-partitions.tests.yaml).
+- `policy test` decides each case in a YAML test file for a stated identity and lookup answers, and compares with `expect`. A case may name a `verb` and `args` instead of a `script`: every statement the verb would send is decided (see [Test a policy](../../docs/policy.md#test-a-policy)). Exit 0 all passed, 1 a case failed, 2 usage or load error. See [examples/three-partitions.tests.yaml](../../examples/three-partitions.tests.yaml).
 - `policy replay` re-decides the statements in the run log under a candidate policy and lists those whose decision changes. Run it before switching a partition from observe to enforce. It always exits 0 unless the arguments or files are bad.
 
 ## Exports
 
-`classify`, `classifyCl`, `splitScript`, `parseCl`, `builtinCommands`, `mergeCommands`, `loadPolicy`, `parsePolicy`, `builtinPolicy`, `decide`, `rolesOf`, `environmentOf`, `detectPartition`, `RunLog`, `redact`, `runPolicyTests`, `replayRunLog`, `loadPolicyTests`, plus the types. Also `loadVerbs`, `resolveVerb` and related functions for project verbs (a library only: no MCP tool uses them yet).
+`classify`, `classifyCl`, `splitScript`, `parseCl`, `builtinCommands`, `mergeCommands`, `loadPolicy`, `parsePolicy`, `builtinPolicy`, `decide`, `rolesOf`, `environmentOf`, `detectPartition`, `RunLog`, `redact`, `runPolicyTests`, `replayRunLog`, `loadPolicyTests`, plus the types. For project verbs: `loadVerbs`, `resolveVerb`, `bindArgs`, `substitute`, `planVerb` (bind and substitute a verb and every verb it calls), `decideVerb` and `decidePlans` (classify a plan, or several verbs' plans, as one script in run order and decide each statement). The server's `verb_run` and `policy_check` use them.
 
 ## Configuration it reads
 

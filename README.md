@@ -3,7 +3,7 @@
 One MCP server for IBM i. It gives an AI agent 5250 green screens, source members, and SQL
 and CL, all through the signed-on user's own IBM i profile. Each user signs on as themselves,
 so IBM i object authority stays the real boundary. An execution guard catches dangerous mistakes
-in `run_script` before they run; see [Safety](#safety).
+in `run_script` and `verb_run` before they run; see [Safety](#safety).
 
 ## Packages
 
@@ -13,7 +13,7 @@ in `run_script` before they run; see [Safety](#safety).
 | [`packages/guard`](packages/guard/README.md) | execution guard: classifier, CL command table, policy |
 | [`packages/screen`](packages/screen/README.md) | 5250 engine |
 | [`packages/source`](packages/source/README.md) | source and SQL engine |
-| [`packages/server`](packages/server/README.md) | the stdio MCP server, `list_servers`, `run_script`, `policy_check` |
+| [`packages/server`](packages/server/README.md) | the stdio MCP server, `list_servers`, `run_script`, `policy_check`, `verb_list`, `verb_run` |
 
 ## Install
 
@@ -41,8 +41,10 @@ Pass `server` (a name from `list_servers`) to pick which IBM i; omit it for the 
 | `session_close` | screen | Signs off and closes a 5250 session | changes |
 | `session_open` | screen | Signs on and opens a 5250 session, optionally starting a program | changes; runs code |
 | `list_servers` | server | Lists configured servers and open sessions | read-only |
-| `policy_check` | server | Shows what the execution policy would decide for a script, without running it | read-only |
+| `policy_check` | server | Shows what the execution policy would decide for a script, or for every statement a verb would send, without running it | read-only |
 | `run_script` | server | Runs SQL and CL after the execution policy decides every statement | changes; runs code |
+| `verb_list` | server | Lists the verbs (named, parameterised procedures in YAML files) by layer, with tags, parameters and overrides | read-only |
+| `verb_run` | server | Runs a verb, or every verb with a tag, after the execution policy decides every statement | changes; runs code |
 | `compile_member` | source | Compiles a source member and parses the compile messages | changes; runs code |
 | `list_libraries` | source | Lists libraries | read-only |
 | `list_members` | source | Lists the members of a source file | read-only |
@@ -73,8 +75,9 @@ as a starting point. `list_servers` shows the folders searched and the open sess
 
 Protected settings are read from the profile file only, never from the environment, so an MCP
 registration's env cannot override them (`IBMI_KIT_CONFIG_DIR` does choose which profile folder
-is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`,
-`IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`,
+is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_PARTITION`, `IBMI_KIT_POLICY`
+(absolute path), `IBMI_KIT_VERBS` (absolute folders, separated by `;` on Windows and `:`
+elsewhere), `IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`,
 `IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_MAPEPIRE_CA`,
 `IBMI_MAPEPIRE_JAR`, and every `IBMI_*_PORT`
 (`IBMI_SSH_PORT`, `IBMI_MAPEPIRE_PORT`, `IBMI_5250_PORT`, `IBMI_5250_VIEWER_PORT`). Other
@@ -118,9 +121,12 @@ The kit replaces `ibm-i-5250-mcp` and `ibm-i-source-mcp`.
 
 `run_script` runs every SQL statement and CL command through the execution guard: each is
 classified, matched against a policy file (roles, environments, partitions, rules) and allowed,
-confirmed with the user, or denied before anything is sent. `policy_check` makes the same
-decisions but only reports them. Without a policy file the guard only observes and logs, apart
-from statements it always denies. `run_script` decisions go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
+confirmed with the user, or denied before anything is sent. `verb_run` does the same for every
+statement of a verb, its nested verbs and its cleanup, and for every verb of a tag suite, decided
+as one script before the first is sent; a verb runs with the signed-on user's rules, so sharing
+one grants nothing. `policy_check` makes the same decisions but only reports them. Without a
+policy file the guard only observes and logs, apart from statements it always denies.
+`run_script` and `verb_run` decisions go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
 [docs/policy.md](docs/policy.md) for the policy file.
 
 Limits, stated plainly: the guard sees only the text it is given, not what called programs or
@@ -133,14 +139,17 @@ The guard's catalog lookups have not yet been verified on a live IBM i.
 
 ## Words
 
-"Statements and commands" means SQL statements and CL commands. "Verbs" is reserved for
-custom, named operations a project defines; those come later (`project-verbs`).
+"Statements and commands" means SQL statements and CL commands. A "verb" is a named,
+parameterised procedure (setup, steps, expectations, cleanup) that a person or a project writes
+as a YAML file; see the [server README](packages/server/README.md#verbs).
 
 ## Roadmap
 
-`unified-kit` is done; `execution-guard` is in progress (the guard decides `run_script` and
-`policy_check`; wiring it into the other tools and a live check are open). Next: `project-verbs`
-(library code exists, no tool yet), `config-bootstrap`, a company pilot. See `docs/idea.md`.
+`unified-kit` is done; `execution-guard` is in progress (the guard decides `run_script`,
+`verb_run` and `policy_check`; wiring it into the other tools and a live check are open).
+`project-verbs` is in progress (`verb_list`, `verb_run` and `policy_check` verb input are done;
+an example verb and a live check are open). Next: `config-bootstrap`, a company pilot. See
+`docs/idea.md`.
 
 ## Built on
 

@@ -153,7 +153,7 @@ commands:
 
 ## Confirmation
 
-`confirm` rules make `run_script` ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
+`confirm` rules make `run_script` and `verb_run` ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
 
 ## Example
 
@@ -178,6 +178,18 @@ node <repo>/packages/server/dist/index.js policy test examples/three-partitions.
 
 `lookups` is optional: `schemas` maps a long schema name to its system name, and `bases` maps an alias or view to its base tables (`LIB.NAME`). `as` takes `user`, `groups`, `authlists`, `partition` and `curlib`. `expect` is the policy's decision, so an observe-mode deny is still tested as deny. Exit 0 all cases passed, 1 a case failed, 2 a bad file. In a team, run it in CI.
 
+A case can test a verb instead of a script: give `verb` (a name, or `proj:NAME` / `org:NAME`) and optional `args` in place of `script`.
+
+```yaml
+- name: analyst cannot run the team order fix
+  as: { user: ANL01, groups: [GRPANL], partition: prod }
+  verb: FIX-ORDERS
+  args: { order: 999001 }
+  expect: deny
+```
+
+Every statement the verb would send is decided, in run order: each setup step's `requires_absent` query and statement, the steps (nested verbs in place), then the cleanup entries. A per-statement `expect` lists them in that order. Verbs are found in `.ibmi-kit/verbs/` in the folder you run the command from and in `verbs/` beside the policy file; personal verbs in `~/.ibmi-agent-kit/verbs` are never read, so CI decides the same everywhere. A `requires_absent` or `expect` query that does more than read decides as `deny`. A verb that is missing, refused at load or given bad arguments exits 2.
+
 Before enforcing, replay the run log under the candidate:
 
 ```sh
@@ -186,7 +198,7 @@ node <repo>/packages/server/dist/index.js policy replay candidate.yaml --since 1
 
 It prints each logged statement whose decision changes, and a count. It reads the run log in the first folder in `CONFIG_DIRS()` (`~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`) is set).
 
-To check one script without a connection from an agent, call `policy_check` with `as` and, optionally, `policy`.
+To check one script or verb without a connection from an agent, call `policy_check` with `script` or `verb` (and `args`), `as` and, optionally, `policy`.
 
 ## Run log
 

@@ -13,6 +13,7 @@
 ## 3. Documentation and example
 
 - [ ] 3.1 Add `examples/verbs/SMOKE-SAMPLE.yaml` for the user's own PUB400 library (setup creates a table and inserts a row with `requires_absent`, an expectation, cleanup drops the table) and a README "Verbs" section (layers and override, `:p` vs `${p}`, `requires_absent`, cleanup rule, `policy_check` with a verb, suites by tag); verify the example loads in the guard selfcheck, the README example is byte-identical, and `scripts/check-names.mjs` reports no hits
+- [x] 3.2 Docs updated for tasks 2.1-2.2 (docs-check passes): `verb_list`, `verb_run` and `policy_check` verb input in the root Tools table and the server README, `IBMI_KIT_VERBS` in the protected profile keys, `policy test` verb cases in `docs/policy.md`, safety text checked against the code
 
 ## 4. Integration
 
