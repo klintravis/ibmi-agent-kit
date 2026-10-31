@@ -1,11 +1,10 @@
-import mapepire from "@ibm/mapepire-js";
+// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public execute() and cl().
+import type { Msg } from "@ibmi-agent-kit/core";
 import type { CompileError, CompileOpts, CompileResult, LibraryListAction, LibraryListChange, LibraryListEntry, MemberMeta, MemberRef, Profile, Reporter, SearchMatch, SearchOpts, SearchResult, SqlColumn } from "./types.js";
 import { NOOP_REPORTER } from "./types.js";
 import { assertCompileCommandAllowed, buildCompileCommand, buildLibraryListCommands, parseEvfevent } from "./compile.js";
 import { assertSelectOnly, likeLiteral, parseFndstrpdm, withTimeLimit } from "./util.js";
-import { closeSshMapepire, connectSshMapepire, raceJobClosed } from "./sshMapepire.js";
-
-const { SQLJob } = mapepire;
+import { transportFor, type Transport } from "./transport.js";
 
 // --- constants ---
 const NAME = /^[A-Za-z#$@][A-Za-z0-9#$@_.]{0,9}$/; // trust boundary: spliced into SQL and CL, never bound
@@ -58,14 +57,14 @@ export const qcmdexc = (command: string) => `call qsys2.qcmdexc('${command.repla
 
 // --- backend ---
 export class MapepireBackend {
-  private job?: InstanceType<typeof SQLJob>;
-  private connecting?: Promise<InstanceType<typeof SQLJob>>;
   private chain: Promise<unknown> = Promise.resolve();
   // minted once and kept across a reconnect, so a dropped job's held spool stays reachable
   private readonly splfTag = ("MCP" + Math.random().toString(36).slice(2).toUpperCase() + "0000000").slice(0, 10);
   private spoolReady = false;
 
-  constructor(private profile: Profile) {}
+  constructor(private profile: Profile, private transport: Transport = transportFor(profile)) {
+    transport.onReconnect = () => { this.spoolReady = false; }; // ovrprtf was job scoped, the new job needs it again
+  }
 
   // --- job plumbing ---
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
@@ -74,18 +73,8 @@ export class MapepireBackend {
     return run;
   }
 
-  private async connect(reporter: Reporter = NOOP_REPORTER): Promise<InstanceType<typeof SQLJob>> {
-    if (this.job && (this.job as any).status !== "ended") return this.job;
-    if (!this.connecting) {
-      if (this.job) {
-        reporter.log("notice", `connection to ${this.profile.host} was lost, reconnecting`);
-        this.job = undefined;
-        this.spoolReady = false; // ovrprtf was job scoped, the new job needs it again
-      }
-      this.connecting = connectSshMapepire(this.profile, reporter).finally(() => (this.connecting = undefined));
-    }
-    this.job = await this.connecting;
-    return this.job;
+  private connect(reporter: Reporter = NOOP_REPORTER): Promise<void> {
+    return this.transport.connect(reporter);
   }
 
   private async sql(statement: string, parameters?: any[]): Promise<Row[]> {
@@ -94,27 +83,16 @@ export class MapepireBackend {
     return rows;
   }
 
-  private async fetchRows(statement: string, max: number, parameters?: any[]): Promise<{ rows: Row[]; columns: SqlColumn[]; truncated: boolean }> {
-    const job = await this.connect();
-    const q = (job as any).query(statement, parameters ? { parameters } : undefined);
-    // one past the cap: is_done stays false when a result is exactly the cap, so it cannot tell truncation
-    const rs: any = await raceJobClosed(job, q.execute(max + 1));
-    await q.close?.();
-    const columns = (rs.metadata?.columns ?? []).map((c: any) => ({ name: c.name, type: c.type, precision: c.precision, scale: c.scale }));
-    const data: Row[] = rs.has_results ? rs.data : [];
-    return { rows: data.slice(0, max), columns, truncated: data.length > max };
+  private fetchRows(statement: string, max: number, parameters?: any[]): Promise<{ rows: Row[]; columns: SqlColumn[]; truncated: boolean }> {
+    return this.transport.query(statement, parameters, max);
   }
 
   private async runOrThrow(statement: string, what: string): Promise<void> {
     try { await this.sql(statement); } catch (e: any) { throw new Error(`${what} failed: ${e?.message || e}`); }
   }
 
-  private async clResult(command: string): Promise<any> {
-    const job = await this.connect();
-    const q = (job as any).query(command, { isClCommand: true });
-    const rs = await raceJobClosed(job, q.execute());
-    await q.close?.();
-    return rs;
+  private clResult(command: string) {
+    return this.transport.cl(command);
   }
 
   // --- read ---
@@ -197,7 +175,7 @@ export class MapepireBackend {
       for (const c of cmds) {
         reporter.step(`running ${c}`);
         const r = await this.clResult(c);
-        if (r?.success === false) throw new Error(`${c} failed: ${r.error || r.sql_state || "unknown error"}`);
+        if (!r.ok) throw new Error(`${c} failed: ${r.error || r.sqlState || "unknown error"}`);
       }
       reporter.log("info", `library list changed (${action}): ${cmds.join("; ")}`);
       reporter.step("reading the updated library list");
@@ -241,6 +219,22 @@ export class MapepireBackend {
     return { rows, columns, truncated, cap };
   }
 
+  // --- execute ---
+  // no checks of their own: the execution guard (next change) is their gate, and until then only
+  // internal code calls them. Values are bound, never spliced into the statement.
+  async execute(statement: string, params?: unknown[], reporter: Reporter = NOOP_REPORTER): Promise<{ rowsAffected: number; messages: Msg[] }> {
+    await this.connect(reporter);
+    return this.serialize(() => this.transport.execute(statement, params));
+  }
+
+  async cl(command: string, reporter: Reporter = NOOP_REPORTER): Promise<{ ok: boolean; messages: Msg[] }> {
+    await this.connect(reporter);
+    return this.serialize(async () => {
+      const { ok, messages } = await this.clResult(command);
+      return { ok, messages };
+    });
+  }
+
   // --- search ---
   // one fndstrpdm per source file instead of an alias and a scan per member, 20ms down to 1.7ms
   async searchSource(opts: SearchOpts, reporter: Reporter = NOOP_REPORTER): Promise<SearchResult> {
@@ -276,7 +270,7 @@ export class MapepireBackend {
         reporter.bar(`searching ${lib}/${f}`, i, order.length);
         const r = await this.clResult(
           `fndstrpdm string('${raw.replace(/'/g, "''")}') file(${lib}/${f}) mbr(*all) option(*none) prtrcds(${cap})`);
-        if (r?.success === false) reporter.log("warning", `skipped ${lib}/${f}: ${r.error || r.sql_state || "fndstrpdm failed"}`);
+        if (!r.ok) reporter.log("warning", `skipped ${lib}/${f}: ${r.error || r.sqlState || "fndstrpdm failed"}`);
         else scanned.push(f); // a failed scan prints nothing, so it must not shift the pairing
       }
       reporter.bar(`reading ${scanned.length} listing(s)`, order.length, order.length);
@@ -427,7 +421,7 @@ export class MapepireBackend {
       reporter.log("info", `compile command: ${command}`);
       reporter.step(`compiling ${mbr} (${command.trim().split(/\s+/)[0]}) on ${this.profile.host}`);
       const result = await this.clResult(command);
-      const success = result?.success !== false;
+      const success = result.ok;
       reporter.step(`compile ${success ? "succeeded" : "failed"}, fetching the compiler listing from spool`);
 
       let listing = "";
@@ -444,15 +438,14 @@ export class MapepireBackend {
       } else listing += "\n\n(pass an explicit targetLibrary for structured EVFEVENT errors)";
 
       await this.dropTaggedSpool();
-      const messages = result?.error ? `[${result.sql_state ?? ""}] ${result.error}` : "";
+      const messages = result.error ? `[${result.sqlState ?? ""}] ${result.error}` : "";
       reporter.log(success ? "info" : "error", `compile ${mbr}: ${success ? "SUCCESS" : "FAILED"} (${errors.length} evfevent record(s))`);
       return { command, success, listing, messages, errors };
     });
   }
 
   async close(): Promise<void> {
-    await closeSshMapepire(this.job);
-    this.job = undefined;
+    await this.transport.close();
     this.spoolReady = false;
   }
 }

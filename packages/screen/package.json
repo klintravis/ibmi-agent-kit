@@ -34,7 +34,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "check": "npm run build && node --test dist/selfcheck.js",
-    "prepare": "npm run build"
+    "prepack": "npm run build"
   },
   "keywords": [
     "mcp",

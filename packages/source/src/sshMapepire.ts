@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): requests go through a job.transport shim over the ssh stream, which mapepire-js 0.6.3 sends through instead of job.socket.
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -158,6 +159,9 @@ export async function connectSshMapepire(profile: Profile, reporter: Reporter = 
     const j = job as any; // socket/responseEmitter/options/status are private in TS, plain fields at runtime
     j.options.naming = "system"; // the jdbc driver would otherwise default to sql naming
     j.socket = socket;
+    // mapepire-js 0.6.3 sends through job.transport; without this shim every request went to an unconnected websocket
+    j.transport = { send: async (req: unknown) => socket.send(JSON.stringify(req)), close: async () => socket.close(), getResponseEmitter: () => j.responseEmitter,
+      isConnected: () => j.status !== "ended", enableTrace: () => {}, disableTrace: () => {} };
     socket.on("message", (line: string) => {
       try { const m = JSON.parse(line); j.responseEmitter.emit(m.id, m); }
       catch { /* startup banner or a log line that is not json: ignore */ }
