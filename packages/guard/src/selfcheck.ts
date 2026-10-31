@@ -4,12 +4,19 @@
 // stubbed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   builtinCommands,
   classify,
   classifyCl,
+  builtinPolicy,
   customClasses,
+  loadPolicy,
   mergeCommands,
+  parsePolicy,
   parseCommandFile,
   splitScript,
   type Classification,
@@ -488,4 +495,82 @@ test("command table: a command file is validated, naming the file", () => {
   assert.throws(() => parseCommandFile("commands:\n  CMPRM: { class: promote, class_by_param: { param: L, values: {}, default: danger } }\n", "x.yaml"), /exactly one of class/);
   assert.throws(() => parseCommandFile("commands: [unclosed\n", "broken.yaml"), /broken\.yaml line \d/);
   assert.throws(() => parseCommandFile("commands:\n  X: { class: read }\n  X: { class: write }\n", "dup.yaml"), /dup\.yaml/);
+});
+
+// --- policy loading (execution-policy spec; task 2.1) ---
+
+const EXAMPLE = fileURLToPath(new URL("../../../examples/three-partitions.yaml", import.meta.url));
+const tmp = () => mkdtempSync(join(tmpdir(), "guard-policy-"));
+const MINIMAL = "version: 1\nrules:\n  - { decision: allow }\n";
+
+test("policy: the D4 example and its command file load", () => {
+  const p = loadPolicy(EXAMPLE);
+  assert.deepEqual(p.mode, { default: "observe", partitions: { prod: "enforce" } });
+  assert.deepEqual(p.partitions.map((x) => x.name), ["dev", "qa", "prod"]);
+  assert.deepEqual(p.rdbs, { DEVRDB: "dev", QARDB: "qa", QAIASP1: "qa", PRODRDB: "prod" });
+  assert.equal(p.unknownPartition, "prod");
+  assert.equal(p.defaultRole, "analyst");
+  assert.equal(p.commands.CMPRM?.class_by_param?.values.QA, "promote_qa", "cm-product.yaml merged");
+  assert.ok(p.commands.DSPOBJD, "shipped table kept");
+  assert.equal(p.rules.length, 10);
+  assert.deepEqual(p.rules[0], { classes: ["danger"], decision: "deny" });
+  assert.deepEqual(p.rules[5], { roles: ["dev", "qa"], partition: ["dev"], env: ["personal", "devlibs", "integ"], decision: "allow" });
+  assert.deepEqual(p.environments[1], { name: "personal", libraries: [], match: ["${USER}", "${USER}_*"], partitions: ["dev"] });
+});
+
+test("policy: the built-in policy loads in observe mode", () => {
+  const p = builtinPolicy();
+  assert.equal(p.source, "built-in");
+  assert.deepEqual(p.mode, { default: "observe", partitions: {} });
+  assert.deepEqual(p.rules, [{ decision: "allow" }]);
+  assert.deepEqual(loadPolicy(), p);
+});
+
+test("policy: mode is a value or a per-partition map; a file without one enforces", () => {
+  assert.deepEqual(parsePolicy(MINIMAL, "p.yaml").mode, { default: "enforce", partitions: {} });
+  assert.deepEqual(parsePolicy("mode: observe\n" + MINIMAL, "p.yaml").mode, { default: "observe", partitions: {} });
+  const m = parsePolicy("mode: { prod: observe }\npartitions: [{ name: prod, rdbs: [P] }]\nunknown_partition: prod\n" + MINIMAL, "p.yaml").mode;
+  assert.deepEqual(m, { default: "enforce", partitions: { prod: "observe" } });
+  assert.throws(() => parsePolicy("mode: watch\n" + MINIMAL, "p.yaml"), /p\.yaml: mode/);
+});
+
+test("policy: a typo in a key is refused naming the file and the key", () => {
+  assert.throws(() => parsePolicy("version: 1\nrules:\n  - { decison: allow }\n", "team.yaml"), /team\.yaml: rules\.0: .*decison/);
+  assert.throws(() => parsePolicy("version: 1\nrule: []\n", "team.yaml"), /team\.yaml: .*rule/);
+});
+
+test("policy: a missing file is refused naming the path", () => {
+  const path = join(tmp(), "nope.yaml");
+  assert.throws(() => loadPolicy(path), (e: Error) => e.message.includes(path));
+});
+
+test("policy: NO stays a string (YAML 1.2 core schema)", () => {
+  const p = parsePolicy("version: 1\nenvironments:\n  - { name: norway, libraries: [NO] }\nrules:\n  - { env: norway, decision: allow }\n", "p.yaml");
+  assert.deepEqual(p.environments[0].libraries, ["NO"]);
+});
+
+test("policy: an unquoted * names the line and says to quote it", () => {
+  assert.throws(
+    () => parsePolicy("version: 1\nenvironments:\n  - { name: all, match: [*ALL] }\nrules: []\n", "p.yaml"),
+    /p\.yaml line 3: .*quote values starting with \*/,
+  );
+});
+
+test("policy: an error in a command file names that file", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "cm-product.yaml"), "commands:\n  CMPRM: { clas: promote }\n");
+  writeFileSync(join(dir, "policy.yaml"), "version: 1\ncommand_files: [cm-product.yaml]\nrules: []\n");
+  assert.throws(() => loadPolicy(join(dir, "policy.yaml")), /cm-product\.yaml: commands\.CMPRM.*clas/s);
+  writeFileSync(join(dir, "policy.yaml"), "version: 1\ncommand_files: [missing.yaml]\nrules: []\n");
+  assert.throws(() => loadPolicy(join(dir, "policy.yaml")), /policy\.yaml: command_files: .*missing\.yaml not found/);
+});
+
+test("policy: command_files merge in order, then the policy's own commands", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "a.yaml"), "commands:\n  FROB: { class: read }\n  ZAP: { class: write }\n");
+  writeFileSync(join(dir, "b.yaml"), "commands:\n  FROB: { class: write }\n");
+  writeFileSync(join(dir, "policy.yaml"), "version: 1\ncommand_files: [a.yaml, b.yaml]\ncommands:\n  zap: { class: ddl }\nrules: []\n");
+  const p = loadPolicy(join(dir, "policy.yaml"));
+  assert.equal(p.commands.FROB.class, "write");
+  assert.equal(p.commands.ZAP.class, "ddl");
 });

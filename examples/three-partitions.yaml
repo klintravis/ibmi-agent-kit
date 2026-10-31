@@ -1,0 +1,36 @@
+version: 1
+mode: { default: observe, prod: enforce }
+partitions:
+  - { name: dev,  systems: [DEVBOX],  rdbs: [DEVRDB] }
+  - { name: qa,   systems: [QABOX],   rdbs: [QARDB, QAIASP1] }   # mirror of prod
+  - { name: prod, systems: [PRODBOX], rdbs: [PRODRDB] }
+unknown_partition: prod
+command_files: [cm-product.yaml]          # e.g. CMPRM with class_by_param LEVEL → promote_qa
+environments:                             # one list, first match wins
+  - { name: scratch,    libraries: [QTEMP] }
+  - { name: personal,   match: ["${USER}", "${USER}_*"], partitions: [dev] }
+  - { name: blocked,    libraries: [PAYLIB] }
+  - { name: test,       match: ["QT*"], partitions: [qa] }      # before system, so Q* does not swallow it
+  - { name: system,     match: ["Q*", "SYS*"] }
+  - { name: devlibs,    match: ["DV*", "CR*"], partitions: [dev] }  # incl. per-ticket libs
+  - { name: integ,      match: ["IN*"], partitions: [dev] }
+  - { name: stage_qa,   match: ["SQ*"], partitions: [dev] }
+  - { name: stage_prod, match: ["SP*"], partitions: [dev] }
+  - { name: live,       match: ["LV*"] }
+roles:                                    # a user holds every role that matches
+  - { name: qa,         groups: [GRPQA], authlists: [AUTLQA] }
+  - { name: dev,        groups: [GRPDEV] }
+  - { name: contractor, users: ["CTR*"] }
+  - { name: analyst,    groups: [GRPANL] }
+default_role: analyst
+rules:                                    # first match wins; omitted key or `any` = anything; unmatched = deny
+  - { classes: [danger], decision: deny }
+  - { env: blocked, decision: deny }
+  - { env: scratch, classes: [read, write, ddl], decision: allow }
+  - { roles: [contractor], classes: [read], env: [personal, devlibs, integ], decision: allow }
+  - { roles: [contractor], decision: deny }
+  - { roles: [dev, qa], partition: dev, env: [personal, devlibs, integ], decision: allow }
+  - { roles: [qa], partition: dev, classes: [promote_qa], decision: allow }
+  - { roles: [qa], partition: qa, env: test, classes: [read, write, call], decision: allow }
+  - { roles: [dev, qa], classes: [liblist], decision: allow }
+  - { classes: [read], decision: allow }

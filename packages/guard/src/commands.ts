@@ -1,7 +1,7 @@
 // The CL command table (design D3): the shipped commands.yaml, its schema, and the merge a policy
 // uses for its `command_files` and `commands`. Loading the policy itself is not done here.
 import { readFileSync } from "node:fs";
-import { parse, YAMLParseError } from "yaml";
+import { LineCounter, parseDocument, visit } from "yaml";
 import { z } from "zod";
 import { BUILTIN_CLASSES } from "./types.js";
 
@@ -67,19 +67,33 @@ function normalise(table: CommandTable): CommandTable {
 // Parse a commands-only YAML file (the shipped table, or a policy's command_files entry). Every
 // error names `source`, so a mistake in a vendor's file points at that file.
 export function parseCommandFile(text: string, source: string): CommandTable {
-  let doc: unknown;
-  try {
-    doc = parse(text, { schema: "core", uniqueKeys: true, prettyErrors: true });
-  } catch (e) {
-    const where = e instanceof YAMLParseError && e.linePos ? ` line ${e.linePos[0].line}` : "";
-    throw new Error(`${source}${where}: ${(e as Error).message.split("\n")[0]}`);
-  }
-  const r = commandFileSchema.safeParse(doc);
-  if (!r.success) {
-    const lines = r.error.issues.map((i) => `${source}: ${i.path.join(".") || "(top)"}: ${i.message}`);
-    throw new Error(lines.join("\n"));
-  }
+  const r = commandFileSchema.safeParse(parseYaml(text, source));
+  if (!r.success) throw new Error(issueLines(source, r.error));
   return normalise(r.data.commands);
+}
+
+// YAML 1.2 core schema (so NO stays a string), unique keys, and no aliases: guard files have no
+// use for anchors, and an unquoted *LIBL or *ALL is read as one. Errors name `source` and the line.
+export function parseYaml(text: string, source: string): unknown {
+  const lineCounter = new LineCounter();
+  const doc = parseDocument(text, { schema: "core", uniqueKeys: true, prettyErrors: true, lineCounter });
+  const err = doc.errors[0];
+  if (err) {
+    const where = err.linePos ? ` line ${err.linePos[0].line}` : "";
+    throw new Error(`${source}${where}: ${err.message.split("\n")[0]}`);
+  }
+  visit(doc, {
+    Alias(_, node) {
+      const line = node.range ? ` line ${lineCounter.linePos(node.range[0]).line}` : "";
+      throw new Error(`${source}${line}: *${node.source} is read as a YAML alias; quote values starting with * ("*${node.source}")`);
+    },
+  });
+  return doc.toJS();
+}
+
+// zod issues as one line each, naming `source` and the key path.
+export function issueLines(source: string, error: z.ZodError): string {
+  return error.issues.map((i) => `${source}: ${i.path.join(".") || "(top)"}: ${i.message}`).join("\n");
 }
 
 // Later tables win, a whole entry at a time: an override restates the command.

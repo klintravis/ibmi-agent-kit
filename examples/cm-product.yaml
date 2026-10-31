@@ -1,0 +1,6 @@
+# An invented change-management product's commands, shared as a command file. CMPRM promotes a
+# request to a level; each level is its own class, so rules can govern each promotion.
+commands:
+  CMPRM:
+    class_by_param: { param: LEVEL, values: { QA: promote_qa, PROD: promote_prod }, default: danger }
+    positional: [REQ, LEVEL]

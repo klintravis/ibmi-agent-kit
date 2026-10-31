@@ -29,3 +29,5 @@ export type {
   Operation,
   Statement,
 } from "./types.js";
+export { BUILTIN_POLICY, builtinPolicy, loadPolicy, parsePolicy } from "./policy.js";
+export type { Mode, Policy, Rule, Verdict } from "./policy.js";
