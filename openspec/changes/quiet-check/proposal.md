@@ -17,4 +17,5 @@ printed pass/fail totals (the dot reporter prints none; the exit code and the ab
 
 ## Impact
 
-`package.json` of core, guard, screen, server, source; `openspec/config.yaml`.
+`package.json` of core, guard, screen, server, source; `openspec/config.yaml`; root, screen and source
+READMEs (Node version text).

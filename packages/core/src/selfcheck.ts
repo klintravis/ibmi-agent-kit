@@ -1,6 +1,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIRS, listServers, resolveProfileEnv } from "./index.js";
@@ -167,4 +168,20 @@ test("Mapepire CA and jar paths never come from the environment", () => {
   process.env.IBMI_MAPEPIRE_CA = "/tmp/evil.pem";
   process.env.IBMI_MAPEPIRE_JAR = "/tmp/evil.jar";
   assert.deepEqual(Object.keys(resolveProfileEnv("dev")), ["IBMI_HOST"]);
+});
+
+test("dot reporter prints a failing test's name and message (quiet-check)", () => {
+  const f = join(root, "canary.test.mjs");
+  writeFileSync(
+    f,
+    'import { test } from "node:test";\nimport assert from "node:assert";\n' +
+      'test("quiet-check-canary", () => assert.fail("canary-message"));\n',
+  );
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT; // else the child runs as a subtest of this run and exits 0
+  const r = spawnSync(process.execPath, ["--test", "--test-reporter=dot", f], { encoding: "utf8", env });
+  assert.notEqual(r.status, 0);
+  const out = r.stdout + r.stderr;
+  assert.match(out, /quiet-check-canary/);
+  assert.match(out, /canary-message/);
 });
