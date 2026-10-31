@@ -103,6 +103,12 @@ export async function decideVerb(plan: PlannedVerb, identity: Identity, policy: 
   const c = await classify(script, { lookups, commands: policy.commands, rdbs: policy.rdbs });
   if (c.statements.length !== list.length || c.statements.some((s, i) => s.kind !== list[i].kind))
     throw new Error(`${plan.verb.address}: its ${list.length} statements read back as ${c.statements.length} in one script, so they cannot be decided`);
+  // What is sent must be what was decided: CL goes as the classifier read it, continuation lines
+  // folded and comments stripped (as run_script sends it); SQL must read back unchanged.
+  list.forEach((s, i) => {
+    if (s.kind === "cl") s.text = c.statements[i].display;
+    else if (c.statements[i].text !== s.text) throw new Error(`${s.verb} ${s.where}: reads back as different text in one script, so it cannot be decided`);
+  });
   const refusals: string[] = [];
   const statements = list.map((planned, i) => {
     const statement = c.statements[i];

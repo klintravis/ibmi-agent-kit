@@ -45,8 +45,10 @@ cleanup:
 
 ### D2. Decide everything, confirm once, then run
 `verb_run` substitutes all three lists (and nested verbs, at most 5 verbs in one call chain, the top one counted), classifies and decides every
-statement, gathers every `confirm` into one elicitation, and only then runs requires_absent →
-setup → steps → cleanup through `run_script`'s executor.
+statement, gathers every `confirm` into one elicitation, and only then runs setup (each step's
+requires_absent just before it, so it can query a table an earlier setup step created) → steps →
+cleanup through `run_script`'s executor. `requires_absent` and `expect` queries must classify as
+reads only. A `tag` suite decides every verb first and asks once; a declined confirmation runs none.
 
 ### D3. Cleanup bookkeeping and resets
 The runner records succeeded setup ids; a cleanup entry runs iff its `undoes` id is in that set.
@@ -59,9 +61,14 @@ At startup: `~/.ibmi-agent-kit/verbs` (`user`), `<cwd>/.ibmi-kit/verbs` and `IBM
 Bare names resolve `user` → `proj` → `org`.
 - *Why closest-wins rather than refusing collisions:* a person can try a variant of a team verb
   without editing the shared file; `verb_list` makes the override visible.
+- `IBMI_KIT_VERBS` is a profile setting, so the server loads a server's verbs once, on that
+  server's first verb call, and never reloads them. `policy test` reads only `proj` (its working
+  directory) and `org` (beside the policy under test), so CI never depends on a person's verbs.
 
 ### D5. Fewer tools
 `verb_check` folds into `policy_check` (`verb`, `args`); `verb_test` folds into `verb_run` (`tag`).
+A `tag` suite skips a verb a closer layer overrides (a bare name never reaches it), and reports it
+as skipped.
 
 ## Risks / Trade-offs
 
