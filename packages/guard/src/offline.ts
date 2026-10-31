@@ -114,7 +114,7 @@ export function describeFailure(r: TestResult): string {
 const answersSchema = z
   .object({
     schemas: z.record(z.string().nullable()).optional(),
-    bases: z.record(z.array(z.string())).optional(),
+    bases: z.record(z.array(z.string()).nullable()).optional(),
     curlib: z.string().nullable().optional(),
   })
   .strict();

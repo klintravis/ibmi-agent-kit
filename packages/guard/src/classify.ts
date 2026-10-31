@@ -47,6 +47,7 @@ const key = (o: { lib?: string; name: string }) => `${o.lib}.${o.name}`;
 class Resolver {
   private schemas = new Map<string, Promise<string | undefined>>();
   private curlib?: Promise<string | undefined>;
+  curlibChanged = false; // an earlier statement holds a liblist operation
   constructor(private ctx: ClassifyContext, private local: Map<string, ObjectRef[]>, readonly notes: string[]) {}
 
   private async currentLibrary(): Promise<string | undefined> {
@@ -80,12 +81,16 @@ class Resolver {
     const o = op.object;
     if (!o?.lib || o.rdb) return op;
     if (o.lib === "*CURLIB") {
-      const lib = (await this.currentLibrary())?.toUpperCase();
+      // After a library list change in the script, the box's answer is about the wrong moment.
+      const lib = this.curlibChanged ? undefined : (await this.currentLibrary())?.toUpperCase();
       if (!lib) {
         const name = o.type === "*LIB" ? "*CURLIB" : o.name;
         const r: Operation = { ...op, object: { name } };
         if (op.class === "read" || op.class === "call") r.env = "unqualified";
-        else if (op.class !== "danger") { r.class = "unqualified"; r.reason = "*CURLIB could not be resolved to the job's current library; name the library"; }
+        else if (op.class !== "danger") {
+          r.class = "unqualified";
+          r.reason = this.curlibChanged ? "the script changes the current library; name the library" : "*CURLIB could not be resolved to the job's current library; name the library";
+        }
         return r;
       }
       o.lib = lib;
@@ -110,7 +115,13 @@ class Resolver {
     try {
       for (const b of await this.ctx.lookups.baseTables({ lib: o.lib, name: o.name })) found.push({ lib: b.lib.toUpperCase(), name: b.name.toUpperCase() });
     } catch (e) {
-      this.notes.push(`alias/view lookup for ${o.lib}.${o.name} failed, classified as itself only: ${(e as Error).message}`);
+      // Fail closed: decided as itself, a write through a QTEMP alias to a live table would pass.
+      const reason = `could not resolve alias/view bases of ${o.lib}.${o.name}: ${(e as Error).message}`;
+      this.notes.push(reason);
+      const d: Operation = { ...op, class: "danger", reason };
+      delete d.env;
+      delete d.code;
+      return [d];
     }
     const seen = new Set([key(o)]);
     const out: Operation[] = [];
@@ -139,6 +150,7 @@ async function resolve(statements: ClassifiedStatement[], ctx: ClassifyContext, 
       out.push(named, ...(await r.bases(named, raw)));
     }
     s.operations = out;
+    if (out.some((o) => o.class === "liblist")) r.curlibChanged = true;
   }
 }
 

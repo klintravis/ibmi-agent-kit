@@ -384,11 +384,11 @@ rows("sql", [
     check: (r) => assert.deepEqual(r.operations[1].via, ["alias or view APP.V"]),
   },
   {
-    name: "a failed lookup keeps the object's own class and is noted",
+    name: "a failed alias/view lookup fails closed as danger, and is noted",
     script: "DELETE FROM LIVLIB.V",
     stub: { basesThrow: true },
-    ops: ["write LIVLIB.V"],
-    check: (r) => assert.match(r.notes.join("\n"), /LIVLIB\.V failed/),
+    ops: ["write LIVLIB.V", "danger LIVLIB.V"],
+    check: (r) => assert.match(r.operations[1].reason ?? "", /^could not resolve alias\/view bases of LIVLIB\.V: not authorised/),
   },
   {
     name: "a long schema with no system name is noted",
@@ -475,6 +475,26 @@ rows("cl", [
   { name: "generic library is unqualified", script: "CL: DLTF FILE(LIV*/X)", ops: ["unqualified LIV*/X"], check: (r) => assert.match(r.operations[0].reason ?? "", /more than one/) },
   { name: "*CURLIB that cannot be resolved", script: "CL: DLTF FILE(*CURLIB/X)", stub: { curlib: null }, ops: ["unqualified X"], check: (r) => assert.match(r.notes.join(), /current library lookup failed/) },
   { name: "*CURLIB library parameter", script: "CL: CLRLIB LIB(*CURLIB)", stub: { curlib: "JDOE" }, ops: ["ddl lib JDOE"] },
+  {
+    name: "*CURLIB after CHGCURLIB earlier in the script is unqualified; before it, resolved",
+    script: "CL: CLRPFM FILE(*CURLIB/A)\nCL: CHGCURLIB LVORD\nCL: CLRPFM FILE(*CURLIB/ORDERS)",
+    stub: { curlib: "JDOE" },
+    stmts: [["write JDOE.A"], ["liblist lib LVORD"], ["unqualified ORDERS"]],
+    check: (r) => assert.equal(r.statements[2].operations[0].reason, "the script changes the current library; name the library"),
+  },
+  {
+    name: "*CURLIB after CHGLIBL CURLIB() earlier in the script is unqualified",
+    script: "CL: CHGLIBL LIBL(A) CURLIB(LVORD)\nCL: CLRPFM FILE(*CURLIB/ORDERS)",
+    stub: { curlib: "JDOE" },
+    stmts: [["liblist lib A", "liblist lib LVORD"], ["unqualified ORDERS"]],
+  },
+  {
+    name: "*CURLIB after CHGCURLIB through QCMDEXC is unqualified",
+    script: "CALL QSYS2.QCMDEXC('CHGCURLIB LVORD');\nCL: CLRPFM FILE(*CURLIB/ORDERS)",
+    stub: { curlib: "JDOE" },
+    stmts: [["liblist lib LVORD"], ["unqualified ORDERS"]],
+    check: (r) => assert.match(r.statements[1].operations[0].reason ?? "", /changes the current library/),
+  },
   { name: "a parameter naming another (*FROMLIB)", script: "CL: CRTDUPOBJ OBJ(X) FROMLIB(A) OBJTYPE(*FILE) TOLIB(*FROMLIB) NEWOBJ(Y)", ops: ["ddl lib A", "read lib A"] },
   { name: "copy reads one file and writes another", script: "CL: CPYF FROMFILE(LIVLIB/ORD) TOFILE(JDOE/ORD) MBROPT(*REPLACE)", ops: ["read LIVLIB.ORD", "write JDOE.ORD"] },
   { name: "library list values", script: "CL: CHGLIBL LIBL(A B C) CURLIB(D)", ops: ["liblist lib A", "liblist lib B", "liblist lib C", "liblist lib D"] },
@@ -1495,7 +1515,10 @@ test("lookups: recorded answers, failures included, replay as stated answers", a
   assert.deepEqual(again.statements.map((s) => sorted(s.operations)), live.statements.map((s) => sorted(s.operations)));
   const failed = recordLookups(lookups({ basesThrow: true, curlib: null }));
   await classify("DELETE FROM QTEMP.A;\nCL: CLRPFM FILE(*CURLIB/X)", { ...d4ctx(), lookups: failed.lookups });
-  assert.deepEqual(failed.answers, { bases: { "QTEMP.A": [] }, curlib: null });
+  assert.deepEqual(failed.answers, { bases: { "QTEMP.A": null }, curlib: null });
+  // A failed alias lookup fails closed again when replayed from the recorded answers.
+  const replayed = await classify("DELETE FROM QTEMP.A", { ...d4ctx(), lookups: statedLookups(failed.answers) });
+  assert.deepEqual(classes(replayed), ["write", "danger"]);
   assert.equal(await statedLookups({ schemas: {} }).systemSchema("constructor"), undefined, "own keys only");
 });
 

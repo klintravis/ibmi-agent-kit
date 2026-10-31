@@ -38,7 +38,12 @@ Classification SHALL produce one operation per object: `read`; `write` for data-
 ### Requirement: Aliases and views resolve to their base objects
 Before deciding, every changed object that is an alias or a view SHALL also be classed against
 each base table it resolves to, looked up on the box at decision time. An object that cannot be
-looked up SHALL keep only its own classification and the lookup failure SHALL be logged.
+looked up SHALL classify as `danger` naming the failed lookup, so the statement is denied in every
+mode rather than decided as the object alone.
+
+#### Scenario: Alias lookup fails
+- **WHEN** the base-table lookup for `QTEMP.A` errors and a statement writes through `QTEMP.A`
+- **THEN** the statement is denied with a message that the alias/view bases could not be resolved
 
 #### Scenario: Alias in QTEMP
 - **WHEN** a script runs `CREATE ALIAS QTEMP.A FOR LIVLIB.ORD` then `DELETE FROM QTEMP.A`
@@ -68,7 +73,10 @@ object plus every operation in its body.
 ### Requirement: Changed objects name their library
 Every changed object SHALL name its library, in SQL (`LIB.OBJ`) or system (`LIB/OBJ`) naming,
 case-insensitively with delimited names normalised. `*CURLIB` SHALL be resolved to the job's
-current library at decision time. Any other unqualified changed object, or `*LIBL`, SHALL
+current library at decision time, unless an earlier statement of the same script holds a
+`liblist` operation (directly or inside `QCMDEXC`/`RUNSQL`): then `*CURLIB` is not resolved and a
+change through it is `unqualified`, since the script may have changed the current library. Any
+other unqualified changed object, or `*LIBL`, SHALL
 classify as `unqualified`, which no rule can allow. Unqualified reads and unqualified calls
 (procedures, functions, CL `CALL PGM(X)` or `*LIBL/X`) keep their class and are in environment
 `unqualified`, so rules decide them.
@@ -80,6 +88,10 @@ classify as `unqualified`, which no rule can allow. Unqualified reads and unqual
 #### Scenario: Current library compile
 - **WHEN** a compile targets `*CURLIB` and the job's current library is `JDOE`
 - **THEN** it classifies as `compile` into `JDOE`
+
+#### Scenario: Current library changed earlier in the script
+- **WHEN** a script runs `CL: CHGCURLIB LVORD` then `CL: CLRPFM FILE(*CURLIB/ORDERS)`
+- **THEN** the clear classifies as `unqualified`, saying the script changes the current library
 
 #### Scenario: Unqualified call
 - **WHEN** a statement is `CALL MYPROC()` or a CL command is `CALL PGM(ORDVAL)`

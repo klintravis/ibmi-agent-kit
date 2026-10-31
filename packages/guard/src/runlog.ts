@@ -125,11 +125,12 @@ export function redact(text: string): string {
 // --- lookup answers ---
 
 // What the box answered while a script was classified: a schema's system name (null for none or
-// a failed lookup), an alias or view's base tables as "LIB.NAME" ([] for a table or a failed
-// lookup) and the current library (null when unknown). Policy test files state the same shape.
+// a failed lookup), an alias or view's base tables as "LIB.NAME" ([] for a table, null for a
+// failed lookup, which fails closed again on replay) and the current library (null when unknown).
+// Policy test files state the same shape.
 export interface Answers {
   schemas?: Record<string, string | null>;
-  bases?: Record<string, string[]>;
+  bases?: Record<string, string[] | null>;
   curlib?: string | null;
 }
 
@@ -139,11 +140,14 @@ const own = <T>(r: Record<string, T> | undefined, k: string): T | undefined => (
 export function statedLookups(a: Answers = {}): Lookups {
   return {
     systemSchema: async (schema) => own(a.schemas, schema) ?? undefined,
-    baseTables: async ({ lib, name }) =>
-      (own(a.bases, `${lib}.${name}`) ?? []).map((b) => {
+    baseTables: async ({ lib, name }) => {
+      const bases = own(a.bases, `${lib}.${name}`);
+      if (bases === null) throw new Error("the lookup failed when this was decided live");
+      return (bases ?? []).map((b) => {
         const dot = b.indexOf(".");
         return { lib: b.slice(0, dot), name: b.slice(dot + 1) };
-      }),
+      });
+    },
     currentLibrary: async () => a.curlib ?? undefined,
   };
 }
@@ -165,7 +169,7 @@ export function recordLookups(inner: Lookups): { lookups: Lookups; answers: Answ
     answers,
     lookups: {
       systemSchema: (schema) => keep(inner.systemSchema(schema), (v) => ((answers.schemas ??= {})[schema] = v ?? null)),
-      baseTables: (o) => keep(inner.baseTables(o), (v) => ((answers.bases ??= {})[`${o.lib}.${o.name}`] = (v ?? []).map((b) => `${b.lib}.${b.name}`))),
+      baseTables: (o) => keep(inner.baseTables(o), (v) => ((answers.bases ??= {})[`${o.lib}.${o.name}`] = v ? v.map((b) => `${b.lib}.${b.name}`) : null)),
       currentLibrary: () => keep(inner.currentLibrary(), (v) => (answers.curlib = v ?? null)),
     },
   };
