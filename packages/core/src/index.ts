@@ -59,7 +59,7 @@ export function listServers(): string[] {
 // trusts) or a guard. These come from the profile file only, so a registration's environment can
 // never lift a guard.
 const PROTECTED =
-  /^IBMI_(HOST|USER|PASSWORD|PARTITION|SQL_TRANSPORT|RESTRICTED|ALLOWED_CL|BLOCKED_CL|BLOCKED_TABLES|READ_ONLY|5250_TLS_INSECURE|MAPEPIRE_CA|MAPEPIRE_JAR|[A-Z0-9_]*_PORT)$/;
+  /^IBMI_(HOST|USER|PASSWORD|PARTITION|KIT_POLICY|SQL_TRANSPORT|RESTRICTED|ALLOWED_CL|BLOCKED_CL|BLOCKED_TABLES|READ_ONLY|5250_TLS_INSECURE|MAPEPIRE_CA|MAPEPIRE_JAR|[A-Z0-9_]*_PORT)$/;
 
 // Resolve a server name to the env map the engines' loadProfile() parses. The name is matched
 // exactly against the listed names before any file is read, so it never becomes part of a path.
