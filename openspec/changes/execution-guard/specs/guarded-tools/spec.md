@@ -2,77 +2,118 @@
 
 ## Purpose
 
-Puts the execution policy in front of every kit tool that changes or runs something on IBM i,
-and gives agents a way to run scripts and to ask what the policy would decide.
+Puts the execution policy in front of every kit entry point that reads, changes or runs something
+on IBM i, and gives agents a way to run scripts and to ask what the policy would decide.
 
 ## ADDED Requirements
 
-### Requirement: run_script checks every statement before running any
-`run_script` SHALL take a script of SQL statements and `CL:` commands and a `server`. It SHALL
-classify and decide every statement first; if any is denied, nothing SHALL be sent. Allowed
-statements SHALL run in order, stopping at the first failure, and the result SHALL give each
-statement's decision, outcome, rows affected or returned (bounded), and messages.
+### Requirement: run_script decides and confirms everything before running anything
+`run_script` SHALL take a script of SQL statements and `CL:` commands and a `server`, classify and
+decide every statement, and ask one confirmation covering every `confirm` operation, before
+sending any statement. Any deny or a declined confirmation SHALL send nothing. Statements SHALL run
+in order, stopping at the first failure, returning per statement its decision, outcome, rows
+affected, up to `maxRows` (default 100, at most 1000) rows returned, and messages.
 
 #### Scenario: One denied statement
 - **WHEN** a three-statement script's third statement is denied
 - **THEN** no statement runs, and the result names the denied statement and the rule or reason
 
+#### Scenario: Declined confirmation
+- **WHEN** statements 1 and 3 need confirmation and the user declines
+- **THEN** no statement runs
+
 #### Scenario: Failure stops the script
 - **WHEN** the second of three allowed statements fails on the IBM i
 - **THEN** the third is not sent, and the result shows the first succeeded and the second's error
 
+### Requirement: run_script respects the profile's own guards
+`run_script` SHALL refuse writes, DDL, compiles, calls and CL on a profile with `IBMI_READ_ONLY`,
+and SHALL refuse any statement touching a table in `IBMI_BLOCKED_TABLES`, in addition to the policy.
+
+#### Scenario: Read-only profile
+- **WHEN** `run_script` sends an `UPDATE` on a read-only profile that the policy allows
+- **THEN** it is refused naming `IBMI_READ_ONLY`
+
 ### Requirement: policy_check decides without running
-`policy_check` SHALL take a script and a `server` and return, for each statement, its classified
-operations with library, environment and class, the matching rule, and the decision, without
-sending any statement to run. It SHALL be annotated read-only.
+`policy_check` SHALL take a script (or, after `project-verbs`, a verb and arguments) and a
+`server`, and return per statement the classified operations with library, partition,
+environment and class, the matching rule, and the decision, sending only the lookups needed to
+decide. It SHALL be annotated read-only.
 
 #### Scenario: Explain a decision
 - **WHEN** `policy_check` is given `DELETE FROM INLIB1.ORD WHERE K = 1`
-- **THEN** it returns `write INLIB1.ORD`, the environment, the matching rule, and the decision
+- **THEN** it returns `write INLIB1.ORD`, its environment, the matching rule and the decision
 
 ### Requirement: Existing tools are decided before they act
-Before acting, `run_sql` SHALL be decided as reads of its objects; `upload_source_member` as a
-`write` to the member's library; `compile_member` as `compile` into its target library, and for
-an SQL-type member also as every statement in the member; CL typed by `screen_do` into a command
-line as that command. A denied call SHALL fail without contacting the IBM i for the action.
+Before acting: `run_sql`, `read_source_member` and `search_source` SHALL be decided as reads of
+their objects or library; `upload_source_member` as `write` to the member's library;
+`manage_library_list` changes as `liblist` on each library; `compile_member` from its final command
+string, plus the member's statements when the member type is SQL or the command is `RUNSQLSTM`, read
+at decision time. A denied call SHALL fail without the action reaching the IBM i.
 
-#### Scenario: Compile of an SQL member
-- **WHEN** `compile_member` is called for a member of type SQL that contains `DROP TABLE B.X`
-- **THEN** it is decided as `compile` plus `ddl B.X`, and denied if either is denied
+#### Scenario: Override target
+- **WHEN** `compile_member` is called with `targetLibrary: JDOE` and `command: "CRTBNDRPG PGM(LIVLIB/ORDVAL) …"`
+- **THEN** it is decided as `compile` into `LIVLIB`
 
-#### Scenario: Command line on a screen
-- **WHEN** `screen_do` types `CLRPFM FILE(B/X)` into a command line and the policy denies it
-- **THEN** nothing is typed and the result gives the reason
+#### Scenario: Blocked library source read
+- **WHEN** `read_source_member` targets a library in an environment the rules deny for `read`
+- **THEN** it fails and nothing is downloaded
+
+### Requirement: 5250 command lines are decided when sent
+Before the screen engine sends an AID key while the cursor's screen has a command line holding
+text, that text SHALL be decided as a CL command, so retrieved (F9) and edited commands are
+covered. `session_open` SHALL decide its `program` as `call` and its `library` as `liblist`.
+Keystrokes the engine sends itself (sign-on, recovery, sign-off) SHALL NOT be decided.
+
+#### Scenario: Retrieved command
+- **WHEN** `screen_do` presses F9 then Enter, and the retrieved command is denied
+- **THEN** Enter is not sent and the result gives the reason
+
+#### Scenario: Sign-on program
+- **WHEN** `session_open` is given `program: LIVLIB/ORDFIX` and the rules deny that call
+- **THEN** sign-on does not proceed and the result gives the reason
 
 ### Requirement: The engines' own checks still apply
-The policy SHALL be an additional check: `run_sql` stays select-only, screen restricted mode and
-the compile command checks stay in force. An operation SHALL run only if both the policy and the
-engine's own check allow it.
+An operation SHALL run only if both the policy and the engine's own check allow it.
 
 #### Scenario: Policy allows, engine refuses
 - **WHEN** the policy allows a command that screen restricted mode refuses
-- **THEN** the command is not typed and the result names restricted mode
+- **THEN** the command is not sent and the result names restricted mode
 
 ### Requirement: Confirm asks the user, never the agent
-A `confirm` decision SHALL ask the user through MCP elicitation, showing the server, partition,
-statement and its classified operations; only an explicit accept runs it, and only that
-statement. A client without elicitation support, a decline, a cancel or a timeout SHALL be
-treated as deny. No tool input SHALL be able to pre-approve a confirmation.
+A confirmation SHALL be an MCP elicitation showing the server, partition, and each operation
+(class, object, environment) before the comment-stripped statement text; it runs only on
+`action: accept` with `confirm: true`. Missing elicitation support, decline, cancel, or no answer
+within 120 seconds SHALL deny. No tool input SHALL pre-approve.
 
 #### Scenario: Client without elicitation
-- **WHEN** a statement needs confirmation and the client does not support elicitation
+- **WHEN** confirmation is needed, the client lacks elicitation and no fallback is set
 - **THEN** it is denied with a message saying confirmation is unavailable in this client
 
-#### Scenario: User accepts
-- **WHEN** the user accepts the confirmation
-- **THEN** that statement runs and the run log records the confirmation
+#### Scenario: Accepted with false
+- **WHEN** the client answers `accept` with `confirm: false`
+- **THEN** it is denied
+
+#### Scenario: Startup notice
+- **WHEN** the server connects to a client
+- **THEN** it logs to stderr whether confirmation is available
+
+### Requirement: An opt-in browser fallback for clients without elicitation
+If the policy sets `confirm_fallback: browser`, a client without elicitation SHALL instead get a
+one-time page on `127.0.0.1` that confirms only with its one-time token. The README SHALL state
+that this fallback is not proof against an agent that can make local HTTP requests.
+
+#### Scenario: Fallback page
+- **WHEN** confirmation is needed, the client lacks elicitation and the fallback is set
+- **THEN** the result gives a local URL, and the statement runs only after that page is confirmed
 
 ### Requirement: Limits are stated where users see them
-`policy_check` results, deny messages and the README SHALL state that the guard classifies the
-text it is given and does not see what called programs, triggers, menu options or prompted 5250
-fields do, and that IBM i authority remains the real boundary. Deny messages SHALL tell the agent
-not to look for another route to the same action.
+Deny messages, `policy_check` output and the README SHALL state that the guard classifies the text
+it is given, does not see what called programs, triggers, application menu options or prompted
+fields do, and that IBM i authority remains the real boundary. Deny messages SHALL tell the agent to
+ask the user rather than try another route. The README SHALL recommend client permission rules that
+stop the agent editing the policy file, profile files and verb folders.
 
 #### Scenario: Deny message
-- **WHEN** any statement is denied
+- **WHEN** any operation is denied
 - **THEN** the message names the reason and tells the agent to ask the user instead of retrying another way

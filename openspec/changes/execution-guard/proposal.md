@@ -5,29 +5,36 @@
 Developers, analysts and QA sign on with their own IBM i profiles, and agents write SQL and CL for
 them. Their authority usually allows far more than any one task needs: a developer can clear a
 file in an integration library as easily as in their own, and an agent that misreads a library
-name does real damage. The engines today guard only narrow cases (select-only `run_sql`, a
-command-line allowlist, destructive compile verbs). The kit needs one configurable guard that
-decides every statement from who is running it, which partition and library it touches, and what
-it does — and that says plainly that it catches mistakes, not a determined user.
+name does real damage. The engines guard only narrow cases today. The kit needs one configurable
+guard that decides every operation from who is running it, which partition and library it
+touches, and what it does — that a team can roll out in observe mode first, and that says plainly
+it catches mistakes, not a determined user.
 
 ## What Changes
 
-- New **execution policy**: a YAML file (`IBMI_KIT_POLICY`) maps the box to a **partition**,
-  libraries to **environments** (ordered patterns per partition), the signed-on user to a **role**
-  (from their IBM i group profiles), and decides each operation by an ordered list of **rules**
-  (role × partition × environment × class → allow | confirm | deny). Anything unmatched is denied.
-  A built-in default policy applies when none is configured.
-- New **statement classification** for SQL and CL: a tokenizer aware of string literals and
-  comments; per-object read/write classification; recursion into `QCMDEXC`, `SBMJOB CMD`,
-  `RUNSQL SQL`, `FINAL TABLE`, data-change CTEs and routine/trigger bodies; a closed CL command
-  table recording which parameters name a library; unknown commands are denied; writes must
-  name their library.
-- **Guarded tools**: the policy runs before `run_sql`, `upload_source_member`, `compile_member`
-  (including SQL members run by `RUNSQLSTM`), and CL typed on a 5250 command line by `screen_do`.
-- New tools `run_script` (run a script of SQL statements and CL commands, every statement checked
-  before the first is sent) and `policy_check` (classify and decide without running).
-- `confirm` decisions ask the user through MCP elicitation; a client without elicitation gets deny.
-- A local **run log** of every decision and outcome.
+- New **execution policy** (`IBMI_KIT_POLICY`): partitions identified from the box, ordered
+  library environments per partition, roles from IBM i group profiles, and ordered rules
+  (role × partition × environment × class → allow | confirm | deny), unmatched → deny.
+  `mode: observe` decides and logs without blocking; `mode: enforce` blocks. With no policy file a
+  built-in policy applies in observe mode, so installing the guard changes nothing until a team
+  opts in.
+- New **statement classification**: a literal- and comment-aware tokenizer; per-object read/write
+  classification; aliases and views resolved to their base tables; recursion into `QCMDEXC`,
+  `RUNSQL SQL`, `FINAL TABLE`, data-change CTEs and routine/trigger bodies; user functions classed
+  as calls; a closed CL command table naming each command's library parameters and, where needed,
+  the partition a target library belongs to; `SBMJOB`, unknown commands and commands qualified to a
+  non-IBM library are `danger`; `*CURLIB` resolved to the job's current library; other unqualified
+  changes refused.
+- **Guarded tools:** `run_sql`, `read_source_member`, `search_source`, `upload_source_member`,
+  `compile_member` (the final command string, and for SQL members or RUNSQLSTM the member's
+  statements read at decision time), `manage_library_list`, `session_open` sign-on fields, and every
+  key that sends a 5250 command line (including after F9 retrieve).
+- New tools `run_script` (SQL statements and CL commands, all decided — and all confirmations
+  asked — before the first is sent) and `policy_check` (decide without running).
+- **Confirmation:** one MCP elicitation per call listing every operation needing it; without
+  elicitation, deny — or, if the policy opts in, a local browser page, documented as not
+  agent-proof.
+- A local **run log** with secrets redacted.
 
 ### MCP tools added or changed
 
@@ -35,33 +42,32 @@ it does — and that says plainly that it catches mistakes, not a determined use
 |---|---|---|
 | `run_script` | destructive | new |
 | `policy_check` | read-only | new |
-| `run_sql` | read-only | also subject to the policy's read rules |
-| `upload_source_member` | destructive | decided as a write to the member's library |
-| `compile_member` | destructive | decided as a compile into the target library; SQL members also by their statements |
-| `screen_do` | destructive | CL typed on a command line also decided by the policy |
+| `run_sql`, `read_source_member`, `search_source` | read-only | decided as reads of their objects |
+| `upload_source_member`, `compile_member`, `manage_library_list` | destructive | decided before acting |
+| `session_open`, `screen_do` | destructive | sign-on program/menu/library and command lines decided |
 
 ## Out of scope
 
-- Stopping deliberate workarounds: programs that write once CALLed, triggers fired by allowed
-  writes, menu options and prompted fields on 5250 screens, dynamic SQL built at runtime.
-  These are stated limits, not features.
-- Custom verbs (change `project-verbs`); CI and service profiles; tamper-proof logging.
-- Any company's real libraries, partitions or vendor commands: the repo ships invented examples.
+- Stopping deliberate workarounds: what called programs and triggers do inside, menu options and
+  prompted fields on application screens, dynamic SQL built at runtime. Stated limits.
+- Verbs (`project-verbs`); CI service profiles; tamper-proof logging; a JDBC transport.
+- Any company's real libraries, partitions or vendor commands: examples are invented.
 
 ## Capabilities
 
 ### New Capabilities
-- `execution-policy`: the policy file, partitions, environments, roles, rules and decisions.
-- `statement-classification`: how SQL and CL text becomes classed operations on qualified objects.
-- `guarded-tools`: which tools are guarded, `run_script`, `policy_check`, and confirmation.
+- `execution-policy`: policy file, mode, partitions, environments, roles, rules, decisions.
+- `statement-classification`: how SQL and CL text becomes classed operations on objects.
+- `guarded-tools`: guarded entry points, `run_script`, `policy_check`, confirmation.
 - `run-log`: what is recorded about each decision and where.
 
 ### Modified Capabilities
-- None. (`unified-server` and `server-profiles` from change `unified-kit` are unchanged.)
+- None (`server-profiles`, `sql-transport` and `unified-server` from `unified-kit` are unchanged).
 
 ## Impact
 
-- New `packages/guard` (policy, classifier, command table, run log), used by `packages/server`.
-- `packages/screen` and `packages/source`: a guard hook at each tool entry point listed above;
-  the engines' existing checks remain as a second layer.
-- Depends on change `unified-kit` (server package, profile loader).
+- New `packages/guard` (pure: policy, classifier, command table, run log).
+- `packages/server`: decision context, `run_script`, `policy_check`, confirmation, guard hooks.
+- `packages/screen`: async guard hook before AID keys that send a command line; sign-on field
+  check; System-name read from the sign-on screen. `packages/source`: guard hook at each tool.
+- Depends on `unified-kit` (server, profile loader, transport `execute`/`cl`).

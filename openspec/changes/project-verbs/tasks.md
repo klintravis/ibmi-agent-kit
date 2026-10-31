@@ -1,23 +1,23 @@
 # Tasks
 
-## 1. Verb format and loading (verbs spec, design D1, D4)
+## 1. Verb format and loading (verbs spec; D1, D4)
 
-- [ ] 1.1 Add the verb zod schema, loader for `IBMI_KIT_VERBS` and `<policy dir>/verbs/`, layer addressing, duplicate and unknown-key refusal, cycle and depth checks to `packages/guard`; selfcheck rows for every load-time scenario with temp folders; verify `npm run check -w packages/guard` passes
-- [ ] 1.2 Implement parameter validation and substitution (`${p}` only for `allowed` or numeric/date types, CL quote doubling, `:p` → bound `?` markers in order); selfcheck: identifier parameter without `allowed` refused at load, value outside `allowed` refused, `x' or '1'='1` arrives as a bound value, CL string with a quote is escaped
+- [ ] 1.1 Add the verb zod schema and loader to `packages/guard`: three layer folders, `<cwd>/.ibmi-kit/verbs` auto-load, `IBMI_KIT_VERBS`, closest-layer resolution with overridden marks, same-layer duplicate refusal, unknown-key refusal, cycle and depth ≤ 5 checks; selfcheck rows with temp folders for every load-time scenario; verify `npm run check -w packages/guard` passes
+- [ ] 1.2 Implement parameter validation and substitution: types incl. boolean, `:p` → ordered bound markers, `${p}` only for `allowed` or validated numeric/date/boolean, quote doubling in CL literals, load-time refusal of a free-text string in `${}`; selfcheck: string `${env}` without `allowed` refused, value outside `allowed` refused, `x' or '1'='1` arrives as a bound value with the statement text unchanged
 
-## 2. Running verbs (design D2–D3)
+## 2. Running verbs (verbs spec; D2, D3)
 
-- [ ] 2.1 Implement the runner in `packages/server`: decide all statements first, then setup → steps → cleanup through the `run_script` executor, expectations (`equals`, `rows`, `empty`), cleanup only for succeeded setup ids, confirm decline as failure; selfcheck with a stub backend: denied step sends nothing, expectation mismatch reports expected and actual and stops steps, setup collision skips its cleanup, failed step still runs eligible cleanups and reports each
-- [ ] 2.2 Add `verb_list`, `verb_check` (read-only) and `verb_run`, `verb_test` (destructive) with structured content; selfcheck: an analyst-role context is refused a verb that writes a denied library, `verb_check` runs nothing, `verb_test` continues after a failure with correct passed/failed/skipped counts, and no tool writes verb files
+- [ ] 2.1 Implement the runner in `packages/server`: substitute and decide every statement incl. nested verbs, one gathered confirmation, then `requires_absent` → setup → steps → cleanup through the `run_script` executor; expectations (`equals`, `rows`, `empty`); cleanup only for succeeded setup ids; reset handling; selfcheck with a stub transport: denied step sends nothing, declined confirmation sends nothing, `requires_absent` hit runs neither setup nor cleanup, expectation mismatch reports expected and actual and stops steps, failed setup skips its cleanup, failed step runs eligible cleanups and reports each, reset fails the verb and retries cleanup on a new connection
+- [ ] 2.2 Add `verb_list` (read-only) and `verb_run` (destructive, `verb` or `tag`), and `verb`/`args` input on `policy_check`, with structured content; selfcheck: analyst context refused a verb writing a denied library, `policy_check` with a verb runs nothing, `tag` suite continues after a failure with correct counts and skips naming missing parameters, no tool writes verb files
 
 ## 3. Documentation and example
 
-- [ ] 3.1 Add `examples/verbs/SMOKE-SAMPLE.yaml` targeting the user's own PUB400 library (create table in setup, insert, expect, drop in cleanup) and a README "Verbs" section (format, `${}` vs `:p`, layers, cleanup rule, `verb_check` for review); verify the example loads in the guard selfcheck and the README example is byte-identical to the file
+- [ ] 3.1 Add `examples/verbs/SMOKE-SAMPLE.yaml` for the user's own PUB400 library (setup creates a table and inserts a row with `requires_absent`, an expectation, cleanup drops the table) and a README "Verbs" section (layers and override, `:p` vs `${p}`, `requires_absent`, cleanup rule, `policy_check` with a verb, suites by tag); verify the example loads in the guard selfcheck, the README example is byte-identical, and `scripts/check-names.mjs` reports no hits
 
 ## 4. Integration
 
-- [ ] 4.1 Root `npm run check` passes from a clean `dist`
-- [ ] 4.2 With a PUB400 profile, run `verb_check` and `verb_test smoke` on the sample through Claude Code and record the result in the PR; skip with a note if no account exists yet
+- [ ] 4.1 Root `npm run clean && npm run check` passes and the CI matrix is green after push
+- [ ] 4.2 With a PUB400 profile, run `policy_check` with the sample verb and `verb_run tag: smoke` through Claude Code and record results in the PR; skip with a note if no account exists yet
 
 ## Workflow follow-up
 

@@ -3,14 +3,14 @@
 ## Purpose
 
 Defines how the kit finds and loads the named IBM i server profiles a user signs on with, so a
-server name always means one file and one box.
+server name always means one file and one box, and no file's settings leak into another's.
 
 ## ADDED Requirements
 
 ### Requirement: Profiles are searched in a fixed order of folders
-Profiles SHALL be searched in `IBMI_KIT_CONFIG_DIR` (when set), then `~/.ibmi-agent-kit`, then
-`~/.ibm-i-servers`. A file named `.env` is the `default` server and `.env.<name>` is server
-`<name>`; `.env.example` is never a server.
+Profiles SHALL be searched in `IBMI_KIT_CONFIG_DIR` (or, when unset, `IBMI_MCP_CONFIG_DIR`), then
+`~/.ibmi-agent-kit`, then `~/.ibm-i-servers`. A file named `.env` is the `default` server and
+`.env.<name>` is server `<name>`; `.env.example` is never a server. No other folder is read.
 
 #### Scenario: Shared folder fallback
 - **WHEN** only `~/.ibm-i-servers/.env.pub400` exists
@@ -19,6 +19,10 @@ Profiles SHALL be searched in `IBMI_KIT_CONFIG_DIR` (when set), then `~/.ibmi-ag
 #### Scenario: Earlier folder wins
 - **WHEN** `.env.pub400` exists in both `~/.ibmi-agent-kit` and `~/.ibm-i-servers`
 - **THEN** the file in `~/.ibmi-agent-kit` is used
+
+#### Scenario: Old per-engine folder ignored
+- **WHEN** a profile exists only in `~/.ibm-i-5250-mcp`
+- **THEN** it is not listed, and the README migration notes say where to move it
 
 ### Requirement: A server name must exactly match a listed profile
 A `server` argument SHALL be accepted only if it equals, case-sensitively, a name `list_servers`
@@ -38,26 +42,33 @@ the error.
 - **THEN** the `default` profile is used, and the call fails naming the available servers if none exists
 
 ### Requirement: One file supplies a whole profile
-A profile SHALL be read from exactly one file. Values SHALL NOT be merged from other profile
-files or folders. Process environment variables MAY fill settings the file omits, except
-`IBMI_HOST`, `IBMI_USER` and `IBMI_PASSWORD`, which come from the file only; a value in the file
-always wins over the environment.
+A profile SHALL be read from exactly one file and SHALL NOT take values from other profile files.
+Loading profiles SHALL NOT change the process environment.
 
 #### Scenario: No password inheritance
-- **WHEN** `~/.ibmi-agent-kit/.env.dev` has a host and user but no password, and another file has a password
+- **WHEN** `.env.dev` has a host and user but no password, and another profile file has a password
 - **THEN** loading `dev` fails naming the missing `IBMI_PASSWORD`
 
-#### Scenario: Environment does not leak in
-- **WHEN** `IBMI_PASSWORD` is set in the process environment and `.env.dev` omits it
-- **THEN** loading `dev` fails naming the missing `IBMI_PASSWORD`
+#### Scenario: Default file does not leak
+- **WHEN** `.env` sets `IBMI_RESTRICTED=false` and `.env.prod` does not set it
+- **THEN** the `prod` profile uses the engine default (restricted on), not `false`
 
-#### Scenario: File beats environment
-- **WHEN** `.env.dev` sets `IBMI_READ_ONLY=true` and the process environment sets `IBMI_READ_ONLY=false`
-- **THEN** the `dev` profile is read-only
+### Requirement: Connection and safety settings come from the file only
+Settings that select the box, the credentials, the transport or any guard (host, user, password,
+ports, transport, restricted mode, allowed and blocked commands and tables, read-only) SHALL be
+read only from the profile file. Other settings MAY fall back to the process environment when
+the file omits them.
+
+#### Scenario: Environment cannot lift a guard
+- **WHEN** the process environment sets `IBMI_RESTRICTED=false` and `.env.dev` does not set it
+- **THEN** the `dev` profile has restricted mode on
+
+#### Scenario: Viewer setting from the registration
+- **WHEN** the process environment sets `IBMI_5250_VIEWER=true` and `.env.dev` does not set it
+- **THEN** the `dev` profile has the viewer enabled
 
 ### Requirement: Both engines read the same profiles
-The screen engine and the source engine SHALL resolve every server name through the same loader,
-so the same name selects the same file for 5250 and SQL work.
+The screen engine and the source engine SHALL resolve every server name through the same loader.
 
 #### Scenario: Same file for both
 - **WHEN** `session_open` and `run_sql` are both called with `server: pub400`
