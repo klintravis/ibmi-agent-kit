@@ -27,12 +27,12 @@
     "NOTICE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18.15"
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "check": "npm run build && node --test dist/selfcheck.js",
+    "check": "npm run build && node --test --test-reporter=dot dist/selfcheck.js",
     "prepack": "npm run build",
     "check:jar": "node scripts/check-jar.mjs"
   },

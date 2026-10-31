@@ -16,12 +16,12 @@
     "dist"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18.15"
   },
   "scripts": {
     "prebuild": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc",
-    "check": "npm run build && node --test dist/selfcheck.js"
+    "check": "npm run build && node --test --test-reporter=dot dist/selfcheck.js"
   },
   "license": "Apache-2.0",
   "dependencies": {
