@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): added the tools.js import-side-effect check; custom sign on screen tests.
+// Modified by ibmi-agent-kit (2026): added the tools.js import-side-effect check; custom sign on screen tests; execution guard hook tests (command line decided at the key, sign on program and library, System name).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -1287,9 +1287,9 @@ const commandEntry = () =>
 
 // A session over a fake host: open() paints the sign on capture, the key that signs on lands on a
 // command entry screen, and F9 writes `retrieve` onto its command line. Every record sent is kept.
-function fakeHost(o: { program?: string; retrieve?: string } = {}) {
+function fakeHost(o: { program?: string; retrieve?: string; restricted?: boolean } = {}) {
   const profile = loadProfile({
-    IBMI_HOST: "h", IBMI_USER: "MYUSER", IBMI_PASSWORD: "S3CRET", IBMI_RESTRICTED: "false", IBMI_5250_TERMINAL: "IBM-3179-2",
+    IBMI_HOST: "h", IBMI_USER: "MYUSER", IBMI_PASSWORD: "S3CRET", IBMI_RESTRICTED: String(o.restricted ?? false), IBMI_5250_TERMINAL: "IBM-3179-2",
     ...(o.program ? { IBMI_5250_PROGRAM: o.program } : {}),
   });
   const s = new Session(profile);
@@ -1309,8 +1309,9 @@ function fakeHost(o: { program?: string; retrieve?: string } = {}) {
   return { s, sent };
 }
 
-// The screen tools on a fake host, with a guard that records every call and denies what `deny` matches.
-async function guardedScreen(o: { program?: string; retrieve?: string; deny?: RegExp } = {}) {
+// The screen tools on a fake host, with a guard that records every call and denies what `deny`
+// matches; `during` runs while the guard decides (a confirmation's wait, say).
+async function guardedScreen(o: { program?: string; retrieve?: string; restricted?: boolean; deny?: RegExp; during?: (s: Session) => void } = {}) {
   const host = fakeHost(o);
   const calls: { tool: string; input: Record<string, unknown>; server: string; outcome?: string }[] = [];
   const mcp = new McpServer({ name: "t", version: "0" });
@@ -1320,6 +1321,7 @@ async function guardedScreen(o: { program?: string; retrieve?: string; deny?: Re
     guard: async (tool, input, server) => {
       const call: (typeof calls)[number] = { tool, input, server };
       calls.push(call);
+      o.during?.(host.s);
       if (o.deny?.test(JSON.stringify(input))) throw new Error(`Denied, ${tool} did nothing: rule 1 denies it`);
       return (outcome) => void (call.outcome = outcome);
     },
@@ -1352,6 +1354,46 @@ test("6.2: F9 then Enter decides the command the line holds at the key, so a den
     assert.equal((await k.call("screen_do", { actions: ["key: F3"] })).error, false);
     assert.equal(k.calls.length, 2);
     assert.equal(k.sent.length, 3);
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.2: restricted mode still applies to a command F9 brought back, though the guard allows it", async () => {
+  const k = await guardedScreen({ restricted: true, retrieve: "DLTLIB X" });
+  try {
+    assert.equal((await k.call("session_open", {})).error, false);
+    const r = await k.call("screen_do", { actions: ["type f1: DSPLIBL", "key: F9", "key: Enter"] });
+    assert.equal(r.error, true);
+    assert.match(r.text, /"key: Enter" failed: restricted mode: "dltlib" is not on the allowlist/);
+    assert.equal(k.sent.length, 2, "F9 went out, Enter did not");
+    assert.deepEqual(k.calls.map((c) => c.input.commands), [["DSPLIBL"]], "the engine refused before the guard was asked");
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.2: a menu option typed on a ===> line is not a command, so it is not decided", async () => {
+  const k = await guardedScreen({ deny: /./ });
+  try {
+    assert.equal((await k.call("session_open", {})).error, false);
+    assert.equal((await k.call("screen_do", { actions: ["type f1: 1", "key: Enter"] })).error, false);
+    assert.equal(k.sent.length, 2);
+    assert.deepEqual(k.calls, []);
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.2: a command line that changes while the guard decides it sends nothing", async () => {
+  const k = await guardedScreen({ during: (s) => s.screen.typeInto(s.screen.fields[0], "DLTLIB X", enc) });
+  try {
+    assert.equal((await k.call("session_open", {})).error, false);
+    const r = await k.call("screen_do", { actions: ["type f1: DSPLIBL", "key: Enter"] });
+    assert.equal(r.error, true);
+    assert.match(r.text, /the command line changed while it was being decided, so nothing was sent/);
+    assert.equal(k.sent.length, 1, "only the sign on Enter");
+    assert.deepEqual(k.calls.map((c) => [c.input.commands, c.outcome]), [[["DSPLIBL"], "not sent: the command line changed while it was decided"]]);
   } finally {
     await k.close();
   }

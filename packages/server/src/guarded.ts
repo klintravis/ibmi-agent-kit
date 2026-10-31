@@ -96,6 +96,19 @@ export function sqlLookups(conn: Conn): Lookups {
   };
 }
 
+// A 5250 command line runs in the 5250 job, whose current library and QTEMP the SQL job cannot
+// see: *CURLIB is unqualified and a write through a QTEMP alias or view is danger.
+function screenLookups(sql: Lookups): Lookups {
+  return {
+    ...sql,
+    currentLibrary: async () => undefined,
+    baseTables: async (o) => {
+      if (o.lib === "QTEMP") throw new Error("the 5250 job's QTEMP is not visible to the guard");
+      return sql.baseTables(o);
+    },
+  };
+}
+
 // After a confirmation, whose wait may be long: a *CURLIB decided before it must still be the
 // current library. Why not, or undefined when it was not looked up or has not changed.
 export async function curlibMoved(conn: Conn, answers: Answers): Promise<string | undefined> {
@@ -112,7 +125,12 @@ interface Box {
   groups?: string[]; // absent: USER_INFO had no row or failed, so roles fall back to default_role
   authlists?: string[];
   notes: string[];
+  failed?: boolean; // the identity lookup failed: asked again after IDENTITY_RETRY_MS
 }
+
+// A failed identity lookup is not asked again on every key press: a dead SQL port can cost a
+// connect timeout each time.
+const IDENTITY_RETRY_MS = 60_000;
 
 // SUPPLEMENTAL_GROUP_LIST: ten-character slots (a full name runs into the next, the last may be
 // trimmed), read as slots only when every padded slot is one name; otherwise blank-separated
@@ -122,10 +140,17 @@ export function supplementalGroups(list: string): string[] {
   return (slots.every((s) => /^\S+ *$/.test(s)) ? slots : list.split(/\s+/)).map((s) => s.trim()).filter(Boolean);
 }
 
-// These lookups are the kit's own and are not decided. Only the first failing is fatal: without
-// the user nothing can be decided.
+// These lookups are the kit's own and are not decided. When the first fails (a 5250-only profile
+// with no working SQL connection, say), the profile's user decides with default_role (owner ruling
+// 2026-10-31) and `failed` is set; danger and unqualified are denied in every mode regardless.
 async function readBox(conn: Conn): Promise<Box> {
-  const [me] = (await conn.query("SELECT CURRENT SERVER AS RDB, CURRENT USER AS USR FROM SYSIBM.SYSDUMMY1")).rows;
+  let me: Record<string, unknown> | undefined;
+  try {
+    [me] = (await conn.query("SELECT CURRENT SERVER AS RDB, CURRENT USER AS USR FROM SYSIBM.SYSDUMMY1")).rows;
+  } catch (e) {
+    const user = conn.profile.user.toUpperCase();
+    return { user, failed: true, notes: [`identity lookup failed, so ${user} from the profile decides with default_role: ${(e as Error).message}`] };
+  }
   const box: Box = { user: (str(me?.USR) || conn.profile.user).toUpperCase(), notes: [] };
   if (str(me?.RDB)) box.rdb = str(me?.RDB).toUpperCase();
   try {
@@ -235,6 +260,8 @@ const toolStatement = (text: string, operations: Operation[]): ToolStatement => 
 // are then decided themselves. The command table keeps it danger everywhere else.
 const RUNSQLSTM_READ: CommandEntry = { class: "read", positional: ["SRCFILE", "SRCMBR"], params: { SRCFILE: "object" } };
 const MEMBER = /^[A-Z#$@][A-Z0-9#$@_.]{0,9}$/;
+// compile_member's read of the member whose statements it decides, decided before it is fetched.
+const memberRead = (m: MemberRef): Operation => ({ class: "read", object: { lib: m.library, name: m.sourceFile }, source: "sql" });
 
 // What an engine tool call does, as statements (run_sql, compile_member's final command and member
 // statements) or as the operations it builds (the rest). Names go through the engine's own
@@ -244,7 +271,7 @@ export async function toolStatements(
   input: Record<string, unknown>,
   policy: Policy,
   lookups: Lookups,
-  memberText: (ref: MemberRef) => Promise<string>,
+  memberText: (ref: MemberRef) => Promise<string | undefined>, // undefined: its read is denied, not fetched
 ): Promise<{ statements: (ClassifiedStatement | ToolStatement)[]; notes: string[] }> {
   const name = (v: unknown, what: string) => validName(String(v ?? ""), what);
   const ctx = { lookups, commands: policy.commands, rdbs: policy.rdbs };
@@ -275,7 +302,8 @@ export async function toolStatements(
       return { statements: c.statements, notes: c.notes };
     }
     case "screen_command": {
-      // A 5250 command line runs one command: each is decided, and logged, as a CL line.
+      // A 5250 command line runs one command: each is decided, and logged, as a CL line, with
+      // the 5250 job's lookups (screenLookups, applied by the caller so the run log keeps them).
       const statements: ClassifiedStatement[] = [];
       const notes: string[] = [];
       for (const command of (input.commands as unknown[] | undefined) ?? []) {
@@ -316,7 +344,8 @@ export async function toolStatements(
       const statements: (ClassifiedStatement | ToolStatement)[] = [];
       let member: MemberRef | undefined;
       const parsed = parseCl(stripClComments(command).text);
-      if (!("error" in parsed) && parsed.name === "RUNSQLSTM") {
+      const runsqlstm = !("error" in parsed) && parsed.name === "RUNSQLSTM";
+      if (runsqlstm) {
         const c = await classify(`CL: ${command}`, { ...ctx, commands: { ...policy.commands, RUNSQLSTM: RUNSQLSTM_READ } });
         notes.push(...c.notes);
         const ops = c.operations;
@@ -334,15 +363,20 @@ export async function toolStatements(
         if (String(input.type ?? "").toLowerCase() === "sql") member = { library: name(input.library, "library"), sourceFile: name(input.sourceFile, "sourceFile"), member: name(input.member, "member") };
       }
       if (member) {
-        let text: string;
+        let text: string | undefined;
         try {
           text = await memberText(member);
         } catch (e) {
           throw new Error(`refused: cannot read ${member.library}/${member.sourceFile}(${member.member}) to decide its statements: ${(e as Error).message}`);
         }
-        const c = await classify(text, ctx);
-        notes.push(...c.notes);
-        statements.push(...c.statements);
+        if (text !== undefined) {
+          const c = await classify(text, ctx);
+          notes.push(...c.notes);
+          statements.push(...c.statements);
+        } else if (!runsqlstm) {
+          // Not fetched because its read is denied: RUNSQLSTM's own read of SRCFILE says so, else this.
+          statements.push(toolStatement(`read ${member.library}/${member.sourceFile}(${member.member})`, [memberRead(member)]));
+        }
       }
       return { statements, notes };
     }
@@ -360,9 +394,10 @@ export function registerGuarded(
   async function identityOf(server: string, conn: Conn, policy: Policy): Promise<{ identity: Identity; names: PartitionNames; notes: string[] }> {
     let p = boxes.get(server);
     if (!p) {
-      p = readBox(conn);
-      boxes.set(server, p);
-      p.catch(() => boxes.get(server) === p && boxes.delete(server)); // a failed connection is asked again next call
+      const read = (p = readBox(conn));
+      boxes.set(server, read);
+      const drop = () => boxes.get(server) === read && boxes.delete(server);
+      void read.then((b) => b.failed && setTimeout(drop, IDENTITY_RETRY_MS).unref(), drop); // a throw is asked again next call
     }
     const box = await p;
     const names: PartitionNames = {};
@@ -484,8 +519,11 @@ export function registerGuarded(
     const { policy, runLog } = deps.policyFor(s);
     const conn = deps.conn(s);
     const who = await identityOf(s, conn, policy);
-    const { lookups, answers } = recordLookups(sqlLookups(conn));
-    const { statements, notes } = await toolStatements(tool, input, policy, lookups, (ref) => deps.memberText(s, ref));
+    const screen = tool === "screen_command";
+    const { lookups, answers } = recordLookups(screen ? screenLookups(sqlLookups(conn)) : sqlLookups(conn));
+    // A member in a library the policy denies reading is never fetched, so its text reaches no message.
+    const memberText = async (ref: MemberRef) => (decide([memberRead(ref)], who.identity, policy).effective === "deny" ? undefined : deps.memberText(s, ref));
+    const { statements, notes } = await toolStatements(tool, input, policy, lookups, memberText);
     const planned = statements.map((statement) => ({ statement, decision: decide(statement.operations, who.identity, policy) }));
     const record = (outcome: (p: (typeof planned)[number]) => string, confirmed?: boolean) =>
       runLog.record({
@@ -507,7 +545,8 @@ export function registerGuarded(
     const needs = planned.filter((p) => p.decision.effective === "confirm");
     if (needs.length) {
       const no = await confirm(s, who.identity, needs.map((p, i) => ({ label: `${tool}${needs.length > 1 ? ` ${i + 1}` : ""}`, decision: p.decision, display: p.statement.display })));
-      const stop = no ?? (await curlibMoved(conn, answers));
+      // The SQL job's current library says nothing about the 5250 job's.
+    const stop = no ?? (screen ? undefined : await curlibMoved(conn, answers));
       if (stop) {
         record(() => `not sent: ${stop}`, no === undefined);
         throw new Error(`Denied, ${tool} did nothing: ${stop}.\n${ASK}\n${LIMITS}`);

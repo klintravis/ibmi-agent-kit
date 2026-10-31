@@ -108,6 +108,17 @@ SQL connection: `CURRENT SERVER`; `QSYS2.USER_INFO` (group, supplemental groups)
 `QSYS2.AUTHORIZATION_LIST_USER_INFO` for `CURRENT USER` (internal, not decided). 5250 session: the
 sign-on screen's `System . . . :` field. `systems:` matches the System name, `rdbs:` the RDB name;
 both and any `IBMI_PARTITION` must map to one partition. Cached per server.
+- *Identity lookup fails (owner ruling, 2026-10-31):* e.g. a 5250-only profile with no working SQL
+  connection. The profile's user decides with no groups or authorization lists, so with
+  `default_role` unless a `users:` role names them; the run-log line's `notes` say the lookup
+  failed, and decisions go on as usual (danger and unqualified stay denied everywhere). Shared by
+  source, 5250 and `run_script`. The fallback is kept for a minute before the lookup is tried
+  again, so a dead SQL port does not cost a connect timeout on every key press.
+- *5250 command lines run in the 5250 job,* whose current library and QTEMP the SQL job cannot see:
+  `screen_command` classifies with no current library (`*CURLIB` is unqualified) and a QTEMP
+  alias/view lookup that fails (a write through it is danger). Restricted mode and
+  `IBMI_BLOCKED_CL` run on the text read at the key, before the guard; digits-only values (menu
+  options) are not command text.
 
 ### D6. Screen hook before AID keys
 `Session.pressKey(key, reporter, { guarded })`: when `guarded` (set by the tool layer, never by the
@@ -135,7 +146,7 @@ text; each line also stores the identity and the lookup answers used, so it can 
   `decide` under the candidate, skipping `classify`. Tools with text (`run_sql`, `compile_member`'s
   final command, 5250 command lines) log their text as `sql` or `cl` and replay like `run_script`.
 - *Server context (D5):* the System name comes from the screen engine once a session read it;
-  identity and RDB are read once per server over SQL and not cached when that fails; the profile's
+  identity and RDB are read once per server over SQL, a failure falling back as in D5; the profile's
   password is passed as the run log's `secret`, and `names` (System, RDB, `IBMI_PARTITION`) are
   logged so replay re-detects the partition. `IBMI_PARTITION` and `IBMI_KIT_POLICY` are
   profile-only (core `PROTECTED`), so a registration's environment can neither pick nor drop the

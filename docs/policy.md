@@ -80,7 +80,7 @@ roles:
 default_role: analyst
 ```
 
-A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match.
+A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match. If the identity lookup itself fails (a profile with no working SQL connection, as a 5250-only one may be), the profile's user is decided the same way with no groups, so usually as `default_role`; the run log notes the failure, it is tried again after a minute, and `danger` and `unqualified` stay denied in every mode.
 
 ### Rules
 
@@ -209,5 +209,4 @@ See [Run log in the guard README](../packages/guard/README.md#run-log). It is a 
 - The guard sees the text it is given: not what a called program, trigger, menu option or prompted field does, and not options typed on a list screen.
 - A decision is made against the job as it was when the script was planned; a job lost or reset in between refuses the send.
 - Not yet verified on a live IBM i: the catalog lookups and the supplemental-group format.
-- 5250: only the command line is decided, when a key that sends field data (not F3, F12, Clear or Attn) is pressed; F4 (prompt) with a command on the line is always denied, like `?`; `session_open`'s `menu` is not decided; the screen engine's restricted mode checks typed text only, so a command brought back with F9 meets only the guard.
-- `compile_member` with no `targetLibrary` compiles into `*CURLIB`, decided as the job's current library; with none, it is denied as unqualified.
+- 5250: only the command line is decided, when a key that sends field data (not F3, F12, Clear or Attn) is pressed; F4 (prompt) with a command on the line is always denied, like `?`; `session_open`'s `menu` is not decided; the screen engine's restricted mode and `IBMI_BLOCKED_CL` also check what the line holds at the key, so a command brought back with F9 meets both them and the guard. A menu option (digits only) on a `===>` line is not decided; other text there that is not a command is denied. The guard cannot see the 5250 job, so on a command line `*CURLIB` is unqualified and a write through an alias or view in `QTEMP` is denied.- `compile_member` with no `targetLibrary` compiles into `*CURLIB`, decided as the job's current library; with none, it is denied as unqualified.

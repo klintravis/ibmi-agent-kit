@@ -136,6 +136,11 @@ every role whose sources match, or `default_role` if none match or the lookup fa
 - **WHEN** the identity lookup returns no row
 - **THEN** the user holds `default_role` and the run log records why
 
+#### Scenario: No working SQL connection
+- **WHEN** the identity lookup itself fails, as on a 5250-only profile
+- **THEN** the profile's user is decided with `default_role`, the run log records that the lookup
+  failed, and `danger` and `unqualified` are still denied
+
 ### Requirement: Ordered rules decide each operation, defaulting to deny
 Each operation SHALL be decided by the first rule whose `roles` (any held role), `partition`,
 `env` and `classes` all match; an omitted key or the word `any` matches anything. A rule's

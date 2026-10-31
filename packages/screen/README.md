@@ -279,7 +279,7 @@ it like any tool that can act on the box.
   it would type decided before signing on. A deny sends nothing. Sign-on, recovery and sign-off
   keys the server sends itself are not decided. The standalone `ibmi-agent-kit-screen` bin has no
   guard. Restricted mode checks text as it is typed, so in the standalone bin a command retrieved
-  with F9 is not checked. See the [root README](../../README.md#safety).
+  with F9 is not checked; in the kit server it is checked again at the key, before the guard. See the [root README](../../README.md#safety).
 - **Password masking.** Anything the screen hides while you type it stays hidden. Your password never
   shows up in what the assistant reads, in the live view, or in the logs.
 - **The live view.** A non interactive page, served on 127.0.0.1 only, gated by a token that is new

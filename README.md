@@ -144,9 +144,13 @@ values are typed later on a screen with no command line, where the guard does no
 `session_open` reads the sign-on screen's System name (which then places the box in its partition),
 then decides its `program` (or the profile's `IBMI_5250_PROGRAM`) as a `call` and its `library` (or
 `IBMI_5250_CURLIB`) as `liblist` before typing them; a deny signs nothing on. `menu` is not
-decided. The session's own sign-on, recovery and sign-off keys are never decided. Each decision
-reads the user's identity over SQL, so when the profile's SQL connection fails, a key sent with a
-command on the line, or a sign-on with a program or library, is refused.
+decided. The session's own sign-on, recovery and sign-off keys are never decided. A command line
+runs in the 5250 job, which the guard cannot see into, so there `*CURLIB` is decided as
+unqualified and a write through an alias or view in `QTEMP` is denied. A menu option (digits only)
+typed on a `===>` line is not decided; any other text there that is not a command is denied. Each
+decision reads the user's identity over SQL; when that lookup fails (a profile with no working SQL
+connection, say), the profile's user decides with `default_role`, the run log says the lookup
+failed, and it is tried again after a minute.
 These decisions, and those of `run_script` and `verb_run`, go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
 [docs/policy.md](docs/policy.md) for the policy file, and [docs/verbs.md](docs/verbs.md) for verbs.
 
@@ -155,8 +159,8 @@ triggers do, nor menu options, prompted fields or options typed on a list screen
 remains the real boundary. The source tools also use `IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES` and
 `IBMI_BLOCKED_CL` (compile commands only). The 5250 tools also use `IBMI_RESTRICTED` (an allowlist, on by default), `IBMI_ALLOWED_CL` and
 `IBMI_BLOCKED_CL` (the last applies only when restricted is off); they ignore `IBMI_READ_ONLY`.
-Those three check text as it is typed into a command line, so a command brought back with F9 meets
-only the guard.
+Those three check text as it is typed into a command line and again, before the guard, on what the
+line holds when the key is pressed, so a command brought back with F9 meets both.
 The guard's catalog lookups have not yet been verified on a live IBM i.
 
 ## Words

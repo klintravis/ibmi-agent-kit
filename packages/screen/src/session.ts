@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery; pressKey takes an optional `guarded` check of the command line before the key is sent; the sign on screen's System name is read.
+// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery; pressKey takes an optional `guarded` check of the command line before the key is sent, after the engine's own command check on the same text; the sign on screen's System name is read.
 // One 5250 session: transport, screen, and settle logic. The host says it is done twice, by
 // unlocking the keyboard and then definitively by sending a read command, so nothing here polls.
 
@@ -260,15 +260,17 @@ export class Session extends EventEmitter {
   // What the command lines hold now, typed or retrieved by the host (F9), is what the key sends.
   // Read again after the guard, which may wait on a confirmation: only what was decided is sent.
   // F4 prompts the command, whose values are typed later on a screen with no command line: it is
-  // decided as `?command`, which the guard refuses like any prompted command.
+  // decided as `?command`, which the guard refuses like any prompted command. The engine's own
+  // check (restricted mode, IBMI_BLOCKED_CL) runs first, on the same text: typeInto never saw F9's.
   private async decideCommandLine(guarded: CommandGuard, prompt: boolean): Promise<((outcome: string) => void) | undefined> {
     const read = () =>
       this.commandLineCandidates()
         .filter((f) => !isNondisplay(f.attr)) // a passphrase is never decided, nor logged
         .map((f) => this.screen.valueOf(f).trim())
-        .filter(Boolean);
+        .filter((v) => v && !/^\d+$/.test(v)); // a menu option typed on a ===> line, not a command
     const commands = read();
     if (!commands.length) return undefined;
+    for (const c of commands) assertCommandAllowed(c, { restricted: this.profile.restricted, allowedCl: this.profile.allowedCl, blockedCl: this.profile.blockedCl });
     const done = (await guarded(prompt ? commands.map((c) => `?${c}`) : commands)) || undefined;
     if (read().join("\n") !== commands.join("\n")) {
       done?.("not sent: the command line changed while it was decided");

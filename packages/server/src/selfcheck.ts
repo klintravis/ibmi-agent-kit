@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, LATEST_PROTOCOL_VERSION, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
-import { builtinPolicy, classify, decide, loadPolicy, parsePolicy, recordLookups, runLogLines, statedLookups, type Policy } from "@ibmi-agent-kit/guard";
+import { builtinPolicy, classify, decide, loadPolicy, parsePolicy, recordLookups, replayRunLog, runLogLines, statedLookups, type Policy } from "@ibmi-agent-kit/guard";
 import { MapepireBackend } from "@ibmi-agent-kit/source/tools";
 import { Session } from "@ibmi-agent-kit/screen/tools";
 import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js";
@@ -310,12 +310,13 @@ type Row = Record<string, unknown>;
 // A box: answers the guard's own queries, records every script statement that reaches it. Like the
 // backend, a send checks the job generation after connecting and before sending.
 function stubConn(
-  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string; member?: string[] } = {},
+  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string; member?: string[]; identityThrows?: boolean } = {},
 ) {
   const sent: string[] = [];
   const queries: string[] = [];
   let curlibAsked = 0;
   const own = (sql: string): Row[] | undefined => {
+    if (sql.startsWith("SELECT CURRENT SERVER") && o.identityThrows) throw new Error("connect ECONNREFUSED box:8076");
     if (sql.startsWith("SELECT CURRENT SERVER")) return [{ RDB: o.rdb ?? "DEVRDB", USR: o.user ?? "JDOE" }];
     if (sql.includes("QSYS2.USER_INFO")) return o.userInfo === null ? [] : [o.userInfo ?? { G: "GRPDEV", S: "" }];
     if (sql.includes("AUTHORIZATION_LIST_USER_INFO")) return (o.authlists ?? []).map((a) => ({ A: a }));
@@ -764,8 +765,8 @@ test("5.1: each profile's IBMI_KIT_POLICY is loaded at startup; a missing one re
 
 // The source engine over the stub box: its tools' sends land in stub.sent, the guard's own
 // identity and catalog lookups in stub.queries.
-async function sourceKit(o: { policy?: Policy; member?: string[]; elicit?: (req: any) => Promise<ElicitResult> } = {}) {
-  const stub = stubConn({ member: o.member });
+async function sourceKit(o: { policy?: Policy; member?: string[]; curlib?: string[]; elicit?: (req: any) => Promise<ElicitResult> } = {}) {
+  const stub = stubConn({ member: o.member, curlib: o.curlib });
   const localDir = mkdtempSync(join(tmpdir(), "kit-src-"));
   const transport = {
     connect: async () => {},
@@ -887,6 +888,27 @@ test("6.1: an SQL member compiled with RUNSQLSTM is decided by its statements, r
   }
 });
 
+test("6.1: an SQL member in a library the policy denies reading is never fetched, and its text is in no message", async () => {
+  const k = await sourceKit({ member: ["DELETE FROM PAYLIB.SALARY;"] });
+  try {
+    const r = await k.call("compile_member", { library: "PAYLIB", sourceFile: "QSQLSRC", member: "SETUP", type: "SQL", targetLibrary: "JDOE" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /rule 2 denies read PAYLIB\.QSQLSRC/);
+    assert.doesNotMatch(r.text, /SALARY/);
+    assert.deepEqual(k.stub.sent, [], "the member was not read");
+    assert.doesNotMatch(JSON.stringify(k.log()), /SALARY/);
+    // With a command that reads no SRCFILE itself, the member's read is decided on its own line.
+    const own = await k.call("compile_member", { library: "PAYLIB", sourceFile: "QSQLSRC", member: "SETUP", type: "SQL", command: "CRTSQLRPGI OBJ(JDOE/SETUP) SRCFILE(JDOE/QSQLSRC) SRCMBR(SETUP)" });
+    assert.equal(own.error, true);
+    assert.doesNotMatch(own.text, /SALARY/);
+    assert.deepEqual(k.stub.sent, []);
+    const read = k.log().at(-1);
+    assert.deepEqual([read.kind, read.text, read.effective], ["tool", "read PAYLIB/QSQLSRC(SETUP)", "deny"]);
+  } finally {
+    await k.close();
+  }
+});
+
 test("6.1: a source tool whose write a rule asks to confirm sends nothing when declined", async () => {
   const k = await sourceKit({ policy: CONFIRM_POLICY, elicit: async () => ({ action: "decline" }) });
   try {
@@ -897,6 +919,23 @@ test("6.1: a source tool whose write a rule asks to confirm sends nothing when d
     assert.deepEqual([k.log()[0].confirmed, k.log()[0].outcome], [false, "not sent: the user chose decline"]);
   } finally {
     await k.close();
+  }
+  // Accepted with confirm: true it runs, logged confirmed; a *CURLIB that moved while confirming stops it.
+  const policy = parsePolicy("version: 1\nmode: enforce\nrules:\n  - { classes: [danger], decision: deny }\n  - { classes: [write, compile], decision: confirm }\n  - { decision: allow }\n", "confirm.yaml");
+  const ok = await sourceKit({ policy, curlib: ["JDOE", "OTHER"], elicit: async () => ({ action: "accept", content: { confirm: true } }) });
+  try {
+    const r = await ok.call("upload_source_member", { library: "JDOE", sourceFile: "QRPGLESRC", member: "ORDVAL", content: "x", create: true, memberType: "RPGLE" });
+    assert.equal(r.error, false, r.text);
+    assert.ok(ok.stub.sent.length > 0);
+    assert.deepEqual([ok.log()[0].confirmed, ok.log()[0].outcome], [true, "ok"]);
+    const sent = ok.stub.sent.length;
+    const moved = await ok.call("compile_member", ORDVAL); // into *CURLIB, JDOE when decided
+    assert.equal(moved.error, true);
+    assert.match(moved.text, /current library changed from JDOE to OTHER while confirming/);
+    assert.equal(ok.stub.sent.length, sent);
+    assert.deepEqual([ok.log()[1].confirmed, ok.log()[1].outcome], [true, "not sent: the current library changed from JDOE to OTHER while confirming"]);
+  } finally {
+    await ok.close();
   }
 });
 
@@ -979,6 +1018,54 @@ test("6.2: a 5250 command line is decided as CL when the key is pressed; a denie
     await k.call("session_close", {});
     assert.equal(host.sent.length, 3);
     assert.equal(k.log().length, 3);
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.2: a 5250 command line is decided against the 5250 job: *CURLIB is unqualified and QTEMP's aliases are unseen", async () => {
+  const host = fakeScreen();
+  const k = await guardedKit({ policy: d4With("DEVBOX"), stub: stubConn({ curlib: ["JDOE"] }), screen: () => host.s });
+  try {
+    assert.equal((await k.call("session_open", {})).error, false);
+    assert.equal((await k.call("screen_do", { actions: ["type f1: CHGCURLIB LVORD", "key: Enter"] })).error, false);
+    // The SQL job's current library is JDOE, where dev may write; the 5250 job's is now LVORD.
+    const clr = await k.call("screen_do", { actions: ["type f1: CLRPFM FILE(*CURLIB/ORDERS)", "key: Enter"] });
+    assert.equal(clr.error, true);
+    assert.match(clr.text, /Denied, screen_command did nothing:\n  CLRPFM FILE\(\*CURLIB\/ORDERS\): /);
+    assert.equal(host.sent.length, 2, "CLRPFM never went out");
+    assert.ok(!k.stub.queries.some((q) => q.includes("LIBRARY_LIST_INFO")), "the SQL job's current library is not asked");
+    // An alias made in the 5250 job's QTEMP cannot be seen through, so a write through it is danger.
+    assert.equal((await k.call("screen_do", { actions: ["type f1: RUNSQL SQL('CREATE ALIAS QTEMP.A FOR LVORD.ORDERS')", "key: Enter"] })).error, false);
+    const del = await k.call("screen_do", { actions: ["type f1: RUNSQL SQL('DELETE FROM QTEMP.A')", "key: Enter"] });
+    assert.equal(del.error, true);
+    assert.match(del.text, /the 5250 job's QTEMP is not visible to the guard/);
+    assert.equal(host.sent.length, 3, "the DELETE never went out");
+    // The run log keeps those answers, so replay decides the same.
+    assert.equal(k.log().at(-1).lookups.bases["QTEMP.A"], null);
+    assert.deepEqual((await replayRunLog(d4With("DEVBOX"), k.log())).changes, []);
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.2: a failed identity lookup decides as the profile's user with default_role, logged, and is not asked again on every key", async () => {
+  const host = fakeScreen();
+  const k = await guardedKit({ policy: d4With("DEVBOX"), stub: stubConn({ identityThrows: true }), screen: () => host.s });
+  try {
+    assert.equal((await k.call("session_open", {})).error, false);
+    const ok = await k.call("screen_do", { actions: ["type f1: DSPLIBL", "key: Enter"] });
+    assert.equal(ok.error, false, ok.text);
+    const denied = await k.call("screen_do", { actions: ["type f1: dltlib lvord", "key: Enter"] });
+    assert.equal(denied.error, true);
+    assert.equal(host.sent.length, 2, "only DSPLIBL went out");
+    const lines = k.log();
+    assert.deepEqual(lines.map((l) => [l.roles, l.roleSource, l.effective]), [
+      [["analyst"], "default_lookup_failed", "allow"],
+      [["analyst"], "default_lookup_failed", "deny"],
+    ]);
+    assert.match(lines[0].notes.join("\n"), /identity lookup failed, so JDOE from the profile decides with default_role: connect ECONNREFUSED/);
+    assert.equal(k.stub.queries.filter((q) => q.startsWith("SELECT CURRENT SERVER")).length, 1);
   } finally {
     await k.close();
   }
