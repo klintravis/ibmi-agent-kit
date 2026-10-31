@@ -546,7 +546,7 @@ export function registerGuarded(
     if (needs.length) {
       const no = await confirm(s, who.identity, needs.map((p, i) => ({ label: `${tool}${needs.length > 1 ? ` ${i + 1}` : ""}`, decision: p.decision, display: p.statement.display })));
       // The SQL job's current library says nothing about the 5250 job's.
-    const stop = no ?? (screen ? undefined : await curlibMoved(conn, answers));
+      const stop = no ?? (screen ? undefined : await curlibMoved(conn, answers));
       if (stop) {
         record(() => `not sent: ${stop}`, no === undefined);
         throw new Error(`Denied, ${tool} did nothing: ${stop}.\n${ASK}\n${LIMITS}`);
