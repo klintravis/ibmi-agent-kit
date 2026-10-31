@@ -1,59 +1,34 @@
 # The idea
 
-Agents can already query Db2 for i. What they cannot do is *work* on IBM i: walk the menus a
-person walks, see what a green-screen program actually does, change source and prove the change
-on screen. And every shop's IBM i is different — the libraries, the file names, the meaning of
-field `CMCRLM` — so an agent that knows IBM i in general still knows nothing about *your* IBM i.
+Agents can already query Db2 for i. What they cannot do safely is *work* on IBM i: walk the
+menus a person walks, run SQL and CL, change source, and prove the change on screen, without
+one wrong command doing damage.
 
-ibmi-agent-kit closes both gaps:
+## Direction: execute and guard
 
-1. **Engines** — tools that act: 5250 screens (`packages/screen`) and source members
-   (`packages/source`).
-2. **Knowledge packs** — YAML that teaches the agent one enterprise, so adopting the kit is
-   writing a pack, not writing code.
+- **Users sign on as themselves.** Every action runs in the person's own IBM i job, under
+  their own authority. IBM i object authority is the real boundary; the kit never replaces it.
+- **Knowledge lives in Claude skills.** What a company's libraries and workflows mean is
+  written as skills, loaded by path from that company's private repo. The MCP holds none of it.
+- **The MCP executes and guards.** It runs 5250, SQL and CL work, and catches dangerous
+  mistakes before they run: a guard against accident, not against a determined user.
 
-## Knowledge packs
+Public repo: the kit plus examples built against PUB400. A company's real policy lives in that
+company's own private repo.
 
-A pack is a folder. Everything in it is reviewable text, so a pack is versioned, diffed and
-code-reviewed like any other asset.
+## Roadmap
 
-| Folder | Teaches | Example |
-|---|---|---|
-| `schema/` | Libraries, files, fields and what they mean in business terms | `CUSMST.CMCRLM` = customer credit limit, USD |
-| `glossary/` | Business words mapped to objects | "credit hold" → `ORDHDR.OHHOLD = 'C'` |
-| `workflows/` | Menu paths and programs for business tasks, runnable by an agent or as a test | "release a credit hold": main menu → 3 → 7 → … |
-| `safety/` | Per-environment modes, allow-lists and step budgets | `prod`: explore only, 200 keys per session |
+Each step lands as an OpenSpec change under `openspec/changes/`.
 
-`pack init` drafts `schema/` from the system catalog (`QSYS2.SYSTABLES`, `QSYS2.SYSCOLUMNS`,
-object text); people refine the meaning. Workflows an agent discovers while exploring are saved
-as `discovered` and promoted by a person.
-
-Public repo: the engines plus a sample pack built against PUB400. An enterprise's real pack
-lives in that enterprise's own private repo.
-
-## Safety model
-
-The IBM i is the real guard: agents sign on with their own limited user profile (`*USE` on the
-libraries in scope, no special authorities, `LMTCPB` where possible). The kit adds a second
-layer — `explore` (read-only) and `test` modes, deny rules for known destructive screens and
-commands, step budgets — but never claims to replace object authority.
-
-## Phases
-
-1. Import the engines with history; both build and pass their own checks. *(done)*
-2. One MCP entry point exposing both engines.
-3. Knowledge pack format v1 and the PUB400 sample pack.
-4. `pack init` from the catalog.
-5. Safety modes and session recording.
-6. Workflow discovery → review → promotion.
-
-Each phase lands as an OpenSpec change under `openspec/changes/`.
+1. `unified-kit`: one server, one profile loader, a SQL transport that can execute. *(this change)*
+2. `execution-guard`: check SQL and CL before they run, in observe mode first.
+3. `project-verbs`: named, reviewed operations a project defines on top of statements and commands.
+4. `config-bootstrap`: create and validate a user's profiles and settings.
+5. Company pilot, starting in observe mode: log what the guard would block, block nothing.
 
 ## Open questions
 
-- SQL access is partly answered: `packages/source` already has `run_sql`, over a
-  `mapepire-server` jar it uploads to the IBM i and runs through SSH (`IBMI_SSH_PORT`; PUB400
-  answers on 2222, not 22). Open: whether that is enough for `pack init`, and whether
-  uploading a jar is acceptable to an enterprise's security review.
-- Where packs are loaded from at runtime: a path, a git URL, or both.
+- Whether a company's security review approves SSH plus a bundled jar upload, or prefers an
+  admin-run Mapepire daemon (the `daemon` transport).
+- Whether the client supports elicitation, so the guard can ask a person to confirm.
 - Whether PUB400's terms allow automated agent sessions, and at what rate.

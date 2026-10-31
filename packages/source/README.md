@@ -1,6 +1,6 @@
-# ibm-i-source-mcp
+# @ibmi-agent-kit/source
 
-[![npm](https://img.shields.io/npm/v/ibm-i-source-mcp?logo=npm&color=cb3837)](https://www.npmjs.com/package/ibm-i-source-mcp)
+The source and SQL engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-source-mcp.
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-3c873a?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6?logo=typescript&logoColor=white)](package.json)
@@ -43,70 +43,34 @@ Say you ask: "find the display file that shows department information, and note 
 
 ## Install
 
-Run it straight from npm with npx (no build), or clone and build from source. Either way, all
-settings live in a `.env` file (see Configuration).
-
-### Option A: from npm
-
-Register the server with Claude Code:
+This package is part of ibmi-agent-kit and is normally run through the kit's single server. See
+the root `README.md` for install, profiles and the old-server migration. To run this engine
+alone, build the repo (`npm ci && npm run check`) and register it:
 
 ```sh
-claude mcp add ibmi-source --scope user -- npx -y ibm-i-source-mcp
+claude mcp add ibmi-agent-kit-source -- node <abs path>/packages/source/dist/index.js
 ```
 
-Or install it once and point at the binary:
-
-```sh
-npm install -g ibm-i-source-mcp
-claude mcp add ibmi-source --scope user -- ibm-i-source-mcp
-```
-
-Then create a `.env` with your connection details in `~/.ibm-i-source-mcp/` (create the folder if it
-does not exist), and restart Claude Code or run `/mcp`. A package installed from npm or run with `npx`
-has no stable folder of its own (the npx copy lives in a cache that is wiped on every update), so this
-home folder is the reliable place to keep credentials. See Configuration for the full search order.
-
-### Option B: from source
-
-```sh
-git clone https://github.com/SH4RKKK/ibm-i-source-mcp && cd ibm-i-source-mcp
-npm install && npm run build
-cp .env.example .env
-claude mcp add ibmi-source --scope user -- node "$PWD/dist/index.js"
-```
-
-Fill in the required values in your `.env` (the optional ones are under Configuration):
-
-```
-IBMI_HOST=your.ibmi.host
-IBMI_USER=YOURUSER
-IBMI_PASSWORD=yourpassword
-```
-
-Restart Claude Code or run `/mcp` and the tools show up. Built from source, the server reads the `.env`
-from its own folder, so it works no matter which directory Claude Code launches it from.
+Put the profile in a `.env` in `~/.ibmi-agent-kit/` (create the folder). Restart Claude Code or run `/mcp`.
 
 ## Configuration
 
-All configuration lives in a `.env` file. The server looks for it in these places, first match wins:
+All configuration lives in a profile file: `.env` for the default server, `.env.<name>` for a named one. The server looks in these folders, first match wins, and the first file found supplies the whole profile:
 
-1. a folder you name yourself in `IBMI_MCP_CONFIG_DIR`. Set it on the MCP server entry rather than in
-   your shell, because your MCP client launches the server, not you:
-   `claude mcp add ibmi-source --env IBMI_MCP_CONFIG_DIR=/path/to/folder -- npx -y ibm-i-source-mcp`
-2. `~/.ibm-i-servers/`, shared by every IBM i MCP server on the machine. Put your credentials here
-   when you run more than one of them and want a single copy
-3. `~/.ibm-i-source-mcp/`, this server's own folder, which is where it should go for an npm or npx
-   install
-4. the server's own install folder, next to `dist/`, if you cloned and built from source
+1. a folder you name in `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`), set on the MCP server entry rather than in your shell
+2. `~/.ibmi-agent-kit/`
+3. `~/.ibm-i-servers/`
 
-A real environment variable, if one is set, always takes precedence over a value in the file.
+The old `~/.ibm-i-source-mcp/` folder and the install folder are no longer read. Connection and safety settings (host, user, password, ports, `IBMI_SQL_TRANSPORT`, `IBMI_READ_ONLY`, `IBMI_BLOCKED_CL`, `IBMI_BLOCKED_TABLES`) come from the profile file only, never from the environment. See the root `README.md`.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `IBMI_HOST` | yes | | IBM i host or IP |
 | `IBMI_USER` | yes | | user profile |
 | `IBMI_PASSWORD` | yes | | password |
-| `IBMI_SSH_PORT` | no | `22` | SSH port on the IBM i |
+| `IBMI_SSH_PORT` | no | `22` | SSH port on the IBM i (`ssh` transport) |
+| `IBMI_SQL_TRANSPORT` | no | `ssh` | `ssh` uploads and runs the bundled mapepire jar over SSH; `daemon` connects to an admin-run Mapepire server and uploads nothing |
+| `IBMI_MAPEPIRE_PORT` | no | `8076` | port of the Mapepire server (`daemon` transport) |
 | `IBMI_SOURCE_FILE_CCSID` | no | `37` | EBCDIC page used for CCSID 65535 source columns |
 | `IBMI_LOCAL_DIR` | no | `ibmi-src` | where local copies are written |
 | `IBMI_MAPEPIRE_JAR` | no | | path to a mapepire jar already on the box, instead of the bundled one |

@@ -1,4 +1,6 @@
-# ibm-i-5250-mcp
+# @ibmi-agent-kit/screen
+
+The 5250 screen engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-5250-mcp.
 
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-3c873a?logo=node.js&logoColor=white)](package.json)
@@ -95,68 +97,25 @@ in the middle of a session still gets the whole history, up to the last 500 scre
 
 ## Install
 
-Run it straight from npm with npx (no build), or clone and build from source. Either way, all
-settings live in a `.env` file (see Configuration).
-
-### Option A: from npm
-
-Register the server with Claude Code:
+This package is part of ibmi-agent-kit and is normally run through the kit's single server. See
+the root `README.md` for install, profiles and the old-server migration. To run this engine
+alone, build the repo (`npm ci && npm run check`) and register it:
 
 ```sh
-claude mcp add ibmi-5250 --scope user -- npx -y ibm-i-5250-mcp
+claude mcp add ibmi-agent-kit-screen -- node <abs path>/packages/screen/dist/index.js
 ```
 
-Or install it once and point at the binary:
-
-```sh
-npm install -g ibm-i-5250-mcp
-claude mcp add ibmi-5250 --scope user -- ibm-i-5250-mcp
-```
-
-Then create a `.env` with your connection details in `~/.ibm-i-servers/` if the other IBM i MCP
-servers should use it too, or in `~/.ibm-i-5250-mcp/` if only this one should (create the folder if
-it does not exist). Restart Claude Code or run `/mcp`. A package installed from npm or run with `npx`
-has no stable folder of its own (the npx copy lives in a cache that is wiped on every update), so a
-home folder is the reliable place to keep credentials. See Configuration for the full search order.
-
-### Option B: from source
-
-```sh
-git clone https://github.com/SH4RKKK/ibm-i-5250-mcp && cd ibm-i-5250-mcp
-npm install && npm run build
-cp .env.example .env
-claude mcp add ibmi-5250 --scope user -- node "$PWD/dist/index.js"
-```
-
-Fill in the required values in your `.env` (the optional ones are under Configuration):
-
-```
-IBMI_HOST=your.ibmi.host
-IBMI_USER=MYUSER
-IBMI_PASSWORD=changeme
-```
-
-Restart Claude Code or run `/mcp` and the tools show up. Built from source, the server reads the
-`.env` from its own folder, so it works no matter which directory Claude Code launches it from.
+Put the profile in a `.env` in `~/.ibmi-agent-kit/` (create the folder). Restart Claude Code or run `/mcp`.
 
 ## Configuration
 
-All configuration lives in a `.env` file. The server looks for it in these places, first match wins,
-and the first file found supplies the whole profile rather than being merged with the others:
+All configuration lives in a profile file: `.env` for the default server, `.env.<name>` for a named one. The server looks in these folders, first match wins, and the first file found supplies the whole profile:
 
-1. a folder you name yourself in `IBMI_MCP_CONFIG_DIR`. Set it on the MCP server entry rather than in
-   your shell, because your MCP client launches the server, not you:
-   `claude mcp add ibmi-5250 --env IBMI_MCP_CONFIG_DIR=/path/to/folder -- npx -y ibm-i-5250-mcp`
-2. `~/.ibm-i-servers/`, shared with the other IBM i MCP servers
-3. `~/.ibm-i-5250-mcp/`, for profiles only this server should see
-4. the server's own install folder, next to `dist/`, if you cloned and built from source
+1. a folder you name in `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`), set on the MCP server entry rather than in your shell
+2. `~/.ibmi-agent-kit/`
+3. `~/.ibm-i-servers/`
 
-A real environment variable, if one is set, always takes precedence over a value in the file.
-
-Put a box in `~/.ibm-i-servers/` and every IBM i MCP server you run picks it up from there, so its
-host, user and password are written once instead of once per server. Use `~/.ibm-i-5250-mcp/` only
-for a box this server should reach and the others should not, and note that the shared folder wins
-when the same name is in both.
+The old `~/.ibm-i-5250-mcp/` folder and the install folder are no longer read. Connection and safety settings (host, user, password, ports, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_5250_TLS_INSECURE`) come from the profile file only, never from the environment. See the root `README.md`.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|

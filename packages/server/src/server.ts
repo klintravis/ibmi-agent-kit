@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CONFIG_DIRS, listServers } from "@ibmi-agent-kit/core";
-import { register as registerScreen } from "@ibmi-agent-kit/screen/tools";
+import { KEYS, register as registerScreen } from "@ibmi-agent-kit/screen/tools";
 import { register as registerSource } from "@ibmi-agent-kit/source/tools";
 
 export interface Engine {
@@ -35,13 +35,13 @@ export function createServer(deps: { extra?: (mcp: McpServer) => void } = {}): K
   return { mcp, engines: [screen, source] };
 }
 
-export function listServersText(open: { server: string; session: string }[]): string {
+export function listServersText(open: { server: string; session: string; closed?: boolean }[]): string {
   const servers = listServers();
   // A session whose profile file has since gone is still open, so it is still listed.
   const names = [...new Set([...servers, ...open.map((o) => o.server)])];
   const perServer = names
     .map((s) => {
-      const sessions = open.filter((o) => o.server === s).map((o) => o.session);
+      const sessions = open.filter((o) => o.server === s).map((o) => `${o.session}${o.closed ? " (closed)" : ""}`);
       return `  ${s}${servers.includes(s) ? "" : " (no profile)"}: ${sessions.join(", ") || "none"}`;
     })
     .join("\n");
@@ -52,7 +52,8 @@ export function listServersText(open: { server: string; session: string }[]): st
     `Servers: ${servers.join(", ") || "none configured"}\n` +
     (names.length ? `Open 5250 sessions:\n${perServer}\n` : "") +
     `\nProfiles are read from these folders, first match wins:\n${dirs}\n` +
-    (servers.length ? "" : `\nNo profiles found. Copy .env.example into one of the folders above.\n`)
+    (servers.length ? "" : `\nNo profiles found. Copy .env.example into one of the folders above.\n`) +
+    `\nKeys: ${KEYS.join(", ")}`
   );
 }
 

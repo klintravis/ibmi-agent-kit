@@ -27,7 +27,7 @@
 - [x] 5.1 Root `package.json`: `check` in dependency order and a cross-platform `clean`; verify `npm run clean && npm run check` passes in PowerShell and in Git Bash
 - [x] 5.2 Add `.github/workflows/check.yml` (3 OS × Node 18/22, read-only permissions); verify it is valid YAML and, after push, all six jobs pass
 - [x] 5.3 Add `scripts/check-names.mjs` (D9); verify it reports "skipped" without a list and exits 1 when a temp list contains a word present in the tree
-- [ ] 5.4 Rewrite `README.md` (what the kit is; install and `claude mcp add` registration; profiles, folders and protected settings; SQL transports and what each requires on the IBM i; PUB400 notes incl. `IBMI_SSH_PORT=2222`; migration from the old servers; terminology: "commands and statements" vs custom "verbs"; Built on), `CLAUDE.md`, `docs/idea.md` (execute-and-guard direction; roadmap unified-kit → execution-guard → project-verbs → company pilot), `NOTICE` (hard-fork wording), and remove `packs/private/` from `.gitignore`; verify each shell command in README parses (`--help` runs) and `scripts/check-names.mjs` reports no hits
+- [x] 5.4 Rewrite `README.md` (what the kit is; install and `claude mcp add` registration; profiles, folders and protected settings; SQL transports and what each requires on the IBM i; PUB400 notes incl. `IBMI_SSH_PORT=2222`; migration from the old servers; terminology: "commands and statements" vs custom "verbs"; Built on), `CLAUDE.md`, `docs/idea.md` (execute-and-guard direction; roadmap unified-kit → execution-guard → project-verbs → company pilot), `NOTICE` (hard-fork wording), and remove `packs/private/` from `.gitignore`; verify each shell command in README parses (`--help` runs) and `scripts/check-names.mjs` reports no hits
 
 ## Workflow follow-up
 

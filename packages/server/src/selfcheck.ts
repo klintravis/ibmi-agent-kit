@@ -69,9 +69,10 @@ test("list_servers names the profile folders and no sessions when none are open"
     // An open session is listed under its server, even once that profile file is gone.
     const withSessions = listServersText([
       { server: "gone", session: "main" },
-      { server: "gone", session: "s2" },
+      { server: "gone", session: "s2", closed: true },
     ]);
-    assert.ok(withSessions.includes("Open 5250 sessions:\n  gone (no profile): main, s2\n"), withSessions);
+    assert.ok(withSessions.includes("Open 5250 sessions:\n  gone (no profile): main, s2 (closed)\n"), withSessions);
+    assert.match(withSessions, /\nKeys: .*Enter/, withSessions);
   } finally {
     await client.close();
     await shutdownAll(kit.engines);

@@ -3,10 +3,10 @@ Copyright 2026 Klint Travis
 
 Licensed under the Apache License, Version 2.0.
 
-This product includes ibm-i-5250-mcp (packages/screen) and ibm-i-source-mcp
-(packages/source), Copyright 2026 Saman, licensed under the Apache License,
-Version 2.0, from https://github.com/SH4RKKK/ibm-i-5250-mcp and
-https://github.com/SH4RKKK/ibm-i-source-mcp. Their own NOTICE files, which
-carry further third-party attributions (green-screen-react, MIT; mapepire-server,
-Apache-2.0), are kept unmodified at packages/screen/NOTICE and
-packages/source/NOTICE and apply to those packages.
+packages/screen and packages/source are a hard fork of SH4RKKK's Apache-2.0 servers
+ibm-i-5250-mcp and ibm-i-source-mcp (Copyright 2026 Saman), from
+https://github.com/SH4RKKK/ibm-i-5250-mcp and https://github.com/SH4RKKK/ibm-i-source-mcp,
+modified by ibmi-agent-kit. Files changed from upstream carry a modification line. Each
+package's own NOTICE, which carries further third-party attributions (green-screen-react,
+MIT; mapepire-server, Apache-2.0), is kept at packages/screen/NOTICE and
+packages/source/NOTICE and applies to that package.

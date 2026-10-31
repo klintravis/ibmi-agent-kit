@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): tool definitions split out of index.ts into register(); annotations and titles added.
+// Modified by ibmi-agent-kit (2026): tool definitions split out of index.ts into register(); annotations and titles added; openSessions reports closed; KEYS re-exported.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -52,10 +52,13 @@ function collectTests(where: string, filter?: string): string[] {
     .map((f) => join(where, f));
 }
 
+// The key names screen_do accepts, for the kit server's list_servers.
+export { KEYS };
+
 export function register(
   mcp: McpServer,
   opts?: { listServers?: boolean },
-): { shutdown(): Promise<void>; openSessions(): { server: string; session: string }[] } {
+): { shutdown(): Promise<void>; openSessions(): { server: string; session: string; closed: boolean }[] } {
   const sessions = new Map<string, OpenSession>();
 
   function requireSession(name?: string): OpenSession {
@@ -347,6 +350,6 @@ export function register(
   return {
     shutdown,
     openSessions: () =>
-      [...sessions.entries()].map(([session, live]) => ({ server: live.server, session })),
+      [...sessions.entries()].map(([session, live]) => ({ server: live.server, session, closed: live.session.isClosed })),
   };
 }
