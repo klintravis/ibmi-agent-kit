@@ -88,8 +88,8 @@ export interface RunReport {
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const at = (p: Planned) => `${p.verb} ${p.where}`;
 const show = (v: unknown) => (typeof v === "string" ? JSON.stringify(v) : v === undefined ? "nothing" : String(v));
-// As run_script tells a query from a change: queries take the time limit.
-const QUERY = /^\s*(\(|SELECT\b|VALUES\b|WITH\b)/i;
+// How run_script and verb_run tell a query from a change: queries take the time limit.
+export const QUERY = /^\s*(\(|SELECT\b|VALUES\b|WITH\b)/i;
 const RESET_NOTE = "the connection was reset: nothing more was sent, cleanup included, on the old job or a new one; QTEMP and the library list of the old job are gone, so clean up by hand";
 
 // Why each statement may not run: the verb's read-only rule, the profile's guards, the policy.
@@ -240,8 +240,8 @@ export interface VerbCall {
 }
 
 // Plan every verb of the call, decide them all as one script in run order, ask one confirmation,
-// then run each. A declined confirmation runs none; a refused verb fails and the others still run;
-// after a connection reset nothing more is sent.
+// then run each. A declined confirmation runs none; once a verb does not run in full, no later
+// verb runs (they were decided as if it had); after a connection reset nothing more is sent.
 export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]): Promise<RunReport> {
   const prepared = calls.map((c): Prepared => {
     if (c.skip !== undefined) return { verb: c.ref, decided: [], skip: c.skip };
@@ -284,6 +284,9 @@ export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]
 
   const run: RunState = { exec: ctx.exec, out: new Map(), reset: false, undone: [] };
   const results: VerbResult[] = [];
+  // Later verbs were decided as if every earlier one in the script ran in full; once one did not
+  // (refused, requires_absent hit, failed, stopped early), those decisions no longer hold.
+  let broken = false;
   for (const p of prepared) {
     if (p.skip !== undefined) {
       results.push({ verb: p.verb, status: "skipped", error: p.skip, notes: [], statements: [] });
@@ -292,6 +295,7 @@ export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]
     const verbNotes: string[] = [];
     let error = p.error;
     if (!error && run.reset) error = "not sent: the connection was reset during an earlier verb of this call";
+    else if (!error && broken) error = "not sent: an earlier verb in this call did not run in full";
     else if (!error && p.plan) {
       run.undone = [];
       error = await runPlanned(p.plan, run);
@@ -309,6 +313,7 @@ export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]
     const r: VerbResult = { verb: p.verb, status: error ? "failed" : "passed", notes: verbNotes, statements };
     if (p.file) r.file = p.file;
     if (error) r.error = error;
+    if (error && planned.includes(p)) broken = true; // a verb that failed to plan was never in the script
     results.push(r);
   }
 
@@ -421,7 +426,7 @@ export function registerVerbTools(mcp: McpServer, deps: { verbs(server: string):
     {
       title: "Run a verb",
       description:
-        "Run one verb with arguments, or with `tag` every verb carrying that tag as a suite (each with its defaults, continuing after failures). Every statement of the call, nested verbs and cleanup included, is decided by the execution policy as the signed-on user before anything runs: a denied verb runs nothing, and one confirmation covers every statement that needs one. Cleanup undoes only setup steps that succeeded. After a connection reset nothing more is sent, cleanup included, and the result lists the cleanup left to do by hand.",
+        "Run one verb with arguments, or with `tag` every verb carrying that tag as a suite (each with its defaults, in address order). Every statement of the call, nested verbs and cleanup included, is decided by the execution policy as the signed-on user before anything runs, as one script: a denied verb runs nothing, one confirmation covers every statement that needs one, and once a suite verb does not run in full no later verb is sent. Cleanup undoes only setup steps that succeeded. After a connection reset nothing more is sent, cleanup included, and the result lists the cleanup left to do by hand.",
       inputSchema: { server: serverArg, verb: z.string().optional().describe("the verb to run: NAME (closest layer), user:NAME, proj:NAME or org:NAME"), args: argsArg, tag: z.string().optional().describe("run every verb with this tag instead of one verb") },
       annotations: { title: "Run a verb", readOnlyHint: false, destructiveHint: true },
     },

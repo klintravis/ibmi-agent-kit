@@ -77,7 +77,12 @@ Bare names resolve `user` → `proj` → `org`.
 `verb_check` folds into `policy_check` (`verb`, `args`, live or offline with `as`), where a
 `requires_absent` or `expect` query that does more than read shows as deny; `verb_test` folds into
 `verb_run` (`tag`). A `tag` suite skips a verb a closer layer overrides (a bare name never reaches
-it), and reports it as skipped.
+it), and reports it as skipped. Its later verbs are decided as if every earlier one ran in full, so
+the suite sends a later verb only if every earlier verb in the call did run in full: once one is
+refused, hits its `requires_absent`, fails or stops early, the rest are reported "not sent: an
+earlier verb in this call did not run in full" (that verb's own cleanup still runs).
+- *Why not re-decide the rest:* simplest safe rule; a suite of smoke tests that fails early has
+  already answered its question.
 
 ## Risks / Trade-offs
 

@@ -289,9 +289,8 @@ test("verb_run: a reset in a suite's first verb sends nothing of the later verbs
   assert.deepEqual(r.sent, ["0: UPDATE TLIB.A SET X = 1"]);
   assert.deepEqual([r.s.passed, r.s.failed], [0, 3]);
   assert.match(r.s.results[0].error, /^proj:S1 steps\.0: connection to box lost/);
-  // the lost job shows at the next send, which the generation check refuses before sending
-  assert.match(r.s.results[1].error, /^proj:S2 steps\.0: the connection to the IBM i was reset after this was decided; not sent; connection reset; nothing more was sent; cleanup not run: none$/);
-  assert.equal(r.s.results[2].error, "not sent: the connection was reset during an earlier verb of this call");
+  // S1 did not run in full, so nothing after it is sent
+  assert.deepEqual(r.s.results.slice(1).map((x: any) => x.error), ["not sent: an earlier verb in this call did not run in full", "not sent: an earlier verb in this call did not run in full"]);
 });
 
 test("verb_run: a SELECT step takes the query time limit; past it the session is reset and nothing more is sent", async () => {
@@ -379,10 +378,12 @@ test("verb tools: policy_check with a verb runs nothing and returns each stateme
   }
 });
 
-test("verb tools: a tag suite continues after a failure, counts each outcome and names missing parameters", async () => {
+const NOT_IN_FULL = "not sent: an earlier verb in this call did not run in full";
+
+test("verb tools: a tag suite counts each outcome, names missing parameters, and stops sending after a verb fails", async () => {
   const { set } = verbs({
-    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM TLIB.BAD\n"),
-    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM TLIB.B\n"),
+    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM TLIB.A\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM TLIB.BAD\n"),
     "c.yaml": verb("C", "tags: [smoke, nightly]\nsteps:\n  - sql: DELETE FROM TLIB.C\n"),
     "d.yaml": verb("D", "tags: [smoke]\nparams:\n  who: { type: string }\nsteps:\n  - sql: DELETE FROM TLIB.D WHERE W = :who\n"),
     "e.yaml": verb("E", "steps:\n  - sql: DELETE FROM TLIB.E\n"),
@@ -390,10 +391,11 @@ test("verb tools: a tag suite continues after a failure, counts each outcome and
   const k = await kit({ set, box: box({ fail: ["TLIB.BAD"] }) });
   try {
     const r = await k.call("verb_run", { tag: "smoke" });
-    assert.deepEqual([r.s.passed, r.s.failed, r.s.skipped], [2, 1, 1]);
-    assert.deepEqual(r.s.results.map((x: any) => [x.verb, x.status]), [["proj:A", "failed"], ["proj:B", "passed"], ["proj:C", "passed"], ["proj:D", "skipped"]]);
+    assert.deepEqual([r.s.passed, r.s.failed, r.s.skipped], [1, 2, 1]);
+    assert.deepEqual(r.s.results.map((x: any) => [x.verb, x.status]), [["proj:A", "passed"], ["proj:B", "failed"], ["proj:C", "failed"], ["proj:D", "skipped"]]);
+    assert.equal(r.s.results[2].error, NOT_IN_FULL);
     assert.equal(r.s.results[3].error, "skipped: who has no default");
-    assert.deepEqual(k.sent, ["0: DELETE FROM TLIB.BAD", "0: DELETE FROM TLIB.B", "0: DELETE FROM TLIB.C"]);
+    assert.deepEqual(k.sent, ["0: DELETE FROM TLIB.A", "0: DELETE FROM TLIB.BAD"]);
     assert.match((await k.call("verb_run", { verb: "B", tag: "smoke" })).text, /give exactly one of verb and tag/);
     assert.match((await k.call("verb_run", { tag: "none" })).text, /no verb has the tag none/);
   } finally {
@@ -419,6 +421,37 @@ test("verb tools: a suite is decided as one script, so one verb cannot set up a 
   const c = await run({ set: curlib.set, policy: D4, box: box({ ...dev, curlib: ["DVORD"] }) }, { tag: "smoke" });
   assert.deepEqual(c.sent, ["0: CHGCURLIB CURLIB(LVORD)"]);
   assert.match(c.s.results[1].error, /^nothing was sent: proj:D steps\.0 is denied/);
+});
+
+test("verb tools: a later verb decided against an earlier one's set-up is not sent when that one did not run in full", async () => {
+  const dev = { group: "GRPDEV", rdb: "PRODRDB" };
+  // refused: A's CHGCURLIB never runs, so B's *CURLIB was decided against a library that is not current
+  const refused = verbs({
+    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - cl: CHGCURLIB CURLIB(LVORD)\n  - sql: DELETE FROM PAYLIB.T\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - cl: CLRPFM FILE(*CURLIB/ORD)\n"),
+  });
+  const r1 = await run({ set: refused.set, policy: D4, box: box({ ...dev, curlib: ["DVORD"] }) }, { tag: "smoke" });
+  assert.deepEqual(r1.sent, []);
+  assert.match(r1.s.results[0].error, /^nothing was sent: proj:A steps\.1 is denied/);
+  assert.equal(r1.s.results[1].status, "failed");
+  // requires_absent hit: A's alias is never created, so whatever QTEMP.A already is, B must not
+  // delete from it on a decision that took it for QTEMP.REAL
+  const absent = verbs({
+    "a.yaml": verb("A", "tags: [smoke]\nsetup:\n  - id: s\n    requires_absent: SELECT 1 FROM QTEMP.MARK\n    sql: CREATE ALIAS QTEMP.A FOR QTEMP.REAL\nsteps:\n  - sql: VALUES 1\ncleanup:\n  - { undoes: s, sql: DROP ALIAS QTEMP.A }\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM QTEMP.A\n"),
+  });
+  const r2 = await run({ set: absent.set, policy: D4, box: box({ ...dev, rows: (sql) => (sql.includes("QTEMP.MARK") ? [{ X: 1 }] : []) }) }, { tag: "smoke" });
+  assert.deepEqual(r2.sent, ["0: SELECT 1 FROM QTEMP.MARK"]);
+  assert.match(r2.s.results[0].error, /requires_absent: found a row/);
+  assert.equal(r2.s.results[1].error, NOT_IN_FULL);
+  // A fails partway: its alias step never runs; its successful setup is still cleaned up
+  const partway = verbs({
+    "a.yaml": verb("A", "tags: [smoke]\nsetup:\n  - { id: s, sql: INSERT INTO QTEMP.W VALUES 1 }\nsteps:\n  - sql: UPDATE QTEMP.W SET X = 1\n  - sql: CREATE ALIAS QTEMP.A FOR QTEMP.REAL\ncleanup:\n  - { undoes: s, sql: DELETE FROM QTEMP.W }\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM QTEMP.A\n"),
+  });
+  const r3 = await run({ set: partway.set, policy: D4, box: box({ ...dev, fail: ["UPDATE QTEMP.W"] }) }, { tag: "smoke" });
+  assert.deepEqual(r3.sent, ["0: INSERT INTO QTEMP.W VALUES 1", "0: UPDATE QTEMP.W SET X = 1", "0: DELETE FROM QTEMP.W"]);
+  assert.equal(r3.s.results[1].error, NOT_IN_FULL);
 });
 
 test("verb tools: policy_check shows a requires_absent query that writes as deny, live and offline", async () => {
@@ -451,7 +484,8 @@ test("verb tools: a suite asks once; declined, none of its verbs runs; the log m
   assert.deepEqual(no.sent, []);
   assert.deepEqual(no.s.results.map((x: any) => x.status), ["failed", "failed", "failed"]);
   const yes = await run({ set, elicit: YES }, { tag: "smoke" });
-  assert.deepEqual(yes.sent, ["0: UPDATE LVLIB.U SET A = 1", "0: UPDATE TLIB.T SET A = 1"]);
+  assert.deepEqual(yes.sent, ["0: UPDATE LVLIB.U SET A = 1"], "Y was refused, so Z, decided after it, is not sent");
+  assert.equal(yes.s.results[2].error, NOT_IN_FULL);
   // Y was refused, so its UPDATE (a confirm) was never in the question
   assert.deepEqual(yes.log.map((l) => [l.text, l.confirmed]), [
     ["UPDATE LVLIB.U SET A = 1", true],

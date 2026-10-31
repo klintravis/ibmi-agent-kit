@@ -22,7 +22,7 @@ import {
   type RunLog,
   type VerbSet,
 } from "@ibmi-agent-kit/guard";
-import { checkVerb, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
+import { checkVerb, QUERY, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
 
 // What the guard needs of a connection: the source engine's MapepireBackend fits, a stub does too.
 // `generation` is the job the caller decided against: another job refuses before sending.
@@ -418,7 +418,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
             r.messages = c.messages;
             if (!c.ok) throw new Error(c.messages.map((m) => (m.id ? `[${m.id}] ${m.text}` : m.text)).join(" ") || "the command failed");
             outcomes.push("ok");
-          } else if (/^\s*(\(|SELECT\b|VALUES\b|WITH\b)/i.test(x.statement.display)) {
+          } else if (QUERY.test(x.statement.display)) {
             // As written: the display drops blank lines, which may sit inside a literal.
             const q = await limited(conn.query(x.statement.text, undefined, cap, undefined, generation));
             Object.assign(r, { columns: q.columns.map((c) => c.name), rows: q.rows, truncated: q.truncated });

@@ -117,11 +117,13 @@ and a call chain SHALL hold at most 5 verbs, the top one counted.
 ### Requirement: verb_run runs one verb or a tagged suite
 `verb_run` with `verb` SHALL run that verb. With `tag` it SHALL run every verb carrying the tag in
 address order using defaults, skip verbs whose required parameters have no default (naming them),
-continue after failures, and report passed, failed and skipped counts with each result.
+and report passed, failed and skipped counts with each result. Because later verbs are decided as
+if every earlier one ran in full, once a verb is refused or does not run in full (a
+`requires_absent` hit, a failure) no later verb SHALL be sent; each is reported as not sent.
 
 #### Scenario: Suite with a failure
-- **WHEN** three `smoke` verbs run and the first fails
-- **THEN** the other two still run and the report gives one failed and the others' outcomes
+- **WHEN** three `smoke` verbs run and the first fails partway
+- **THEN** the first verb's successful setups are still cleaned up, the other two are reported "not sent: an earlier verb in this call did not run in full", and the report counts three failed
 
 ### Requirement: No tool writes verb files
 No tool SHALL create, change or delete a verb file. Verbs SHALL load only from files, once per
