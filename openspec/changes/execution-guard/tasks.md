@@ -21,7 +21,7 @@
 
 - [ ] 4.1 Implement the server's `lookups` over the transport and the per-connection partition and role resolution with `IBMI_PARTITION` cross-check (D5); selfcheck with a stub transport: profile `dev` on a box mapped to prod decides as prod, declared/detected mismatch denies, empty `USER_INFO` → `default_role` logged
 - [ ] 4.2 Add `run_script` (destructive) and `policy_check` (read-only) with structured content and `maxRows` bounds, honouring `IBMI_READ_ONLY` and `IBMI_BLOCKED_TABLES`; selfcheck: one deny sends nothing, declined confirmation sends nothing, failure stops later statements, read-only profile refuses an allowed update, `policy_check` sends only lookups
-- [ ] 4.3 Implement confirmation (D7): one elicitation per call, 120 s timeout, `confirm === true` required, operations shown before comment-stripped text, startup notice, optional browser fallback on the viewer server; selfcheck with an in-memory client: no capability → deny message, accept+true runs and logs `confirmed`, accept+false/decline/timeout deny, fallback page POST confirms only with its token
+- [ ] 4.3 Implement confirmation (D7): one elicitation per call, 120 s timeout, `confirm === true` required, operations shown before comment-stripped text, startup notice; selfcheck with an in-memory client: no capability → deny message, accept+true runs and logs `confirmed`, accept+false/decline/timeout deny
 
 ## 5. Engine hooks (guarded-tools spec; D6)
 
@@ -30,7 +30,7 @@
 
 ## 6. Documentation
 
-- [ ] 6.1 README "Policy" section: mode and the observe-first rollout, each policy section with the D4 example, `policy_check`, confirmation (clients without elicitation, the browser fallback and its weakness), the run log (not tamper-proof), the stated limits, and recommended client permission rules denying the agent edits to the policy file, profile files and verb folders; verify the README example is byte-identical to `examples/three-partitions.yaml` and `scripts/check-names.mjs` reports no hits
+- [ ] 6.1 README "Policy" section: mode and the observe-first rollout, each policy section with the D4 example, `policy_check`, confirmation (and that clients without elicitation get deny), the run log (not tamper-proof), the stated limits, and recommended client permission rules denying the agent edits to the policy file, profile files and verb folders; verify the README example is byte-identical to `examples/three-partitions.yaml` and `scripts/check-names.mjs` reports no hits
 - [ ] 6.2 Update `docs/idea.md` roadmap; verify no claim there contradicts the specs
 
 ## 7. Integration

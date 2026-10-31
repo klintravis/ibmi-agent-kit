@@ -117,9 +117,10 @@ engine's own sign-on/recovery/sign-off calls) and the screen has a command line 
 
 ### D7. Confirmation
 All `confirm` operations of one tool call are gathered into one `elicitInput` with schema
-`{ confirm: boolean }`, `{ timeout: 120_000 }`; accept requires `content.confirm === true`. Optional
-`confirm_fallback: browser` serves a one-time token page on `127.0.0.1` from the screen engine's
-existing viewer HTTP server and waits for its POST, with the not-agent-proof warning in the README.
+`{ confirm: boolean }`, `{ timeout: 120_000 }`; accept requires `content.confirm === true`.
+- *Rejected — a local browser confirmation page for clients without elicitation:* an agent with
+  shell or HTTP tools can submit it itself, so it would look like a human check without being one.
+  Without elicitation, `confirm` means deny; teams use observe mode while they settle their rules.
 
 ### D8. Run log
 `<first config dir>/runs/YYYY-MM-DD.jsonl`, appended synchronously; `redact()` applied to statement

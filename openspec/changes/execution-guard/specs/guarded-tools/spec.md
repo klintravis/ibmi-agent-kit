@@ -87,8 +87,9 @@ A confirmation SHALL be an MCP elicitation showing the server, partition, and ea
 within 120 seconds SHALL deny. No tool input SHALL pre-approve.
 
 #### Scenario: Client without elicitation
-- **WHEN** confirmation is needed, the client lacks elicitation and no fallback is set
-- **THEN** it is denied with a message saying confirmation is unavailable in this client
+- **WHEN** confirmation is needed and the client lacks elicitation
+- **THEN** it is denied with a message saying confirmation is unavailable in this client, and in
+  observe mode the run log records it as a would-be confirmation
 
 #### Scenario: Accepted with false
 - **WHEN** the client answers `accept` with `confirm: false`
@@ -97,15 +98,6 @@ within 120 seconds SHALL deny. No tool input SHALL pre-approve.
 #### Scenario: Startup notice
 - **WHEN** the server connects to a client
 - **THEN** it logs to stderr whether confirmation is available
-
-### Requirement: An opt-in browser fallback for clients without elicitation
-If the policy sets `confirm_fallback: browser`, a client without elicitation SHALL instead get a
-one-time page on `127.0.0.1` that confirms only with its one-time token. The README SHALL state
-that this fallback is not proof against an agent that can make local HTTP requests.
-
-#### Scenario: Fallback page
-- **WHEN** confirmation is needed, the client lacks elicitation and the fallback is set
-- **THEN** the result gives a local URL, and the statement runs only after that page is confirmed
 
 ### Requirement: Limits are stated where users see them
 Deny messages, `policy_check` output and the README SHALL state that the guard classifies the text

@@ -32,8 +32,7 @@ it catches mistakes, not a determined user.
 - New tools `run_script` (SQL statements and CL commands, all decided — and all confirmations
   asked — before the first is sent) and `policy_check` (decide without running).
 - **Confirmation:** one MCP elicitation per call listing every operation needing it; without
-  elicitation, deny — or, if the policy opts in, a local browser page, documented as not
-  agent-proof.
+  elicitation, deny.
 - A local **run log** with secrets redacted.
 
 ### MCP tools added or changed
