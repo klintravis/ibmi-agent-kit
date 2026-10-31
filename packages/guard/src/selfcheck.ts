@@ -702,24 +702,29 @@ test("partitions: agreement, a declaration, an unknown box", () => {
 });
 
 test("Dev and QA: a user in both groups holds both roles", () => {
-  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPDEV", "grpqa"], authlists: [] }, D4).sort(), ["dev", "qa"]);
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPDEV", "grpqa"], authlists: [] }, D4).roles.sort(), ["dev", "qa"]);
 });
 
 test("Per-user exception: users: [JDOE] gives JDOE the role", () => {
   const p = parsePolicy("version: 1\nroles:\n  - { name: dev, groups: [GRPDEV], users: [JDOE] }\n  - { name: analyst, groups: [GRPANL] }\ndefault_role: analyst\nrules: []\n", "p.yaml");
-  assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: [] }, p), ["dev"]);
-  assert.deepEqual(rolesOf({ user: "ASMITH", groups: [], authlists: [] }, p), ["analyst"]);
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: [] }, p).roles, ["dev"]);
+  assert.deepEqual(rolesOf({ user: "ASMITH", groups: [], authlists: [] }, p).roles, ["analyst"]);
 });
 
 test("Lookup not permitted: default_role; user patterns still match", () => {
-  assert.deepEqual(rolesOf({ user: "JDOE" }, D4), ["analyst"]);
-  assert.deepEqual(rolesOf({ user: "CTR01" }, D4), ["contractor"], "a contractor stays a contractor");
+  assert.deepEqual(rolesOf({ user: "JDOE" }, D4), { roles: ["analyst"], source: "default_lookup_failed" });
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["OTHER"] }, D4).source, "default_lookup_failed", "authorization lists unknown");
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: [] }, D4), { roles: ["analyst"], source: "default_no_match" });
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPDEV"], authlists: [] }, D4), { roles: ["dev"], source: "matched" });
+  const r = decide([{ class: "read", source: "sql", object: { lib: "A", name: "T" } }], { user: "JDOE", partition: "dev" }, D4);
+  assert.deepEqual([r.roles, r.roleSource], [["analyst"], "default_lookup_failed"], "decide reports the roles and why");
+  assert.deepEqual(rolesOf({ user: "CTR01" }, D4).roles, ["contractor"], "a contractor stays a contractor");
 });
 
 test("roles: authorization lists and supplemental groups", () => {
-  assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: ["AUTLQA"] }, D4), ["qa"]);
-  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPANL", "GRPDEV"] }, D4).sort(), ["analyst", "dev"]);
-  assert.deepEqual(rolesOf({ user: "JDOE", groups: [] }, builtinPolicy()), [], "no roles and no default");
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: ["AUTLQA"] }, D4).roles, ["qa"]);
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPANL", "GRPDEV"] }, D4).roles.sort(), ["analyst", "dev"]);
+  assert.deepEqual(rolesOf({ user: "JDOE", groups: [] }, builtinPolicy()).roles, [], "no roles and no default");
 });
 
 // --- decide (execution-policy spec; task 2.4) ---
@@ -887,7 +892,7 @@ test("decide: a partition conflict denies everything, even while observing and w
   const r = await decideScript("SELECT * FROM QTEMP.T", who);
   assert.deepEqual([r.effective, r.operations[0].reason], ["deny", "partition_conflict"]);
   assert.match(r.operations[0].message, /dev and qa/);
-  assert.deepEqual(decide([], who, D4), { decision: "deny", effective: "deny", enforced: true, operations: [], reason: "partition_conflict" });
+  assert.deepEqual(decide([], who, D4), { decision: "deny", effective: "deny", enforced: true, operations: [], roles: ["dev"], roleSource: "matched", reason: "partition_conflict" });
 });
 
 // Decision: a statement with no operations (COMMIT, VALUES 1) is allowed with reason
@@ -900,7 +905,7 @@ test("decide: zero-operation statements are allowed, not default-denied", async 
     assert.deepEqual(s.operations, []);
     for (const part of ["dev", "prod"])
       for (const who of ["contractor", "analyst"])
-        assert.deepEqual(decide(s.operations, as(who, part), D4), { decision: "allow", effective: "allow", enforced: false, operations: [], reason: "no_operations" });
+        assert.deepEqual(decide(s.operations, as(who, part), D4), { decision: "allow", effective: "allow", enforced: false, operations: [], roles: [who], roleSource: "matched", reason: "no_operations" });
   }
 });
 
@@ -948,4 +953,67 @@ test("decide: an identity without a partition is decided on unknown_partition", 
 test("decide: a literal command through QCMDEXC that is not in the table is unknown_command", async () => {
   const r = await decideScript("CALL QSYS2.QCMDEXC('FROBCMD X')", as("dev", "dev"));
   assert.deepEqual([r.operations[0].reason, r.effective], ["unknown_command", "allow"]);
+});
+
+// --- review fixes ---
+
+test("review: command-carrying and system-changing commands are danger even while observing", async () => {
+  const p = builtinPolicy();
+  for (const script of [
+    "CL: ADDJOBSCDE JOB(X) CMD(PWRDWNSYS OPTION(*IMMED)) FRQ(*ONCE)",
+    "CL: CHGJOBD JOBD(QGPL/QDFTJOBD) RQSDTA('PWRDWNSYS')",
+    "CL: CHGCMDDFT CMD(DSPLIB) NEWDFT('X')",
+    "CL: RMVLNK OBJLNK('/home')",
+    "CALL QSYS2.QCMDEXC('ADDJOBSCDE JOB(X) CMD(DSPLIB) FRQ(*ONCE)')",
+    "CL: FROBJOB CMD(PWRDWNSYS)",
+    "CL: FROBJOB RQSDTA('PWRDWNSYS')",
+  ]) {
+    const c = await classify(script, { lookups: lookups() });
+    const r = decide(c.operations, { user: "JDOE" }, p);
+    assert.deepEqual([r.effective, r.operations[0].reason, c.operations[0].code], ["deny", "danger", undefined], script);
+  }
+  const t = builtinCommands();
+  for (const cmd of ["ADDJOBSCDE", "CHGJOBSCDE", "ADDAJE", "CHGAJE", "CHGJOBD", "SBMDBJOB", "STRS36PRC", "TFRCTL", "CHGCMDDFT", "CHGCMD", "ADDEXITPGM", "RMVLNK", "DEL", "RMVDIR", "RNM", "MOV", "CHGAUT", "CHGOWN", "DLTJRNRCV", "CHGOBJAUD", "DLTAUTL", "CHGAUTLE"])
+    assert.equal(t[cmd]?.class, "danger", cmd);
+});
+
+test("review: a partition named after an Object property does not change the mode", () => {
+  for (const name of ["toString", "constructor"]) {
+    const p = parsePolicy(`version: 1\nmode: enforce\npartitions:\n  - { name: ${name}, rdbs: [T] }\nunknown_partition: ${name}\nrules: []\n`, "p.yaml");
+    const r = decide([{ class: "write", source: "sql", object: { lib: "A", name: "T" } }], { user: "JDOE", partition: name }, p);
+    assert.deepEqual([r.decision, r.effective], ["deny", "deny"], name);
+  }
+});
+
+test("review: IBMI_PARTITION is ignored when the policy lists no partitions", async () => {
+  const p = builtinPolicy();
+  const who = detectPartition(p, { declared: "dev" });
+  assert.deepEqual(who, {});
+  const r = decide((await classify("DELETE FROM LVORD.T", { lookups: lookups() })).operations, { user: "JDOE", ...who }, p);
+  assert.equal(r.effective, "allow");
+});
+
+test("review: a command-table partition is enforced if either it or the connection enforces; a remote RDB takes its own", () => {
+  // connection prod (enforce), target dev (observe) through a parameter's partition:
+  const param: Operation = { class: "promote", source: "cl", command: "PRMOBJ", object: { lib: "DVORD", name: "DVORD", type: "*LIB" }, partition: "dev" };
+  const r1 = decide([param], as("analyst", "prod"), D4);
+  assert.deepEqual([r1.operations[0].partition, r1.decision, r1.effective], ["dev", "deny", "deny"]);
+  // the same through a mapped RDB runs on dev, so only dev's (observe) mode applies
+  const remote: Operation = { class: "write", source: "sql", object: { rdb: "DEVRDB", lib: "LVORD", name: "T" }, partition: "dev" };
+  const r2 = decide([remote], as("dev", "prod"), D4);
+  assert.deepEqual([r2.decision, r2.effective], ["deny", "allow"]);
+  // connection dev (observe), target prod (enforce): enforced either way
+  assert.equal(decide([{ ...param, partition: "prod" }], as("analyst", "dev"), D4).effective, "deny");
+});
+
+test("review: command_files stay inside the policy's folder; overriding a shipped danger warns", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "ok.yaml"), "commands:\n  SBMJOB: { class: call }\n");
+  const policy = join(dir, "policy.yaml");
+  for (const f of [join(dir, "ok.yaml"), "../ok.yaml", "sub/../../ok.yaml"]) {
+    writeFileSync(policy, `version: 1\ncommand_files: ["${f.replace(/\\/g, "/")}"]\nrules: []\n`);
+    assert.throws(() => loadPolicy(policy), /must be a relative path inside the policy's folder/, f);
+  }
+  writeFileSync(policy, "version: 1\ncommand_files: [ok.yaml]\nrules: []\n");
+  assert.deepEqual(loadPolicy(policy).warnings, [`${policy}: ok.yaml overrides SBMJOB, which the shipped table classes danger`]);
 });

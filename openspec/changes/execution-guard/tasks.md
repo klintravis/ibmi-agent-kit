@@ -27,7 +27,7 @@
 ## 5. Server: decision context, tools and confirmation (guarded-tools spec; D5, D7)
 
 - [ ] 5.1 Implement the server's `lookups` over the transport and per-connection identity and partition resolution (D5); selfcheck with a stub transport: profile `dev` on a box whose RDB maps to prod decides as prod, System/RDB disagreement denies, empty `USER_INFO` → `default_role` logged, authorization-list role found
-- [ ] 5.2 Add `run_script` (destructive) and `policy_check` (read-only, optional `policy` and `as` for offline decisions) with structured content and `maxRows` bounds, honouring `IBMI_READ_ONLY` and `IBMI_BLOCKED_TABLES`; selfcheck: one deny sends nothing, declined confirmation sends nothing, failure stops later statements, read-only profile refuses an allowed update, `policy_check` sends only lookups, and with `policy`/`as` sends nothing
+- [ ] 5.2 Add `run_script` (destructive) and `policy_check` (read-only, optional `policy` and `as` for offline decisions) with structured content and `maxRows` bounds, honouring `IBMI_READ_ONLY` and `IBMI_BLOCKED_TABLES`; the tool layer decides every operation of the whole script before sending anything; selfcheck: one deny sends nothing, `FROBCMD X` then `PWRDWNSYS` sends nothing, an unmapped `CONNECT` then a `DELETE` sends nothing, declined confirmation sends nothing, failure stops later statements, read-only profile refuses an allowed update, `policy_check` sends only lookups, and with `policy`/`as` sends nothing
 - [ ] 5.3 Implement confirmation (D7): one elicitation per call, 120 s timeout, `confirm === true` required, operations shown before comment-stripped text, startup notice; selfcheck with an in-memory client: no capability → deny message, accept+true runs and logs `confirmed`, accept+false/decline/timeout deny
 
 ## 6. Engine hooks (guarded-tools spec; D6)
@@ -37,7 +37,7 @@
 
 ## 7. Documentation
 
-- [ ] 7.1 README "Policy" section: observe-first rollout incl. per-partition mode, each policy section with the D4 example, command files and `class_by_param` for change-management products, roles from groups/authorization lists/users, `policy_check`, `policy test` in a company's CI, `policy replay` before enforcing, confirmation (clients without elicitation get deny), the run log (not tamper-proof), the stated limits, and client permission rules denying the agent edits to the policy, profile and verb files; verify the README example is byte-identical to `examples/three-partitions.yaml` and `scripts/check-names.mjs` reports no hits
+- [ ] 7.1 README "Policy" section: observe-first rollout incl. per-partition mode, each policy section with the D4 example, command files and `class_by_param` for change-management products, roles from groups/authorization lists/users, `policy_check`, `policy test` in a company's CI, `policy replay` before enforcing, confirmation (clients without elicitation get deny), the run log (not tamper-proof), the stated limits (incl. library-list shadowing: in observe mode `ADDLIBLE MYLIB` then an unqualified unknown `FROBCMD X` runs `MYLIB/FROBCMD`; QSYS commands cannot be shadowed this way), and client permission rules denying the agent edits to the policy, profile and verb files; verify the README example is byte-identical to `examples/three-partitions.yaml` and `scripts/check-names.mjs` reports no hits
 - [ ] 7.2 Update `docs/idea.md` roadmap; verify no claim there contradicts the specs
 
 ## 8. Integration

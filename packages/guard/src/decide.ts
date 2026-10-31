@@ -1,6 +1,6 @@
 // decide() (design D4) and the matching it builds on: who, where and which environment. The server
 // supplies the names it read from the box; policy tests state them.
-import type { Mode, Policy, Verdict } from "./policy.js";
+import type { Policy, Verdict } from "./policy.js";
 import type { Operation } from "./types.js";
 
 export interface Identity {
@@ -44,7 +44,8 @@ export function detectPartition(policy: Policy, names: { system?: string; rdb?: 
   for (const p of policy.partitions) {
     if ((system && p.systems.includes(system)) || (rdb && p.rdbs.includes(rdb))) found.push(p.name);
   }
-  if (names.declared !== undefined) {
+  // With no partitions (the built-in policy) a declaration has nothing to agree with.
+  if (names.declared !== undefined && policy.partitions.length) {
     if (!policy.partitions.some((p) => p.name === names.declared)) return { conflict: `IBMI_PARTITION ${names.declared} is not a partition of the policy` };
     found.push(names.declared);
   }
@@ -59,16 +60,18 @@ export function detectPartition(policy: Policy, names: { system?: string; rdb?: 
 
 // Every role whose sources match, else `default_role`. A failed group lookup only drops the group
 // and authorization-list sources: user names still match, so a contractor whose lookup fails is
-// still a contractor and does not fall back to the default role.
-export function rolesOf(identity: Identity, policy: Policy): string[] {
+// still a contractor and does not fall back to the default role. `source` says why, for the run log.
+export type RoleSource = "matched" | "default_no_match" | "default_lookup_failed";
+export function rolesOf(identity: Identity, policy: Policy): { roles: string[]; source: RoleSource } {
   const user = identity.user.toUpperCase();
   const groups = (identity.groups ?? []).map((g) => g.toUpperCase());
   const authlists = (identity.authlists ?? []).map((a) => a.toUpperCase());
   const held = policy.roles
     .filter((r) => r.groups.some((g) => groups.includes(g)) || r.authlists.some((a) => authlists.includes(a)) || r.users.some((u) => glob(u, user).test(user)))
     .map((r) => r.name);
-  if (held.length) return held;
-  return policy.defaultRole ? [policy.defaultRole] : [];
+  if (held.length) return { roles: held, source: "matched" };
+  const roles = policy.defaultRole ? [policy.defaultRole] : [];
+  return { roles, source: identity.groups && identity.authlists ? "default_no_match" : "default_lookup_failed" };
 }
 
 export interface OperationDecision {
@@ -90,6 +93,8 @@ export interface Decision {
   effective: Verdict; // what happens: the most restrictive enforced decision, else allow
   enforced: boolean; // effective is not allow
   operations: OperationDecision[];
+  roles: string[]; // the roles held
+  roleSource: RoleSource;
   // Only for a statement with no operations (COMMIT, VALUES 1): allowed as nothing to decide, or
   // denied with every other statement when the partition names disagree.
   reason?: "no_operations" | "partition_conflict";
@@ -110,17 +115,24 @@ const hit = (key: string[] | undefined, value: string | undefined) => !key || (v
 // Decide one statement's operations for an identity. A statement takes its most restrictive
 // operation; in observe mode only danger, unqualified and a partition conflict are enforced.
 export function decide(operations: Operation[], identity: Identity, policy: Policy): Decision {
+  const { roles, source: roleSource } = rolesOf(identity, policy);
   if (!operations.length) {
-    if (identity.conflict) return { decision: "deny", effective: "deny", enforced: true, operations: [], reason: "partition_conflict" };
-    return { decision: "allow", effective: "allow", enforced: false, operations: [], reason: "no_operations" };
+    if (identity.conflict) return { decision: "deny", effective: "deny", enforced: true, operations: [], roles, roleSource, reason: "partition_conflict" };
+    return { decision: "allow", effective: "allow", enforced: false, operations: [], roles, roleSource, reason: "no_operations" };
   }
-  const roles = rolesOf(identity, policy);
-  const modeOf = (partition: string | undefined): Mode => (partition && policy.mode.partitions[partition]) || policy.mode.default;
+  // Own keys only, and anything but observe enforces: a partition named `constructor` is no loophole.
+  const observes = (partition: string | undefined): boolean =>
+    (partition !== undefined && Object.hasOwn(policy.mode.partitions, partition) ? policy.mode.partitions[partition] : policy.mode.default) === "observe";
+  // An identity built without a partition is an unknown box, never "no partition".
+  const connection = identity.partition ?? policy.unknownPartition;
   const decided = operations.map((op): OperationDecision => {
-    // An identity built without a partition is an unknown box, never "no partition".
-    const partition = op.partition ?? identity.partition ?? policy.unknownPartition;
+    const partition = op.partition ?? connection;
+    // A command-table partition: names where the target is, but the command runs on this box, so
+    // either enforcing enforces. A remote RDB operation runs there and takes only its own mode.
+    const remote = !!op.object?.rdb;
+    const enforcing = !observes(partition) || (!remote && op.partition !== undefined && !observes(connection));
     const d = (decision: Verdict, reason: OperationDecision["reason"], message: string, hard: boolean): OperationDecision => {
-      const r: OperationDecision = { operation: op, decision, enforced: decision !== "allow" && (hard || modeOf(partition) === "enforce"), reason, message };
+      const r: OperationDecision = { operation: op, decision, enforced: decision !== "allow" && (hard || enforcing), reason, message };
       if (partition) r.partition = partition;
       return r;
     };
@@ -147,5 +159,5 @@ export function decide(operations: Operation[], identity: Identity, policy: Poli
   });
   const decision = worst(decided.map((o) => o.decision));
   const effective = worst(decided.filter((o) => o.enforced).map((o) => o.decision));
-  return { decision, effective, enforced: effective !== "allow", operations: decided };
+  return { decision, effective, enforced: effective !== "allow", operations: decided, roles, roleSource };
 }

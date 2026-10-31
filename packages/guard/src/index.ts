@@ -32,4 +32,4 @@ export type {
 export { BUILTIN_POLICY, builtinPolicy, loadPolicy, parsePolicy } from "./policy.js";
 export type { Mode, Policy, Rule, Verdict } from "./policy.js";
 export { decide, detectPartition, environmentOf, rolesOf } from "./decide.js";
-export type { Decision, Identity, OperationDecision } from "./decide.js";
+export type { Decision, Identity, OperationDecision, RoleSource } from "./decide.js";

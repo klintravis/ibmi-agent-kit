@@ -6,8 +6,8 @@ One MCP server for IBM i (5250 screens, source members, SQL and CL). Intent and 
 ## Layout
 
 - `packages/core`: profile loader (`CONFIG_DIRS`, `resolveProfileEnv`) and the SQL transport type
-- `packages/guard`: execution guard, pure: statement classifier (`classify`) and the CL command table
-  (`src/commands.yaml`)
+- `packages/guard`: execution guard, pure: statement classifier (`classify`), the CL command table
+  (`src/commands.yaml`) and the policy (`loadPolicy`, `decide`)
 - `packages/screen`: 5250 engine, `register(mcp)` in `src/tools.ts`
 - `packages/source`: source and SQL engine, `register(mcp)` in `src/tools.ts`
 - `packages/server`: the kit's stdio server; owns `list_servers`, logging and shutdown

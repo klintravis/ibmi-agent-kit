@@ -2,7 +2,7 @@
 // shape strictly, merges the command tables, and leaves a normalised `Policy` that matching and
 // `decide` read without further checks.
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import { BUILTIN_CLASSES } from "./types.js";
 import { builtinCommands, commandTableSchema, customClasses, issueLines, mergeCommands, parseCommandFile, parseYaml, type CommandTable } from "./commands.js";
@@ -91,11 +91,17 @@ export function parsePolicy(text: string, file: string): Policy {
   if (!r.success) throw new Error(issueLines(file, r.error));
   const p = r.data;
 
-  const tables: CommandTable[] = [builtinCommands()];
+  const shipped = builtinCommands();
+  const tables: CommandTable[] = [shipped];
+  const overrides: string[] = [];
   for (const f of p.command_files ?? []) {
     const path = resolve(dirname(file), f);
+    const rel = relative(dirname(resolve(file)), path);
+    if (isAbsolute(f) || !rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error(`${file}: command_files: ${f} must be a relative path inside the policy's folder`);
     if (!existsSync(path)) throw new Error(`${file}: command_files: ${path} not found`);
-    tables.push(parseCommandFile(readFileSync(path, "utf8"), path));
+    const table = parseCommandFile(readFileSync(path, "utf8"), path);
+    for (const cmd of Object.keys(table)) if (shipped[cmd]?.class === "danger") overrides.push(`${f} overrides ${cmd}, which the shipped table classes danger`);
+    tables.push(table);
   }
   if (p.commands) tables.push(p.commands);
 
@@ -131,12 +137,12 @@ export function parsePolicy(text: string, file: string): Policy {
   if (p.default_role) policy.defaultRole = p.default_role;
   const errors = references(policy);
   if (errors.length) throw new Error(errors.map((e) => `${file}: ${e}`).join("\n"));
-  policy.warnings = shadows(policy).map((w) => `${file}: ${w}`);
+  policy.warnings = [...overrides, ...shadows(policy)].map((w) => `${file}: ${w}`);
   return policy;
 }
 
 // Environment names rules may use without defining them.
-export const RESERVED_ENVS = ["unmatched", "unqualified"];
+const RESERVED_ENVS = ["unmatched", "unqualified"];
 
 // Every name a policy uses must be defined; returns the errors.
 function references(p: Policy): string[] {
