@@ -25,7 +25,7 @@ function emptyConfig() {
 }
 
 async function connected() {
-  const kit = createServer();
+  const kit = createServer({ policy: builtinPolicy() }); // reads no profile on this machine
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "selfcheck", version: "0" });
   await Promise.all([kit.mcp.connect(serverSide), client.connect(clientSide)]);
@@ -291,7 +291,7 @@ const CONFIRM_POLICY = parsePolicy("version: 1\nmode: enforce\nrules:\n  - { cla
 
 type Row = Record<string, unknown>;
 // A box: answers the guard's own queries, records every script statement that reaches it.
-function stubConn(o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string } = {}) {
+function stubConn(o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string } = {}) {
   const sent: string[] = [];
   const queries: string[] = [];
   const own = (sql: string): Row[] | undefined => {
@@ -303,9 +303,11 @@ function stubConn(o: { rdb?: string; user?: string; userInfo?: Row | null; authl
   };
   const run = (sql: string) => {
     sent.push(sql);
+    if (o.resetOn && sql.includes(o.resetOn)) conn.generation!++; // the job dropped and was reopened
     if (o.failOn && sql.includes(o.failOn)) throw new Error(`SQL0204 ${o.failOn} not found`);
   };
   const conn: Conn = {
+    generation: 0,
     profile: { user: o.user ?? "JDOE", password: "Secret1x", readOnly: o.readOnly ?? false, blockedTables: o.blockedTables ?? [], blockedCl: [] },
     async query(sql, _params, maxRows = 100) {
       const rows = own(sql);
@@ -571,3 +573,51 @@ for (const [name, answer] of ANSWERS) {
     }
   });
 }
+
+test("5.2: a connection reset after the script was decided stops it and says so", async () => {
+  const k = await guardedKit({ stub: stubConn({ resetOn: "MYLIB.B" }) });
+  try {
+    const r = await k.call("run_script", { script: "INSERT INTO MYLIB.A VALUES 1;\nINSERT INTO MYLIB.B VALUES 2;\nINSERT INTO MYLIB.C VALUES 3" });
+    assert.equal(r.error, true);
+    assert.deepEqual(k.stub.sent, ["INSERT INTO MYLIB.A VALUES 1", "INSERT INTO MYLIB.B VALUES 2"]);
+    assert.deepEqual(r.s.statements.map((x: any) => x.outcome), ["ok", "ok", "not sent"]);
+    assert.match(r.text, /reset after the script was decided/);
+  } finally {
+    await k.close();
+  }
+});
+
+test("5.1: each profile's IBMI_KIT_POLICY is loaded at startup; a missing one refuses to start; the environment's is ignored", async () => {
+  const { root, env } = emptyConfig();
+  const saved = { ...process.env };
+  const config = join(root, "config");
+  const missing = join(root, "nope.yaml");
+  mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, ".env.dev"), `IBMI_HOST=h\nIBMI_USER=JDOE\nIBMI_PASSWORD=p\nIBMI_KIT_POLICY=${D4_PATH}\n`);
+  writeFileSync(join(config, ".env.bad"), `IBMI_HOST=h\nIBMI_KIT_POLICY=${missing}\n`);
+  Object.assign(process.env, env);
+  for (const k of Object.keys(process.env)) if (k.startsWith("IBMI_") && !(k in env)) delete process.env[k];
+  try {
+    assert.throws(() => createServer(), (e: Error) => e.message.includes(missing));
+    rmSync(join(config, ".env.bad"));
+    process.env.IBMI_KIT_POLICY = missing; // a registration's environment cannot pick or drop the policy
+    const stub = stubConn();
+    const kit = createServer({ conn: () => stub.conn, runLogDir: join(root, "runs"), notice: () => {} });
+    const client = new Client({ name: "selfcheck", version: "0" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([kit.mcp.connect(b), client.connect(a)]);
+    try {
+      const r = await client.callTool({ name: "policy_check", arguments: { script: "DELETE FROM INLIB1.ORD", server: "dev", as: { user: "JDOE", groups: ["GRPDEV"], partition: "dev" } } });
+      const s = r.structuredContent as any;
+      assert.equal(s.policy, D4_PATH);
+      assert.equal(s.statements[0].operations[0].rule, 6);
+    } finally {
+      await client.close();
+      await shutdownAll(kit.engines);
+    }
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    rmSync(root, { recursive: true, force: true });
+  }
+});

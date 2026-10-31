@@ -137,9 +137,13 @@ text; each line also stores the identity and the lookup answers used, so it can 
 - *Server context (D5):* the System name comes from the screen engine once a session read it;
   identity and RDB are read once per server over SQL and not cached when that fails; the profile's
   password is passed as the run log's `secret`, and `names` (System, RDB, `IBMI_PARTITION`) are
-  logged so replay re-detects the partition. `IBMI_PARTITION` is profile-only (core `PROTECTED`);
-  `IBMI_KIT_POLICY` is read from the server's environment at startup, as one policy serves every
-  profile. The profile's own guards (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`)
+  logged so replay re-detects the partition. `IBMI_PARTITION` and `IBMI_KIT_POLICY` are
+  profile-only (core `PROTECTED`), so a registration's environment can neither pick nor drop the
+  policy. `IBMI_KIT_POLICY` is an absolute path; each file is loaded once, every listed profile's
+  at startup (a missing or invalid one refuses to start), a profile added later on first use; with
+  none, the built-in observe policy, which still denies `danger` and `unqualified`. A connection
+  reset after the script was decided (the backend's job generation changed) stops `run_script`
+  before the next statement. The profile's own guards (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`)
   refuse in every mode, observe included.
 
 ### D9. Policy tests and replay as a CLI on the server package

@@ -26,11 +26,12 @@ export interface Conn {
   query(sql: string, params?: unknown[], maxRows?: number): Promise<{ rows: Record<string, unknown>[]; columns: { name: string }[]; truncated: boolean }>;
   execute(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; messages: Msg[] }>;
   cl(command: string): Promise<{ ok: boolean; messages: Msg[] }>;
+  generation?: number; // bumped when the job is lost or reset
 }
 
 export interface GuardDeps {
-  policy: Policy;
-  runLog: RunLog;
+  // The policy the server's profile names (IBMI_KIT_POLICY), loaded once, and its run log.
+  policyFor(server: string): { policy: Policy; runLog: RunLog };
   conn(server: string): Conn;
   profileEnv(server: string): Record<string, string>; // the profile file, for IBMI_PARTITION
   systemName(server: string): string | undefined; // the 5250 sign-on System name, once a session read it
@@ -172,10 +173,9 @@ const stopping = (p: Planned) => p.refused !== undefined || p.decision.effective
 const why = (p: Planned) => p.refused ?? p.decision.operations.filter((o) => o.enforced && o.decision === "deny").map((o) => o.message).join("; ");
 
 export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
-  const { policy } = deps;
   const boxes = new Map<string, Promise<Box>>();
 
-  async function identityOf(server: string, conn: Conn): Promise<{ identity: Identity; names: PartitionNames; notes: string[] }> {
+  async function identityOf(server: string, conn: Conn, policy: Policy): Promise<{ identity: Identity; names: PartitionNames; notes: string[] }> {
     let p = boxes.get(server);
     if (!p) {
       p = readBox(conn);
@@ -201,8 +201,9 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
   // Every statement of the script decided, and the profile's own guards applied, before anything
   // is sent. Only the identity and catalog lookups reach the box.
   async function plan(server: string, script: string): Promise<{ plan: Plan; conn: Conn }> {
+    const { policy } = deps.policyFor(server);
     const conn = deps.conn(server);
-    const who = await identityOf(server, conn);
+    const who = await identityOf(server, conn, policy);
     const { lookups, answers } = recordLookups(sqlLookups(conn));
     const { classification, decisions } = await decideStatements(script, who.identity, policy, lookups);
     const statements = classification.statements.map((statement, i): Planned => {
@@ -215,7 +216,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
   }
 
   function log(p: Plan, conn: Conn, outcomes: string[], confirmed?: boolean): void {
-    deps.runLog.record({
+    deps.policyFor(p.server).runLog.record({
       server: p.server,
       tool: "run_script",
       identity: p.identity,
@@ -292,6 +293,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
         return fail(e);
       }
       const { plan: p, conn } = planned;
+      const generation = conn.generation; // the job the script was decided against
       const summary = { server: s, partition: p.identity.partition, roles: p.statements[0]?.decision.roles ?? [] };
 
       const stopped = p.statements.filter(stopping);
@@ -319,11 +321,14 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
       const cap = maxRows ?? 100;
       const outcomes: string[] = [];
       const done: Record<string, unknown>[] = [];
-      let failed = false;
+      let stop: string | undefined;
       for (const [i, x] of p.statements.entries()) {
         const r = report(x, i);
-        if (failed) {
-          outcomes.push("not sent: an earlier statement failed");
+        // shortcut: a reset during a statement's own send is seen before the next one, not before it ran.
+        if (!stop && conn.generation !== generation)
+          stop = "the connection to the IBM i was reset after the script was decided, so QTEMP, the library list and *CURLIB may not be what it was decided against";
+        if (stop) {
+          outcomes.push(`not sent: ${stop}`);
           done.push({ ...r, outcome: "not sent" });
           continue;
         }
@@ -346,14 +351,14 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
           }
           done.push({ ...r, outcome: "ok" });
         } catch (e) {
-          failed = true;
+          stop = "an earlier statement failed";
           outcomes.push(`failed: ${(e as Error).message}`);
           done.push({ ...r, outcome: "failed", error: (e as Error).message });
         }
       }
       log(p, conn, outcomes, needs.length ? true : undefined);
-      const text = done.map((_, i) => `statement ${i + 1}: ${outcomes[i]}`).join("\n") + (failed ? "\nStopped at the first failure; later statements were not sent." : "");
-      return result({ ...summary, ran: true, statements: done }, `${text}\n\n${JSON.stringify(done, null, 2)}`, failed);
+      const text = done.map((_, i) => `statement ${i + 1}: ${outcomes[i]}`).join("\n") + (stop ? `\nStopped: ${stop}; later statements were not sent.` : "");
+      return result({ ...summary, ran: true, statements: done }, `${text}\n\n${JSON.stringify(done, null, 2)}`, stop !== undefined);
     },
   );
 
@@ -387,7 +392,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
         let statements: Record<string, unknown>[];
         let head: Record<string, unknown>;
         if (as) {
-          const used = candidate ? loadPolicy(candidate) : policy;
+          const used = candidate ? loadPolicy(candidate) : deps.policyFor(key(server)).policy;
           const [t] = await runPolicyTests(used, [{ name: "policy_check", as, script, expect: "allow" }]);
           head = { policy: used.source, as, offline: true };
           statements = t.statements.map((x, i) => report({ statement: { display: x.text }, decision: x.decision }, i));

@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CONFIG_DIRS, listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
-import { loadPolicy, RunLog } from "@ibmi-agent-kit/guard";
+import { loadPolicy, RunLog, type Policy } from "@ibmi-agent-kit/guard";
 import { CONFIRM_TIMEOUT_MS, registerGuarded, type GuardDeps } from "./guarded.js";
 import { KEYS, register as registerScreen } from "@ibmi-agent-kit/screen/tools";
 import { register as registerSource } from "@ibmi-agent-kit/source/tools";
@@ -16,29 +16,47 @@ export interface KitServer {
   engines: Engine[];
 }
 
-export interface ServerDeps extends Partial<Omit<GuardDeps, "runLog">> {
+export interface ServerDeps extends Partial<Omit<GuardDeps, "policyFor">> {
   extra?: (mcp: McpServer) => void;
+  policy?: Policy; // every server decides with this one instead of its profile's IBMI_KIT_POLICY
   runLogDir?: string;
 }
 
 // No process state is touched here: no listeners, no exit, no stdout. index.ts owns the process.
 // A tool name two engines both register throws the SDK's "Tool <name> is already registered".
-// The policy is loaded once, here: a missing or invalid IBMI_KIT_POLICY file throws, and index.ts
-// refuses to start naming it. Unset, the built-in observe policy applies.
+// The policy comes from each profile's IBMI_KIT_POLICY (the profile file only, like every guard
+// setting), each file loaded once: every listed profile's at startup, so a missing or invalid
+// file throws and index.ts refuses to start naming it; a profile added later on first use. Unset,
+// the built-in observe policy applies.
 export function createServer(deps: ServerDeps = {}): KitServer {
   const mcp = new McpServer({ name: "ibmi-agent-kit", version: "0.1.0" }, { capabilities: { logging: {} } });
   const screen = registerScreen(mcp, { listServers: false });
   const source = registerSource(mcp, { listServers: false });
   deps.extra?.(mcp);
 
-  const policy = deps.policy ?? loadPolicy(process.env.IBMI_KIT_POLICY || undefined);
   const notice = deps.notice ?? ((m: string) => console.error(m));
-  for (const w of policy.warnings) notice(`[ibmi-agent-kit] policy warning: ${w}`);
+  const profileEnv = deps.profileEnv ?? ((server: string) => resolveProfileEnv(server));
+  const runLogDir = deps.runLogDir ?? join(CONFIG_DIRS()[0], "runs");
+  const loaded = new Map<string, { policy: Policy; runLog: RunLog }>();
+  const policyFor = (server: string) => {
+    const path = deps.policy ? "" : (profileEnv(server).IBMI_KIT_POLICY?.trim() ?? "");
+    let entry = loaded.get(path);
+    if (!entry) {
+      // A relative path would depend on the client's working folder.
+      if (path && !isAbsolute(path)) throw new Error(`profile ${server}: IBMI_KIT_POLICY must be an absolute path, not ${path}`);
+      const policy = deps.policy ?? loadPolicy(path || undefined);
+      for (const w of policy.warnings) notice(`[ibmi-agent-kit] policy warning: ${w}`);
+      entry = { policy, runLog: new RunLog(runLogDir, policy, notice) };
+      loaded.set(path, entry);
+    }
+    return entry;
+  };
+  if (!deps.policy) for (const server of listServers()) policyFor(server);
+
   registerGuarded(mcp, {
-    policy,
-    runLog: new RunLog(deps.runLogDir ?? join(CONFIG_DIRS()[0], "runs"), policy, notice),
+    policyFor,
     conn: deps.conn ?? ((server) => source.backend(server)),
-    profileEnv: deps.profileEnv ?? ((server) => resolveProfileEnv(server)),
+    profileEnv,
     systemName: deps.systemName ?? (() => undefined), // group 6: the screen engine's sign-on System field
     confirmTimeoutMs: deps.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS,
     notice,
