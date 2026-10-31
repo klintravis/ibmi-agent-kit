@@ -11,6 +11,7 @@ import type { ObjectRef, OpClass, Operation } from "./types.js";
 const NO_OBJECT = new Set(["*NONE", "*SAME", "*N", "*DFT", "*CRTDFT", "*LDA", "*GDA", "*PDA", "*CURRENT", "*PRV", "*BLANK", "*SRCMBRTXT", "*GEN", "*NOCHK"]);
 // RDB values that mean this database.
 const LOCAL_RDB = new Set(["*LOCAL", "*NONE", "*CURRENT"]);
+const CARRIERS = ["CMD", "RQSDTA", "PGM", "TRGPGM", "CLASS"]; // keywords that name something to run
 const LIBL = new Set(["*LIBL", "*NLVLIBL"]); // qualifiers that search the library list
 const IBM_LIBS = new Set(["QSYS", "QSYS2", ...LIBL]);
 // Library special values that are never a reference to another parameter (*FROMLIB, *SAVLIB are).
@@ -109,10 +110,13 @@ export function classifyClText(text: string, run: Run): Operation[] {
   if (!entry) {
     // Only a command found through the library list may be one this table has not met yet; a
     // qualified one is someone's own command, and the qualifier rule decides it.
-    // A command that carries another command (CMD, RQSDTA) may run it anywhere: never just observed.
-    const carries = parsed.params.has("CMD") || parsed.params.has("RQSDTA");
+    // A command that carries a command or names a program to run may run it anywhere: never just
+    // observed. CL wants KEYWORD( with no blank, but `CMD (X)` is caught too rather than read as positional.
+    const carries =
+      CARRIERS.some((k) => parsed.params.has(k)) ||
+      parsed.positional.some((v, i) => CARRIERS.includes(v.toUpperCase()) && parsed.positional[i + 1]?.startsWith("("));
     if (!lib || LIBL.has(lib)) {
-      if (carries) return fail(`${name} is not in the command table and carries a command (CMD or RQSDTA) the guard does not see`, name);
+      if (carries) return fail(`${name} is not in the command table and names a command or program to run (${CARRIERS.join(", ")}) the guard does not see`, name);
       return [danger("cl", `${name} is not in the command table`, run, { command: name, code: "unknown_command" })];
     }
     if (lib === "QSYS" || lib === "QSYS2") return fail(`${lib}/${name} is not in the command table`, name);

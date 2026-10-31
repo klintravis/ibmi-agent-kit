@@ -43,7 +43,9 @@ checks refuse SHALL still be denied. The one exception is a `danger` operation w
 an unqualified (or `*LIBL`/`*NLVLIBL`) CL command missing from the command table (reason
 `unknown_command`): in observe mode it is logged as `decision: deny, enforced: false` with that
 reason and runs. This is a stated limit: after `ADDLIBLE MYLIB`, an unqualified unknown `FROBCMD X`
-observed this way runs `MYLIB/FROBCMD`; QSYS commands cannot be shadowed like this. A statement
+observed this way runs `MYLIB/FROBCMD`; QSYS commands cannot be shadowed like this. Likewise the
+command table's `danger` entries are the boundary while observing: an IBM command missing from the
+table runs in observe mode. A statement
 runs only if every operation in it runs. The built-in policy SHALL be
 in observe mode.
 

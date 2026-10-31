@@ -1017,3 +1017,17 @@ test("review: command_files stay inside the policy's folder; overriding a shippe
   writeFileSync(policy, "version: 1\ncommand_files: [ok.yaml]\nrules: []\n");
   assert.deepEqual(loadPolicy(policy).warnings, [`${policy}: ok.yaml overrides SBMJOB, which the shipped table classes danger`]);
 });
+
+test("review 2: program-running commands, carrier keywords and outage commands are danger while observing", async () => {
+  const p = builtinPolicy();
+  for (const script of ["CL: SBMNWSCMD 'format d:' NWS1", "CL: FROBX PGM(EVIL/P)", "CL: FROBX TRGPGM(EVIL/P)", "CL: FROBX CLASS(EVIL/C)", "CL: FROBX CMD (PWRDWNSYS)", "CL: VRYCFG CFGOBJ(L1) CFGTYPE(*LIN) STATUS(*OFF)"]) {
+    const c = await classify(script, { lookups: lookups() });
+    const r = decide(c.operations, { user: "JDOE" }, p);
+    assert.deepEqual([r.effective, r.operations[0].reason], ["deny", "danger"], script);
+  }
+  const frob = await classify("CL: FROBCMD X (Y)", { lookups: lookups() });
+  assert.equal(frob.operations[0].code, "unknown_command", "positional values never carry");
+  const t = builtinCommands();
+  for (const cmd of ["SBMNWSCMD", "ADDPFTRG", "CHGPFTRG", "ADDRTGE", "CHGRTGE", "ADDPJE", "CHGPJE", "JAVA", "RUNJVA", "VRYCFG", "ENDTCPSVR", "ENDHOSTSVR", "ENDPJ", "ENDTCPIFC", "ENDWTR", "CLRJOBQ", "CLROUTQ", "DLTSPLF", "DLTJRN", "CHGJRN", "RSTUSRPRF", "RSTAUT", "CHGIPLA", "ADDRPYLE"])
+    assert.equal(t[cmd]?.class, "danger", cmd);
+});

@@ -193,3 +193,29 @@ commands:
   RMVDIR:   { class: danger, reason: "removes an IFS directory" }
   RNM:      { class: danger, reason: "renames an IFS object" }
   MOV:      { class: danger, reason: "moves an IFS object" }
+  # run a program or command somewhere the guard does not see
+  SBMNWSCMD: { class: danger, reason: "runs a command on an integrated server" }
+  ADDPFTRG: { class: danger, reason: "adds a trigger program that runs for other users" }
+  CHGPFTRG: { class: danger, reason: "changes a trigger program" }
+  ADDRTGE:  { class: danger, reason: "adds a routing entry that starts a program for jobs" }
+  CHGRTGE:  { class: danger, reason: "changes a routing entry's program" }
+  ADDPJE:   { class: danger, reason: "adds a prestart job entry that starts a program" }
+  CHGPJE:   { class: danger, reason: "changes a prestart job entry" }
+  JAVA:     { class: danger, reason: "runs a Java program the guard does not see" }
+  RUNJVA:   { class: danger, reason: "runs a Java program the guard does not see" }
+  # outages and destruction others feel
+  VRYCFG:   { class: danger, reason: "varies a line, controller or device on or off" }
+  ENDTCPSVR: { class: danger, reason: "ends a TCP/IP server for everyone" }
+  ENDHOSTSVR: { class: danger, reason: "ends host servers for everyone" }
+  ENDPJ:    { class: danger, reason: "ends prestart jobs" }
+  ENDTCPIFC: { class: danger, reason: "ends a TCP/IP interface" }
+  ENDWTR:   { class: danger, reason: "ends a writer" }
+  CLRJOBQ:  { class: danger, reason: "clears a job queue of other users' jobs" }
+  CLROUTQ:  { class: danger, reason: "clears an output queue of other users' spooled files" }
+  DLTSPLF:  { class: danger, reason: "deletes spooled files" }
+  DLTJRN:   { class: danger, reason: "deletes a journal" }
+  CHGJRN:   { class: danger, reason: "changes a journal or its receivers" }
+  RSTUSRPRF: { class: danger, reason: "restores user profiles" }
+  RSTAUT:   { class: danger, reason: "restores authorities" }
+  CHGIPLA:  { class: danger, reason: "changes IPL attributes" }
+  ADDRPYLE: { class: danger, reason: "adds a system reply list entry that answers messages for every job" }
