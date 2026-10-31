@@ -31,5 +31,5 @@ export type {
 } from "./types.js";
 export { BUILTIN_POLICY, builtinPolicy, loadPolicy, parsePolicy } from "./policy.js";
 export type { Mode, Policy, Rule, Verdict } from "./policy.js";
-export { detectPartition, environmentOf, rolesOf } from "./decide.js";
-export type { Identity } from "./decide.js";
+export { decide, detectPartition, environmentOf, rolesOf } from "./decide.js";
+export type { Decision, Identity, OperationDecision } from "./decide.js";

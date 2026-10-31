@@ -14,6 +14,7 @@ import {
   classifyCl,
   builtinPolicy,
   customClasses,
+  decide,
   detectPartition,
   environmentOf,
   loadPolicy,
@@ -25,6 +26,7 @@ import {
   type Classification,
   type ClassifyContext,
   type CommandTable,
+  type Identity,
   type Lookups,
   type Operation,
 } from "./index.js";
@@ -718,4 +720,222 @@ test("roles: authorization lists and supplemental groups", () => {
   assert.deepEqual(rolesOf({ user: "JDOE", groups: [], authlists: ["AUTLQA"] }, D4), ["qa"]);
   assert.deepEqual(rolesOf({ user: "JDOE", groups: ["GRPANL", "GRPDEV"] }, D4).sort(), ["analyst", "dev"]);
   assert.deepEqual(rolesOf({ user: "JDOE", groups: [] }, builtinPolicy()), [], "no roles and no default");
+});
+
+// --- decide (execution-policy spec; task 2.4) ---
+
+const WHO: Record<string, Identity> = {
+  dev: { user: "JDOE", groups: ["GRPDEV"], authlists: [] },
+  qa: { user: "JDOE", groups: ["GRPQA"], authlists: [] },
+  "dev+qa": { user: "JDOE", groups: ["GRPDEV", "GRPQA"], authlists: [] },
+  contractor: { user: "CTR01", groups: [], authlists: [] },
+  analyst: { user: "ANL01", groups: ["GRPANL"], authlists: [] },
+};
+const as = (who: string, partition: string): Identity => ({ ...WHO[who], partition });
+const d4ctx = (stub: Stub = {}): ClassifyContext => ({ lookups: lookups(stub), commands: D4.commands, rdbs: D4.rdbs });
+async function decideScript(script: string, who: Identity, stub: Stub = {}) {
+  const c = await classify(script, d4ctx(stub));
+  return decide(c.operations, who, D4);
+}
+
+// The D4 example as a decision table. Libraries stand for environments: ME is the user's own
+// library, ~ an unqualified read or call, - an operation on no object. Every cell not listed as
+// allowed is expected to be denied. Written by hand from the rules, not computed.
+const LIBS = ["QTEMP", "ME", "PAYLIB", "QTORD", "QSYS2", "DVORD", "INORD", "SQORD", "SPORD", "LVORD", "XYZLIB", "~", "-"];
+const CLASSES = ["read", "write", "ddl", "compile", "call", "liblist", "promote", "promote_qa", "promote_prod"];
+const NOT_PAY = "QTEMP ME QTORD QSYS2 DVORD INORD SQORD SPORD LVORD XYZLIB";
+const BASE = [`read|${NOT_PAY} ~ -`, "write ddl|QTEMP"]; // rule 3 (scratch) and rule 10 (read)
+const LIBLIST = `liblist|${NOT_PAY} -`; // rule 9
+const OWN = `${CLASSES.join(" ")}|ME DVORD INORD`; // rule 6: personal, devlibs, integ on dev
+const QA_DEV = [...BASE, LIBLIST, OWN, `promote_qa|${NOT_PAY} -`]; // + rule 7
+const QA_QA = [...BASE, LIBLIST, "read write call|QTORD"]; // + rule 8
+const ALLOWED: Record<string, Record<string, string[]>> = {
+  analyst: { dev: BASE, qa: BASE, prod: BASE },
+  contractor: { dev: ["read|QTEMP ME DVORD INORD", "write ddl|QTEMP"], qa: ["read write ddl|QTEMP"], prod: ["read write ddl|QTEMP"] },
+  dev: { dev: [...BASE, LIBLIST, OWN], qa: [...BASE, LIBLIST], prod: [...BASE, LIBLIST] },
+  qa: { dev: QA_DEV, qa: QA_QA, prod: [...BASE, LIBLIST] },
+  "dev+qa": { dev: QA_DEV, qa: QA_QA, prod: [...BASE, LIBLIST] },
+};
+
+function cellOp(cls: string, lib: string, user: string): Operation | undefined {
+  if (lib === "-") return { class: cls, source: "cl", command: "XCMD" };
+  if (lib === "~") return cls === "read" || cls === "call" ? { class: cls, source: "sql", object: { name: "T" }, env: "unqualified" } : undefined;
+  const l = lib === "ME" ? user : lib;
+  return { class: cls, source: "sql", object: cls === "liblist" ? { lib: l, name: l, type: "*LIB" } : { lib: l, name: "T" } };
+}
+
+test("decide: the D4 example as a decision table (roles x partitions x environments x classes)", () => {
+  const wrong: string[] = [];
+  let cells = 0;
+  for (const [who, byPart] of Object.entries(ALLOWED))
+    for (const [part, allowed] of Object.entries(byPart)) {
+      const yes = new Set(
+        allowed.flatMap((spec) => {
+          const [cs, ls] = spec.split("|");
+          return cs.split(" ").flatMap((c) => ls.split(" ").map((l) => `${c}@${l}`));
+        }),
+      );
+      for (const cls of CLASSES)
+        for (const lib of LIBS) {
+          const op = cellOp(cls, lib, WHO[who].user);
+          if (!op) continue;
+          cells++;
+          const got = decide([op], as(who, part), D4).decision;
+          const want = yes.has(`${cls}@${lib}`) ? "allow" : "deny";
+          if (got !== want) wrong.push(`${who} on ${part}: ${cls} ${lib} -> ${got}, expected ${want}`);
+        }
+    }
+  assert.deepEqual(wrong, []);
+  assert.equal(cells, 5 * 3 * (CLASSES.length * (LIBS.length - 1) + 2));
+});
+
+test("decide: environments resolve per partition inside decide", () => {
+  const env = (lib: string, part: string) => decide([cellOp("read", lib, "JDOE")!], as("dev", part), D4).operations[0].env;
+  assert.equal(env("QTORD", "dev"), "system");
+  assert.equal(env("QTORD", "qa"), "test");
+  assert.equal(env("DVORD", "qa"), "unmatched");
+  assert.equal(env("ME", "dev"), "personal");
+  assert.equal(env("~", "dev"), "unqualified");
+});
+
+test("Default deny: a ddl on qa no rule matches is denied naming the operation", () => {
+  const r = decide([{ class: "ddl", source: "sql", object: { lib: "QSYS2", name: "T" } }], as("dev", "qa"), D4);
+  assert.equal(r.decision, "deny");
+  assert.equal(r.operations[0].reason, "no_rule");
+  assert.match(r.operations[0].message, /no rule matches ddl QSYS2\.T \(environment system, partition qa\)/);
+});
+
+test("Read live, write own library: INSERT INTO JDOE.T SELECT * FROM LVORD.X is allowed, with each operation's rule", async () => {
+  const r = await decideScript("INSERT INTO JDOE.T SELECT * FROM LVORD.X", as("dev", "dev"));
+  assert.equal(r.decision, "allow");
+  const by = Object.fromEntries(r.operations.map((o) => [`${o.operation.class} ${o.operation.object?.lib}`, [o.reason, o.rule, o.env]]));
+  assert.deepEqual(by, { "write JDOE": ["rule", 6, "personal"], "read LVORD": ["rule", 10, "live"] });
+});
+
+test("One denied part denies the statement: a QTEMP alias to live", async () => {
+  const script = "CREATE ALIAS QTEMP.A FOR LVORD.ORD;\nDELETE FROM QTEMP.A";
+  const c = await classify(script, d4ctx({ bases: { "QTEMP.A": [{ lib: "LVORD", name: "ORD" }] } }));
+  const del = decide(c.statements[1].operations, as("dev", "prod"), D4);
+  assert.deepEqual(del.operations.map((o) => [o.operation.object?.lib, o.decision]), [["QTEMP", "allow"], ["LVORD", "deny"]]);
+  assert.deepEqual([del.decision, del.effective], ["deny", "deny"]);
+});
+
+test("decide: task rows (integ, stage_qa, promote_qa, contractor)", async () => {
+  assert.equal((await decideScript("DELETE FROM INORD.T", as("dev", "dev"))).decision, "allow");
+  assert.equal((await decideScript("DELETE FROM SQORD.T", as("dev", "dev"))).decision, "deny");
+  const promote = await decideScript("CL: CMPRM REQ(1234) LEVEL(QA)", as("qa", "dev"));
+  assert.deepEqual([promote.decision, promote.operations[0].rule, promote.operations[0].env], ["allow", 7, undefined]);
+  assert.equal((await decideScript("CL: CMPRM REQ(1234) LEVEL(QA)", as("dev", "dev"))).decision, "deny");
+  assert.equal((await decideScript("CL: CMPRM REQ(1234) LEVEL(HOTFIX)", as("qa", "dev"))).operations[0].reason, "danger");
+  const ctr = await decideScript("UPDATE DVORD.T SET C = 1", as("contractor", "dev"));
+  assert.deepEqual([ctr.decision, ctr.operations[0].rule], ["deny", 5]);
+});
+
+test("Observe a would-be deny: logged deny, not enforced, runs", async () => {
+  const r = await decideScript("DELETE FROM SQORD.T", as("dev", "dev"));
+  assert.deepEqual([r.decision, r.enforced, r.effective, r.operations[0].enforced], ["deny", false, "allow", false]);
+});
+
+test("Danger still blocked while observing: PWRDWNSYS", async () => {
+  const r = await decideScript("CL: PWRDWNSYS OPTION(*IMMED)", as("dev", "dev"));
+  assert.deepEqual([r.decision, r.enforced, r.effective, r.operations[0].reason], ["deny", true, "deny", "danger"]);
+});
+
+test("Unqualified still blocked while observing", async () => {
+  const r = await decideScript("UPDATE T SET C = 1", as("dev", "dev"));
+  assert.deepEqual([r.effective, r.operations[0].reason], ["deny", "unqualified"]);
+});
+
+test("Unknown command observed: FROBCMD X runs, logged deny / enforced false / unknown_command", async () => {
+  const r = await decideScript("CL: FROBCMD X", as("dev", "dev"));
+  assert.deepEqual([r.decision, r.enforced, r.effective, r.operations[0].reason], ["deny", false, "allow", "unknown_command"]);
+});
+
+test("Unknown command enforced: FROBCMD X on an enforcing partition is denied", async () => {
+  const r = await decideScript("CL: FROBCMD X", as("dev", "prod"));
+  assert.deepEqual([r.effective, r.operations[0].reason], ["deny", "unknown_command"]);
+});
+
+test("Qualified unknown command still blocked while observing: MYLIB/FROBCMD X", async () => {
+  const r = await decideScript("CL: MYLIB/FROBCMD X", as("dev", "dev"));
+  assert.deepEqual([r.effective, r.operations[0].reason], ["deny", "danger"]);
+});
+
+test("Unknown command next to a danger command: the operations together are denied", async () => {
+  const c = await classify("CL: FROBCMD X\nCL: PWRDWNSYS OPTION(*IMMED)", d4ctx());
+  assert.equal(decide(c.operations, as("dev", "dev"), D4).effective, "deny");
+  assert.equal(decide(c.statements[0].operations, as("dev", "dev"), D4).effective, "allow", "alone it would run");
+  assert.equal(decide(c.statements[1].operations, as("dev", "dev"), D4).effective, "deny");
+});
+
+test("One partition enforced: a denied write is blocked on prod and only logged on dev", async () => {
+  const prod = await decideScript("DELETE FROM LVORD.T", as("dev", "prod"));
+  const dev = await decideScript("DELETE FROM LVORD.T", as("dev", "dev"));
+  assert.deepEqual([prod.decision, prod.effective], ["deny", "deny"]);
+  assert.deepEqual([dev.decision, dev.effective], ["deny", "allow"]);
+});
+
+test("decide: an operation's own partition sets its environments, rules and mode", () => {
+  // run on dev (observe), writing through a mapped RDB on prod (enforce)
+  const op: Operation = { class: "write", source: "sql", object: { rdb: "PRODRDB", lib: "DVORD", name: "T" }, partition: "prod" };
+  const r = decide([op], as("dev", "dev"), D4);
+  assert.deepEqual([r.operations[0].partition, r.operations[0].env, r.effective], ["prod", "unmatched", "deny"]);
+});
+
+test("decide: a partition conflict denies everything, even while observing and with no operations", async () => {
+  const who: Identity = { ...WHO.dev, conflict: "System DEVBOX, RDB QARDB map to different partitions: dev and qa" };
+  const r = await decideScript("SELECT * FROM QTEMP.T", who);
+  assert.deepEqual([r.effective, r.operations[0].reason], ["deny", "partition_conflict"]);
+  assert.match(r.operations[0].message, /dev and qa/);
+  assert.deepEqual(decide([], who, D4), { decision: "deny", effective: "deny", enforced: true, operations: [], reason: "partition_conflict" });
+});
+
+// Decision: a statement with no operations (COMMIT, VALUES 1) is allowed with reason
+// no_operations in every mode. The classifier only returns no operations for statements it read
+// completely and found harmless; anything it cannot read is danger, so this is not default deny.
+test("decide: zero-operation statements are allowed, not default-denied", async () => {
+  const c = await classify("COMMIT; VALUES 1", d4ctx());
+  assert.equal(c.statements.length, 2);
+  for (const s of c.statements) {
+    assert.deepEqual(s.operations, []);
+    for (const part of ["dev", "prod"])
+      for (const who of ["contractor", "analyst"])
+        assert.deepEqual(decide(s.operations, as(who, part), D4), { decision: "allow", effective: "allow", enforced: false, operations: [], reason: "no_operations" });
+  }
+});
+
+// Decision: an operation on no object (WRKACTJOB) has no environment; only rules whose env is
+// omitted or `any` match it, so an `env:` rule (even env: unmatched) can never catch it.
+test("decide: object-less CL is matched by rules without env only", async () => {
+  const dev = await decideScript("CL: WRKACTJOB", as("dev", "prod"));
+  assert.deepEqual([dev.decision, dev.operations[0].rule, dev.operations[0].env], ["allow", 10, undefined]);
+  const ctr = await decideScript("CL: WRKACTJOB", as("contractor", "dev"));
+  assert.deepEqual([ctr.decision, ctr.operations[0].rule], ["deny", 5]);
+  const p = parsePolicy("version: 1\nrules:\n  - { env: unmatched, decision: deny }\n  - { env: any, classes: [read], decision: confirm }\n", "p.yaml");
+  const r = decide((await classify("CL: WRKACTJOB", { lookups: lookups() })).operations, { user: "JDOE" }, p);
+  assert.deepEqual([r.decision, r.operations[0].rule], ["confirm", 2]);
+});
+
+test("decide: confirm is asked in enforce mode and runs unasked while observing", () => {
+  const text = (mode: string) => `version: 1\nmode: ${mode}\nrules:\n  - { classes: [write], decision: confirm }\n  - { decision: allow }\n`;
+  const ops: Operation[] = [
+    { class: "write", source: "sql", object: { lib: "A", name: "T" } },
+    { class: "read", source: "sql", object: { lib: "B", name: "T" } },
+  ];
+  const enforce = decide(ops, { user: "JDOE" }, parsePolicy(text("enforce"), "p.yaml"));
+  assert.deepEqual([enforce.decision, enforce.effective, enforce.enforced], ["confirm", "confirm", true]);
+  assert.match(enforce.operations[0].message, /rule 1 asks to confirm write A\.T/);
+  const observe = decide(ops, { user: "JDOE" }, parsePolicy(text("observe"), "p.yaml"));
+  assert.deepEqual([observe.decision, observe.effective, observe.enforced], ["confirm", "allow", false]);
+});
+
+test("decide: the built-in policy allows and logs, denying only danger and unqualified", async () => {
+  const p = builtinPolicy();
+  const run = async (s: string) => decide((await classify(s, { lookups: lookups() })).operations, { user: "JDOE" }, p);
+  const del = await run("DELETE FROM LVORD.T");
+  assert.deepEqual([del.effective, del.operations[0].rule], ["allow", 1]);
+  assert.equal((await run("CL: SBMJOB CMD(DLTLIB X)")).effective, "deny");
+  assert.equal((await run("DELETE FROM T")).effective, "deny");
+  const frob = await run("CL: FROBCMD X");
+  assert.deepEqual([frob.decision, frob.effective], ["deny", "allow"]);
 });
