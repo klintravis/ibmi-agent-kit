@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): checks for the SQL transports, execute and cl, and a side-effect-free tools.ts.
+// Modified by ibmi-agent-kit (2026): checks for the SQL transports, query, execute and cl, and a side-effect-free tools.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -587,6 +587,14 @@ test("execute sends the values as bound parameters and the statement text unchan
   assert.equal(calls.length, 1);
   assert.equal(calls[0].sql, sql, "the statement text reaches the server as written");
   assert.deepEqual(calls[0].opts, { parameters: ["x' or '1'='1", 5] });
+});
+
+test("query binds its values and reports truncation at maxRows", async () => {
+  const { calls, be } = stubBackend(() => ({ success: true, has_results: true, data: [{ A: 1 }, { A: 2 }, { A: 3 }], metadata: { columns: [{ name: "A" }] } }));
+  const res = await be.query("SELECT A FROM T WHERE B = ?", ["x' or '1'='1"], 2);
+  assert.deepEqual(res.rows, [{ A: 1 }, { A: 2 }]);
+  assert.equal(res.truncated, true);
+  assert.deepEqual(calls[0], { sql: "SELECT A FROM T WHERE B = ?", opts: { parameters: ["x' or '1'='1"] } });
 });
 
 test("a failed cl command reports failure with the IBM i message ids and text", async () => {

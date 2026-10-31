@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public execute() and cl().
+// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public query(), execute() and cl().
 import type { Msg } from "@ibmi-agent-kit/core";
 import type { CompileError, CompileOpts, CompileResult, LibraryListAction, LibraryListChange, LibraryListEntry, MemberMeta, MemberRef, Profile, Reporter, SearchMatch, SearchOpts, SearchResult, SqlColumn } from "./types.js";
 import { NOOP_REPORTER } from "./types.js";
@@ -220,8 +220,13 @@ export class MapepireBackend {
   }
 
   // --- execute ---
-  // no checks of their own: the execution guard (next change) is their gate, and until then only
-  // internal code calls them. Values are bound, never spliced into the statement.
+  // no checks of their own: the kit server's execution guard (run_script) is their gate, and the
+  // guard's own catalog lookups use query. Values are bound, never spliced into the statement.
+  async query(statement: string, params?: unknown[], maxRows = MAX_ROWS, reporter: Reporter = NOOP_REPORTER): Promise<{ rows: Row[]; columns: SqlColumn[]; truncated: boolean }> {
+    await this.connect(reporter);
+    return this.serialize(() => this.fetchRows(statement, maxRows, params as any[]));
+  }
+
   async execute(statement: string, params?: unknown[], reporter: Reporter = NOOP_REPORTER): Promise<{ rowsAffected: number; messages: Msg[] }> {
     await this.connect(reporter);
     return this.serialize(() => this.transport.execute(statement, params));
