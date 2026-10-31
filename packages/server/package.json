@@ -1,0 +1,51 @@
+{
+  "name": "@ibmi-agent-kit/server",
+  "version": "0.1.0",
+  "description": "One MCP server for IBM i: the 5250 screen engine and the source engine behind one command and one shutdown",
+  "type": "module",
+  "bin": {
+    "ibmi-agent-kit": "dist/index.js"
+  },
+  "main": "dist/server.js",
+  "types": "dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "check": "npm run build && node --test dist/selfcheck.js",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ibm-i",
+    "as400",
+    "5250",
+    "db2-for-i",
+    "claude"
+  ],
+  "author": "Klint Travis",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@ibmi-agent-kit/core": "^0.1.0",
+    "@ibmi-agent-kit/screen": "^0.2.0",
+    "@ibmi-agent-kit/source": "^0.7.0",
+    "@modelcontextprotocol/sdk": "^1.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

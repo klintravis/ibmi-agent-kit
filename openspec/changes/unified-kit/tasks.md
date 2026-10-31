@@ -18,13 +18,13 @@
 
 ## 4. Kit server (unified-server spec; D5, D6)
 
-- [ ] 4.1 Create `packages/server` (`@ibmi-agent-kit/server`, bin `ibmi-agent-kit`) importing `@ibmi-agent-kit/screen/tools` and `@ibmi-agent-kit/source/tools`, mounting both with `listServers: false`, registering one `list_servers` (profiles plus open sessions), owning console redirection, error hooks and shutdown on SIGINT/SIGTERM/stdin end/transport close; verify `npm run check -w packages/server` runs
-- [ ] 4.2 Selfcheck over an in-memory MCP client: the five named tools present, `list_servers` exactly once, annotations as specified for the named tools, forced duplicate aborts startup naming the tool, shutdown with stub engines resolves within 5 s when one never settles; verify all pass
-- [ ] 4.3 Selfcheck that spawns `node packages/server/dist/index.js`, sends `initialize` + `tools/list`, parses every stdout line as JSON-RPC, then closes stdin and asserts the child exits within 6 s with its stub shutdown called; verify it passes on this Windows host
+- [x] 4.1 Create `packages/server` (`@ibmi-agent-kit/server`, bin `ibmi-agent-kit`) importing `@ibmi-agent-kit/screen/tools` and `@ibmi-agent-kit/source/tools`, mounting both with `listServers: false`, registering one `list_servers` (profiles plus open sessions), owning console redirection, error hooks and shutdown on SIGINT/SIGTERM/stdin end/transport close; verify `npm run check -w packages/server` runs
+- [x] 4.2 Selfcheck over an in-memory MCP client: the five named tools present, `list_servers` exactly once, annotations as specified for the named tools, forced duplicate aborts startup naming the tool, shutdown with stub engines resolves within 5 s when one never settles; verify all pass
+- [x] 4.3 Selfcheck that spawns `node packages/server/dist/index.js`, sends `initialize` + `tools/list`, parses every stdout line as JSON-RPC, then closes stdin and asserts the child exits within 6 s with its stub shutdown called; verify it passes on this Windows host
 
 ## 5. Repo reset, CI and docs (D4, D7, D9)
 
-- [ ] 5.1 Root `package.json`: `check` in dependency order and a cross-platform `clean`; verify `npm run clean && npm run check` passes in PowerShell and in Git Bash
+- [x] 5.1 Root `package.json`: `check` in dependency order and a cross-platform `clean`; verify `npm run clean && npm run check` passes in PowerShell and in Git Bash
 - [x] 5.2 Add `.github/workflows/check.yml` (3 OS × Node 18/22, read-only permissions); verify it is valid YAML and, after push, all six jobs pass
 - [x] 5.3 Add `scripts/check-names.mjs` (D9); verify it reports "skipped" without a list and exits 1 when a temp list contains a word present in the tree
 - [ ] 5.4 Rewrite `README.md` (what the kit is; install and `claude mcp add` registration; profiles, folders and protected settings; SQL transports and what each requires on the IBM i; PUB400 notes incl. `IBMI_SSH_PORT=2222`; migration from the old servers; terminology: "commands and statements" vs custom "verbs"; Built on), `CLAUDE.md`, `docs/idea.md` (execute-and-guard direction; roadmap unified-kit → execution-guard → project-verbs → company pilot), `NOTICE` (hard-fork wording), and remove `packs/private/` from `.gitignore`; verify each shell command in README parses (`--help` runs) and `scripts/check-names.mjs` reports no hits

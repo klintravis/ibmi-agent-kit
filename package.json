@@ -6,7 +6,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "check": "npm run check -w packages/core -w packages/screen -w packages/source"
+    "build": "npm run build -w packages/core -w packages/screen -w packages/source -w packages/server",
+    "check": "npm run check -w packages/core -w packages/screen -w packages/source -w packages/server",
+    "clean": "node -e \"const fs = require('fs'); for (const p of fs.readdirSync('packages')) fs.rmSync('packages/' + p + '/dist', { recursive: true, force: true })\""
   }
 }
