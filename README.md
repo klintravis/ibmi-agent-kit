@@ -127,7 +127,7 @@ as one script before the first is sent; a verb runs with the signed-on user's ru
 one grants nothing. `policy_check` makes the same decisions but only reports them. Without a
 policy file the guard only observes and logs, apart from statements it always denies.
 `run_script` and `verb_run` decisions go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
-[docs/policy.md](docs/policy.md) for the policy file.
+[docs/policy.md](docs/policy.md) for the policy file, and [docs/verbs.md](docs/verbs.md) for verbs.
 
 Limits, stated plainly: the guard sees only the text it is given, not what called programs or
 triggers do; IBM i authority remains the real boundary. It is not yet wired into `run_sql`,
@@ -141,7 +141,7 @@ The guard's catalog lookups have not yet been verified on a live IBM i.
 
 "Statements and commands" means SQL statements and CL commands. A "verb" is a named,
 parameterised procedure (setup, steps, expectations, cleanup) that a person or a project writes
-as a YAML file; see the [server README](packages/server/README.md#verbs).
+as a YAML file; see [docs/verbs.md](docs/verbs.md).
 
 ## Roadmap
 

@@ -27,15 +27,7 @@ Use `policy_check` first to see what the policy would decide. A query in `run_sc
 
 ### Verbs
 
-A verb is one YAML file: `name`, `description`, optional `tags` and typed `params`, and lists `setup`, `steps` and `cleanup` of SQL, CL, `expect` and nested-verb steps. `:p` in SQL is sent as a bound value; `${p}` is text, allowed only for parameters with an `allowed` list or of a numeric, date or boolean type.
-
-- **Layers.** `user` is `~/.ibmi-agent-kit/verbs`, `proj` is `.ibmi-kit/verbs` in the server's working folder plus the folders in the profile's `IBMI_KIT_VERBS` (profile file only, absolute paths; a relative one is refused), `org` is `verbs/` beside the profile's `IBMI_KIT_POLICY`. A bare name runs the closest layer that has it; `user:NAME`, `proj:NAME` and `org:NAME` pick one. A server's verbs load once, on its first verb call; restart the server to reload them. No tool writes verb files.
-- **Decided before anything runs.** Every statement of the call (setup, steps, nested verbs and cleanup, and every verb of a suite) is substituted and decided as one script for the signed-on user, with the same profile checks, confirmation and run log as `run_script`. A statement denied in effect (in enforce mode, or a `danger`, `unqualified` or partition-conflict operation, which observe mode also denies) or refused by a profile check runs nothing of its verb; one confirmation covers the call, and declining runs nothing.
-- **Running.** Setup runs in order, each `requires_absent` query just before its step (a row found fails the verb before that step), then the steps, then each cleanup entry whose `undoes` setup succeeded, even when a step failed. `requires_absent` and `expect` queries must only read; one that writes is denied in every mode.
-- **Suites.** Verbs are decided as if every earlier verb ran in full, so once one is refused, finds its test data present, or fails, no later verb is sent. Overridden verbs and verbs with a parameter that has no default are skipped and named.
-- **Connection reset.** After a reset (a lost connection or the query time limit) nothing more is sent, cleanup and later verbs included; the result lists the cleanup statements not run, to do by hand.
-
-`policy test` cases can name a verb too; see [docs/policy.md](../../docs/policy.md#test-a-policy).
+`verb_list` and `verb_run` work with verbs: YAML files in three layers (`user`, `proj` with the profile's `IBMI_KIT_VERBS`, `org` beside the policy), loaded once per server on its first verb call. Every statement of a call is decided as one script, with the same profile checks, confirmation and run log as `run_script`. The file format, layers, how a run is decided and run, suites and connection resets are in [docs/verbs.md](../../docs/verbs.md).
 
 ### Confirmation
 

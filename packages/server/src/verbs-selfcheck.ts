@@ -425,15 +425,35 @@ test("verb tools: a suite is decided as one script, so one verb cannot set up a 
 
 test("verb tools: a later verb decided against an earlier one's set-up is not sent when that one did not run in full", async () => {
   const dev = { group: "GRPDEV", rdb: "PRODRDB" };
-  // refused: A's CHGCURLIB never runs, so B's *CURLIB was decided against a library that is not current
+  // refused: A's alias never runs, so B, allowed only as a delete from QTEMP.REAL, would delete
+  // from whatever QTEMP.A already is (B passes the guard on its own: only this rule stops it)
   const refused = verbs({
-    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - cl: CHGCURLIB CURLIB(LVORD)\n  - sql: DELETE FROM PAYLIB.T\n"),
-    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - cl: CLRPFM FILE(*CURLIB/ORD)\n"),
+    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - sql: CREATE ALIAS QTEMP.A FOR QTEMP.REAL\n  - sql: DELETE FROM PAYLIB.T\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM QTEMP.A\n"),
   });
-  const r1 = await run({ set: refused.set, policy: D4, box: box({ ...dev, curlib: ["DVORD"] }) }, { tag: "smoke" });
+  const r1 = await run({ set: refused.set, policy: D4, box: box(dev) }, { tag: "smoke" });
   assert.deepEqual(r1.sent, []);
   assert.match(r1.s.results[0].error, /^nothing was sent: proj:A steps\.1 is denied/);
-  assert.equal(r1.s.results[1].status, "failed");
+  assert.deepEqual([r1.s.results[1].statements[0].effective, r1.s.results[1].error], ["allow", NOT_IN_FULL]);
+  // CHGCURLIB then *CURLIB needs no such rule: the guard reads a *CURLIB after a current-library
+  // change in the script as unqualified and denies it in every mode, observe included
+  const curlib = verbs({
+    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - cl: CHGCURLIB CURLIB(DVORD)\n  - sql: DELETE FROM PAYLIB.T\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - cl: CLRPFM FILE(*CURLIB/ORD)\n"),
+  });
+  const c1 = await run({ set: curlib.set, policy: D4, box: box({ group: "GRPDEV", rdb: "DEVRDB", curlib: ["LVORD"] }) }, { tag: "smoke" });
+  assert.deepEqual(c1.sent, ["0: CHGCURLIB CURLIB(DVORD)", "0: DELETE FROM PAYLIB.T"], "dev observes: A runs in full");
+  assert.match(c1.s.results[1].error, /^nothing was sent: proj:B steps\.0 is denied: the script changes the current library; name the library/);
+  // a nested verb fails: the verb did not run in full, so the next is not sent
+  const nested = verbs({
+    "a.yaml": verb("A", "tags: [smoke]\nsteps:\n  - verb: INNER\n"),
+    "inner.yaml": verb("INNER", "steps:\n  - sql: UPDATE QTEMP.X SET A = 1\n"),
+    "b.yaml": verb("B", "tags: [smoke]\nsteps:\n  - sql: DELETE FROM QTEMP.Y\n"),
+  });
+  const n1 = await run({ set: nested.set, policy: D4, box: box({ ...dev, fail: ["UPDATE QTEMP.X"] }) }, { tag: "smoke" });
+  assert.deepEqual(n1.sent, ["0: UPDATE QTEMP.X SET A = 1"]);
+  assert.match(n1.s.results[0].error, /^proj:INNER steps\.0: SQL0803/);
+  assert.equal(n1.s.results[1].error, NOT_IN_FULL);
   // requires_absent hit: A's alias is never created, so whatever QTEMP.A already is, B must not
   // delete from it on a decision that took it for QTEMP.REAL
   const absent = verbs({
