@@ -2,8 +2,8 @@
 
 ## 1. Core: profiles and transport interface (server-profiles, sql-transport specs; D1, D2)
 
-- [ ] 1.1 Create `packages/core` (`@ibmi-agent-kit/core`, declarations on, `check` = build + `node --test dist/selfcheck.js`) exporting `CONFIG_DIRS`, `listServers()`, `resolveProfileEnv(name?)` and the `SqlTransport` type; verify `npm run check -w packages/core` runs
-- [ ] 1.2 Selfcheck with temp folders and a saved/restored `process.env` for every server-profiles scenario: folder order incl. `IBMI_MCP_CONFIG_DIR`, `.env.example` ignored, old per-engine folder ignored, traversal refused without reading, case mismatch refused, omitted server, no merge, `.env` does not leak into `.env.prod`, protected keys never from env, viewer key from env, `process.env` unchanged after loading; verify all pass
+- [x] 1.1 Create `packages/core` (`@ibmi-agent-kit/core`, declarations on, `check` = build + `node --test dist/selfcheck.js`) exporting `CONFIG_DIRS`, `listServers()`, `resolveProfileEnv(name?)` and the `SqlTransport` type; verify `npm run check -w packages/core` runs
+- [x] 1.2 Selfcheck with temp folders and a saved/restored `process.env` for every server-profiles scenario: folder order incl. `IBMI_MCP_CONFIG_DIR`, `.env.example` ignored, old per-engine folder ignored, traversal refused without reading, case mismatch refused, omitted server, no merge, `.env` does not leak into `.env.prod`, protected keys never from env, viewer key from env, `process.env` unchanged after loading; verify all pass
 
 ## 2. Source engine on the transport (sql-transport spec; D2)
 
