@@ -1,5 +1,6 @@
 // The server's half of the execution guard (design D5, D7): who and where a connection is, the
-// catalog lookups, `run_script`, `policy_check` and the confirmation. The guard package decides;
+// catalog lookups, `run_script`, `policy_check` and the confirmation, and the same context for
+// verbs (verbs.ts). The guard package decides;
 // this file does the I/O. Engines never write to stdout, and neither does this.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -19,7 +20,9 @@ import {
   type PartitionNames,
   type Policy,
   type RunLog,
+  type VerbSet,
 } from "@ibmi-agent-kit/guard";
+import { checkVerb, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
 
 // What the guard needs of a connection: the source engine's MapepireBackend fits, a stub does too.
 // `generation` is the job the caller decided against: another job refuses before sending.
@@ -41,6 +44,7 @@ export interface GuardDeps {
   confirmTimeoutMs: number;
   sqlTimeLimitMs: number; // run_script queries, as run_sql
   notice(message: string): void; // stderr
+  verbs(server: string): VerbSet; // the server's verbs (project-verbs), for policy_check's verb input
 }
 
 export const CONFIRM_TIMEOUT_MS = 120_000;
@@ -204,7 +208,7 @@ const why = (p: Planned, identity: Identity) =>
     .join("; ") ||
     `denied: ${p.decision.reason === "partition_conflict" && identity.conflict ? identity.conflict : (p.decision.reason ?? "no reason given")}`);
 
-export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
+export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(server: string): Promise<VerbContext> } {
   const boxes = new Map<string, Promise<Box>>();
 
   async function identityOf(server: string, conn: Conn, policy: Policy): Promise<{ identity: Identity; names: PartitionNames; notes: string[] }> {
@@ -267,16 +271,15 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
   }
 
   // One elicitation for every statement a rule asks to confirm (design D7). Anything but accept
-  // with confirm: true is a no.
-  async function confirm(p: Plan, needs: Planned[]): Promise<string | undefined> {
+  // with confirm: true is a no. Returns why not, or undefined for a yes.
+  async function confirm(server: string, identity: Identity, needs: ConfirmItem[]): Promise<string | undefined> {
     if (!mcp.server.getClientCapabilities()?.elicitation?.form)
       return "confirmation is unavailable in this client (it does not support MCP elicitation), so the statements a rule asks to confirm are denied";
-    const lines = [`Run on server ${p.server}${p.identity.partition ? ` (partition ${p.identity.partition})` : ""}? Nothing runs unless you confirm.`];
+    const lines = [`Run on server ${server}${identity.partition ? ` (partition ${identity.partition})` : ""}? Nothing runs unless you confirm.`];
     for (const s of needs) {
-      const i = p.statements.indexOf(s);
-      lines.push("", `Statement ${i + 1}:`);
+      lines.push("", `${s.label}:`);
       for (const o of s.decision.operations) lines.push(`  - ${o.operation.class} ${o.operation.object ? objectText(o.operation.object) : (o.operation.command ?? "")}${o.env ? ` (environment ${o.env})` : ""}`);
-      lines.push(s.statement.display);
+      lines.push(s.display);
     }
     try {
       const r = await mcp.server.elicitInput(
@@ -292,6 +295,38 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
     } catch (e) {
       return `no confirmation: ${(e as Error).message}`;
     }
+  }
+
+  // Queries only, as run_sql: past the limit the session is reset, which the next send's
+  // generation check sees. DML and CL run to the end: cutting one off leaves it half-done.
+  const limitedOn = (conn: Conn) => <T>(work: Promise<T>) =>
+    withTimeLimit(work, deps.sqlTimeLimitMs, () => void conn.close().catch(() => {}), `gave up after ${deps.sqlTimeLimitMs / 1000}s and reset the session, so the query may still be running on the box`);
+
+  // What verbs (project-verbs) decide and run with: the same identity, lookups, profile guards,
+  // confirmation and run log as run_script, and sends checked against the job the verb was decided
+  // on. `renew` decides again on whatever job the connection has now, for cleanup after a reset.
+  async function verbContext(server: string): Promise<VerbContext> {
+    const { policy, runLog } = deps.policyFor(server);
+    const conn = deps.conn(server);
+    const generation = conn.generation; // before any lookup: every answer must come from this job
+    const who = await identityOf(server, conn, policy);
+    const limited = limitedOn(conn);
+    return {
+      policy,
+      identity: who.identity,
+      lookups: sqlLookups(conn),
+      refusal: (s) => profileRefusal(s, conn.profile),
+      confirm: (needs) => confirm(server, who.identity, needs),
+      exec: {
+        query: (sql, params, maxRows) => limited(conn.query(sql, params, maxRows, undefined, generation)),
+        execute: (sql, params) => conn.execute(sql, params, undefined, generation),
+        cl: (command) => conn.cl(command, undefined, generation),
+        stale: () => conn.generation !== generation,
+      },
+      log: (call) =>
+        runLog.record({ ...call, server, identity: who.identity, ...(Object.keys(who.names).length ? { names: who.names } : {}), notes: [...who.notes, ...(call.notes ?? [])], secret: conn.profile.password }),
+      renew: () => verbContext(server),
+    };
   }
 
   const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
@@ -343,7 +378,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
 
       const needs = p.statements.filter((x) => x.decision.effective === "confirm");
       if (needs.length) {
-        const no = await confirm(p, needs);
+        const no = await confirm(p.server, p.identity, needs.map((s) => ({ label: `Statement ${p.statements.indexOf(s) + 1}`, decision: s.decision, display: s.statement.display })));
         if (no) {
           log(p, conn, p.statements.map(() => `not sent: ${no}`), false);
           const text = `Denied, nothing was sent: ${no}.\n${ASK}\n${LIMITS}`;
@@ -364,10 +399,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
       const outcomes: string[] = [];
       const done: Record<string, unknown>[] = [];
       let stop: string | undefined;
-      // Queries only, as run_sql: past the limit the session is reset, which the next statement's
-      // generation check sees. DML and CL run to the end: cutting one off leaves it half-done.
-      const limited = <T>(work: Promise<T>) =>
-        withTimeLimit(work, deps.sqlTimeLimitMs, () => void conn.close().catch(() => {}), `gave up after ${deps.sqlTimeLimitMs / 1000}s and reset the session, so the query may still be running on the box`);
+      const limited = limitedOn(conn);
       for (const [i, x] of p.statements.entries()) {
         const r = report(x, i);
         if (stop) {
@@ -420,35 +452,55 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
     {
       title: "Policy check",
       description:
-        "Decide a script (SQL statements separated by ;, CL commands on lines starting CL:) without running it: per statement the operations with library, partition, environment and class, the matching rule and the decision. Sends only the catalog lookups needed to decide. With `as` (and optionally `policy`, a candidate policy file) it decides offline for that identity and sends nothing. " +
+        "Decide a script (SQL statements separated by ;, CL commands on lines starting CL:), or every statement a verb would send (nested verbs and cleanup included), without running it: per statement the operations with library, partition, environment and class, the matching rule and the decision. Sends only the catalog lookups needed to decide. With `as` (and optionally `policy`, a candidate policy file) it decides offline for that identity and sends nothing. " +
         LIMITS,
       inputSchema: {
-        script: z.string().min(1).describe("SQL statements separated by ; and CL commands on lines starting CL:"),
+        script: z.string().min(1).optional().describe("SQL statements separated by ; and CL commands on lines starting CL:; give this or verb"),
+        verb: verbCheckInput.verb.optional(),
+        args: verbCheckInput.args,
         server: serverArg,
         policy: z.string().optional().describe("a candidate policy file to decide with instead of the loaded one; needs `as`"),
         as: asSchema.optional().describe("decide offline for this identity instead of the signed-on user; nothing is sent"),
       },
       annotations: { title: "Policy check", readOnlyHint: true },
     },
-    async ({ script, server, policy: candidate, as }) => {
+    async ({ script, verb, args, server, policy: candidate, as }) => {
       try {
+        if ((script === undefined) === (verb === undefined)) throw new Error("give exactly one of script and verb");
+        if (args && verb === undefined) throw new Error("args go with verb");
         let statements: Record<string, unknown>[];
         let head: Record<string, unknown>;
         if (as) {
           const used = candidate ? loadPolicy(candidate) : deps.policyFor(key(server)).policy;
-          const [t] = await runPolicyTests(used, [{ name: "policy_check", as, script, expect: "allow" }]);
+          const input = verb !== undefined ? { verb, ...(args ? { args } : {}) } : { script };
+          const [t] = await runPolicyTests(used, [{ name: "policy_check", as, ...input, expect: "allow" }], verb !== undefined ? deps.verbs(key(server)) : undefined);
           head = { policy: used.source, as, offline: true };
           statements = t.statements.map((x, i) => report({ statement: { display: x.text }, decision: x.decision }, i));
         } else {
           if (candidate) throw new Error("a candidate `policy` is decided offline: state the identity in `as` too");
-          const { plan: p } = await plan(key(server), script);
-          head = { server: key(server), partition: p.identity.partition, roles: p.statements[0]?.decision.roles ?? [], user: p.identity.user };
-          if (p.identity.conflict) head.conflict = p.identity.conflict;
-          statements = p.statements.map(report);
+          let identity: Identity;
+          let roles: string[];
+          if (verb !== undefined) {
+            const ctx = await verbContext(key(server));
+            const r = await checkVerb(ctx, deps.verbs(key(server)), verb, args);
+            identity = ctx.identity;
+            roles = r.statements[0]?.decision.roles ?? [];
+            // A verb's read-only rule for requires_absent and expect refuses like a profile guard.
+            statements = r.statements.map((x, i) => ({ ...report({ ...x, ...(x.refused ? { refused: x.refused } : {}) }, i), verb: x.planned.verb, where: x.planned.where }));
+            head = { verb: r.verb, file: r.file, ...(r.refusals.length ? { refusals: r.refusals } : {}) };
+          } else {
+            const { plan: p } = await plan(key(server), script as string);
+            identity = p.identity;
+            roles = p.statements[0]?.decision.roles ?? [];
+            statements = p.statements.map(report);
+            head = {};
+          }
+          head = { server: key(server), partition: identity.partition, roles, user: identity.user, ...head };
+          if (identity.conflict) head.conflict = identity.conflict;
         }
         const lines = statements.map((r) => {
           const ops = (r.operations as { message: string }[]).map((o) => `    - ${o.message}`);
-          return [`statement ${r.index}: ${r.effective}${r.effective !== r.decision ? ` (policy: ${r.decision}, not enforced)` : ""}${r.refused ? ` (${r.refused})` : ""}`, `    ${String(r.text).split("\n")[0]}`, ...ops].join("\n");
+          return [`statement ${r.index}${r.where ? ` (${r.verb} ${r.where})` : ""}: ${r.effective}${r.effective !== r.decision ? ` (policy: ${r.decision}, not enforced)` : ""}${r.refused ? ` (${r.refused})` : ""}`, `    ${String(r.text).split("\n")[0]}`, ...ops].join("\n");
         });
         return result({ ...head, statements, limits: LIMITS }, `${lines.join("\n")}\n\n${LIMITS}`);
       } catch (e) {
@@ -467,4 +519,6 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
         : "[ibmi-agent-kit] confirmation is unavailable in this client: statements a rule asks to confirm are denied",
     );
   };
+
+  return { verbContext };
 }

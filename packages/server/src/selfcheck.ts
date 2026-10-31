@@ -12,6 +12,7 @@ import { builtinPolicy, classify, decide, loadPolicy, parsePolicy, recordLookups
 import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine } from "./server.js";
+import "./verbs-selfcheck.js"; // project-verbs runner and tools
 
 const BIN = fileURLToPath(new URL("./index.js", import.meta.url));
 

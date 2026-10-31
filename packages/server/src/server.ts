@@ -6,6 +6,7 @@ import { loadPolicy, RunLog, type Policy } from "@ibmi-agent-kit/guard";
 import { CONFIRM_TIMEOUT_MS, registerGuarded, type GuardDeps } from "./guarded.js";
 import { KEYS, register as registerScreen } from "@ibmi-agent-kit/screen/tools";
 import { register as registerSource, SQL_TIME_LIMIT_MS } from "@ibmi-agent-kit/source/tools";
+import { registerVerbTools, verbLoader } from "./verbs.js";
 
 export interface Engine {
   shutdown(): Promise<void>;
@@ -53,7 +54,8 @@ export function createServer(deps: ServerDeps = {}): KitServer {
   };
   if (!deps.policy) for (const server of listServers()) policyFor(server);
 
-  registerGuarded(mcp, {
+  const verbs = deps.verbs ?? verbLoader(profileEnv);
+  const guard = registerGuarded(mcp, {
     policyFor,
     conn: deps.conn ?? ((server) => source.backend(server)),
     profileEnv,
@@ -61,7 +63,9 @@ export function createServer(deps: ServerDeps = {}): KitServer {
     confirmTimeoutMs: deps.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS,
     sqlTimeLimitMs: deps.sqlTimeLimitMs ?? SQL_TIME_LIMIT_MS,
     notice,
+    verbs,
   });
+  registerVerbTools(mcp, { verbs, context: guard.verbContext });
 
   mcp.registerTool(
     "list_servers",

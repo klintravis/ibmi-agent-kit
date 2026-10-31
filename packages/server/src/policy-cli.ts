@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIRS } from "@ibmi-agent-kit/core";
-import { describeFailure, loadPolicy, loadPolicyTests, replayRunLog, runPolicyTests, type ReplayOutcome, type RunLogLine } from "@ibmi-agent-kit/guard";
+import { describeFailure, loadPolicy, loadPolicyTests, loadVerbs, replayRunLog, runPolicyTests, type ReplayOutcome, type RunLogLine } from "@ibmi-agent-kit/guard";
 
 const USAGE = `usage:
   ibmi-agent-kit policy test <policy> <tests>
@@ -55,7 +55,12 @@ export async function policyCli(args: string[], out: Write = (t) => console.log(
     if (cmd === "test" && rest.length === 2) {
       const policy = loadPolicy(rest[0]);
       for (const w of policy.warnings) err(`warning: ${w}`);
-      const results = await runPolicyTests(policy, loadPolicyTests(rest[1]));
+      const cases = loadPolicyTests(rest[1]);
+      // Verb cases find verbs in the project and beside the policy; never a person's own, so CI
+      // decides the same everywhere.
+      const verbs = cases.some((c) => c.verb !== undefined) ? loadVerbs({ cwd: process.cwd(), policyFile: rest[0] }) : undefined;
+      for (const e of verbs?.errors ?? []) err(`warning: ${e}`);
+      const results = await runPolicyTests(policy, cases, verbs);
       const failed = results.filter((r) => !r.ok);
       for (const r of failed) out(describeFailure(r));
       out(failed.length ? `${failed.length} of ${results.length} cases failed` : `${results.length} cases passed`);
