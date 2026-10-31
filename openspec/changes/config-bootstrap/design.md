@@ -46,7 +46,9 @@ environment-like parameter. Each inference is shown with its evidence before ask
 The nearest template is copied and filled — never referenced — so the company owns the file.
 Tests: one allow and one deny per role × environment, plus the change-management command per
 level. Profiles: `.env.<partition>` with host, user placeholder, transport, `IBMI_PARTITION`, and a
-comment where the password goes. Files are written with the client's file tools on a branch.
+comment where the password goes, under `profiles/`. Also generated: `policy.yaml`, `policy.tests.yaml`,
+optional `commands.yaml`, `verbs/smoke.yaml`, `.github/workflows/policy.yml` and `.claude/settings.json`
+(paths as in `templates/company-repo/README.md`). Files are written with the client's file tools on a branch.
 
 ### D5. Maintenance loop
 Re-run D2, diff against the policy, summarise the run log since the last run (date recorded in the

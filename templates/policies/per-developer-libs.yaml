@@ -1,6 +1,6 @@
 # Template: no fixed ladder; each developer works in personal libraries, a lead also in shared ones.
 # Copy to your company repo as policy.yaml and replace every invented name.
-# Observe mode: a deny is logged and the statement still runs.
+# Observe mode: denies are logged and the statement still runs, except danger, unqualified changes and partition conflicts, which are always denied.
 version: 1
 mode: observe
 
@@ -18,7 +18,7 @@ roles:
 default_role: analyst
 
 rules:
-  - { classes: [danger], decision: deny }
+  - { classes: [danger], decision: deny }   # documents the built-in; never reached
   - { env: scratch, classes: [read, write, ddl], decision: allow }
   - { roles: [dev, lead], env: personal, decision: allow }
   - { roles: [lead], env: shared, decision: allow }

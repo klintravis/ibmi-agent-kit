@@ -49,8 +49,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npx --yes @ibmi-agent-kit/server policy test policy.yaml policy.tests.yaml
+      - uses: actions/checkout@v4
+        with:
+          repository: klintravis/ibmi-agent-kit
+          ref: main            # pin a tag or commit SHA
+          path: kit
+      - run: npm ci && npm run check
+        working-directory: kit
+      - run: node kit/packages/server/dist/index.js policy test policy.yaml policy.tests.yaml
 ```
+
+Nothing is published to npm, so CI builds the kit from its repo (the install steps in the root README).
 
 ## Client permission rules
 

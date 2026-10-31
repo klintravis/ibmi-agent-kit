@@ -1,6 +1,7 @@
 # Template: one IBM i partition, a library ladder (dev -> test -> live).
 # Copy to your company repo as policy.yaml and replace every invented name (groups, prefixes).
-# Observe mode: a deny is logged and the statement still runs. Tighten to `enforce` only after
+# Observe mode: denies are logged and the statement still runs, except danger, unqualified changes and
+# partition conflicts, which are always denied. Tighten to `enforce` only after
 # `ibmi-agent-kit policy replay` over the run log shows the denies you expect.
 version: 1
 mode: observe
@@ -20,7 +21,7 @@ roles:                         # a user holds every role that matches
 default_role: analyst          # anyone not in another role: reads only
 
 rules:                         # first match wins; unmatched = deny
-  - { classes: [danger], decision: deny }
+  - { classes: [danger], decision: deny }   # documents the built-in; never reached
   - { env: scratch, classes: [read, write, ddl], decision: allow }
   - { roles: [dev, qa], env: [personal, dev], decision: allow }
   - { roles: [qa], env: test, decision: allow }

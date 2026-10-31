@@ -225,6 +225,7 @@ test("policy templates: each loads, is in observe mode and passes its tests", as
     assert.equal(loadPolicy(policy).mode.default, "observe", f);
     const r = await runBin(["policy", "test", policy, policy.replace(/\.yaml$/, ".tests.yaml")]);
     assert.equal(r.code, 0, `${f}\n${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /warning:/, f);
   }
 });
 

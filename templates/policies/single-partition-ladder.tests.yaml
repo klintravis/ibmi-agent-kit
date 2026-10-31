@@ -1,7 +1,7 @@
 # Policy tests for single-partition-ladder.yaml: every role in every environment, a read and a write, plus an
-# unclassified command (denied as danger) wherever the write is allowed.
+# unclassified command (denied as unknown_command) wherever the write is allowed.
 # Run: ibmi-agent-kit policy test single-partition-ladder.yaml single-partition-ladder.tests.yaml
-# `expect` is the policy's decision per statement; in observe mode a deny is logged and still run.
+# `expect` is the policy's decision per statement; in observe mode a deny is logged and still run, except danger, unqualified changes and partition conflicts, which are always denied.
 # Users: JDOE (dev), MROE (qa), ANL01 (analyst). A personal library is the user's own name.
 - name: dev scratch
   as: { user: JDOE, groups: [GRPDEV] }
