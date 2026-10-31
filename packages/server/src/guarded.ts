@@ -4,6 +4,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Msg } from "@ibmi-agent-kit/core";
+import { assertNotRunaway, SQL_TIME_LIMIT_MS, withTimeLimit } from "@ibmi-agent-kit/source/tools";
 import {
   decideStatements,
   detectPartition,
@@ -21,11 +22,13 @@ import {
 } from "@ibmi-agent-kit/guard";
 
 // What the guard needs of a connection: the source engine's MapepireBackend fits, a stub does too.
+// `generation` is the job the caller decided against: another job refuses before sending.
 export interface Conn {
   profile: { user: string; password: string; readOnly: boolean; blockedTables: string[]; blockedCl: string[] };
-  query(sql: string, params?: unknown[], maxRows?: number): Promise<{ rows: Record<string, unknown>[]; columns: { name: string }[]; truncated: boolean }>;
-  execute(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; messages: Msg[] }>;
-  cl(command: string): Promise<{ ok: boolean; messages: Msg[] }>;
+  query(sql: string, params?: unknown[], maxRows?: number, reporter?: undefined, generation?: number): Promise<{ rows: Record<string, unknown>[]; columns: { name: string }[]; truncated: boolean }>;
+  execute(sql: string, params?: unknown[], reporter?: undefined, generation?: number): Promise<{ rowsAffected: number; messages: Msg[] }>;
+  cl(command: string, reporter?: undefined, generation?: number): Promise<{ ok: boolean; messages: Msg[] }>;
+  close(): Promise<void>; // the reset after a time limit
   generation?: number; // bumped when the job is lost or reset
 }
 
@@ -58,13 +61,18 @@ export function sqlLookups(conn: Conn): Lookups {
       const [r] = await rows("SELECT SYSTEM_SCHEMA_NAME AS S FROM QSYS2.SYSSCHEMAS WHERE SCHEMA_NAME = ?", [schema]);
       return str(r?.S) || undefined;
     },
+    // Two queries, so a failure names the catalog; either failing throws and the classifier denies.
     async baseTables({ lib, name }) {
-      const found = await rows(
-        "SELECT BASE_TABLE_SCHEMA AS L, BASE_TABLE_NAME AS N FROM QSYS2.SYSTABLES WHERE TABLE_TYPE = 'A' AND SYSTEM_TABLE_SCHEMA = ? AND (TABLE_NAME = ? OR SYSTEM_TABLE_NAME = ?)" +
-          " UNION SELECT OBJECT_SCHEMA, OBJECT_NAME FROM QSYS2.SYSVIEWDEP WHERE SYSTEM_VIEW_SCHEMA = ? AND (VIEW_NAME = ? OR SYSTEM_VIEW_NAME = ?) AND OBJECT_TYPE NOT IN ('FUNCTION', 'TYPE')",
-        [lib, name, name, lib, name, name],
+      const ask = (what: string, sql: string) =>
+        rows(sql, [lib, name, name]).catch((e) => {
+          throw new Error(`${what}: ${(e as Error).message}`);
+        });
+      const aliases = await ask("QSYS2.SYSTABLES", "SELECT BASE_TABLE_SCHEMA AS L, BASE_TABLE_NAME AS N FROM QSYS2.SYSTABLES WHERE TABLE_TYPE = 'A' AND SYSTEM_TABLE_SCHEMA = ? AND (TABLE_NAME = ? OR SYSTEM_TABLE_NAME = ?)");
+      const views = await ask(
+        "QSYS2.SYSVIEWDEP",
+        "SELECT OBJECT_SCHEMA AS L, OBJECT_NAME AS N FROM QSYS2.SYSVIEWDEP WHERE SYSTEM_VIEW_SCHEMA = ? AND (VIEW_NAME = ? OR SYSTEM_VIEW_NAME = ?) AND OBJECT_TYPE NOT IN ('FUNCTION', 'TYPE')",
       );
-      return found.map((r) => ({ lib: str(r.L), name: str(r.N) })).filter((b) => b.lib && b.name);
+      return [...aliases, ...views].map((r) => ({ lib: str(r.L), name: str(r.N) })).filter((b) => b.lib && b.name);
     },
     async currentLibrary() {
       const [r] = await rows("SELECT SYSTEM_SCHEMA_NAME AS S FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT'", []);
@@ -83,6 +91,12 @@ interface Box {
   notes: string[];
 }
 
+// SUPPLEMENTAL_GROUP_LIST, as returned (untrimmed): ten-character slots, so a full name runs into
+// the next; a length that is no multiple of ten is read as blank-separated (unverified on a live
+// box: tasks 8.2 checks it on PUB400).
+export const supplementalGroups = (list: string): string[] =>
+  (list.length % 10 === 0 ? (list.match(/.{10}/g) ?? []) : [list]).flatMap((s) => s.split(/\s+/)).filter(Boolean);
+
 // These lookups are the kit's own and are not decided. Only the first failing is fatal: without
 // the user nothing can be decided.
 async function readBox(conn: Conn): Promise<Box> {
@@ -91,7 +105,7 @@ async function readBox(conn: Conn): Promise<Box> {
   if (str(me?.RDB)) box.rdb = str(me?.RDB).toUpperCase();
   try {
     const [u] = (await conn.query("SELECT GROUP_PROFILE_NAME AS G, SUPPLEMENTAL_GROUP_LIST AS S FROM QSYS2.USER_INFO WHERE AUTHORIZATION_NAME = ?", [box.user])).rows;
-    if (u) box.groups = [str(u.G), ...str(u.S).split(/\s+/)].map((g) => g.toUpperCase()).filter((g) => g && g !== "*NONE");
+    if (u) box.groups = [str(u.G), ...supplementalGroups(String(u.S ?? ""))].map((g) => g.toUpperCase()).filter((g) => g && g !== "*NONE");
     else box.notes.push(`QSYS2.USER_INFO has no row for ${box.user}: groups unknown`);
   } catch (e) {
     box.notes.push(`group lookup for ${box.user} failed: ${(e as Error).message}`);
@@ -121,6 +135,11 @@ export function profileRefusal(s: ClassifiedStatement, profile: Conn["profile"])
   if (table) return `refused: ${table.toUpperCase()} is blocked by IBMI_BLOCKED_TABLES`;
   const command = s.operations.find((o) => o.command && profile.blockedCl.includes(o.command.toLowerCase()))?.command;
   if (command) return `refused: ${command} is blocked by IBMI_BLOCKED_CL`;
+  try {
+    assertNotRunaway(s.display);
+  } catch (e) {
+    return `refused: ${(e as Error).message}`;
+  }
   return undefined;
 }
 
@@ -134,6 +153,8 @@ interface Planned {
 
 interface Plan {
   server: string;
+  policy: Policy;
+  runLog: RunLog; // the policy's, kept from the decision so logging never reads the profile again
   identity: Identity;
   names?: PartitionNames;
   statements: Planned[];
@@ -170,7 +191,14 @@ function report(p: { statement: { kind?: string; display: string }; decision: De
 }
 
 const stopping = (p: Planned) => p.refused !== undefined || p.decision.effective === "deny";
-const why = (p: Planned) => p.refused ?? p.decision.operations.filter((o) => o.enforced && o.decision === "deny").map((o) => o.message).join("; ");
+// A statement with no operations (COMMIT) is denied only at statement level, by a partition conflict.
+const why = (p: Planned, identity: Identity) =>
+  p.refused ??
+  (p.decision.operations
+    .filter((o) => o.enforced && o.decision === "deny")
+    .map((o) => o.message)
+    .join("; ") ||
+    `denied: ${p.decision.reason === "partition_conflict" && identity.conflict ? identity.conflict : (p.decision.reason ?? "no reason given")}`);
 
 export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
   const boxes = new Map<string, Promise<Box>>();
@@ -201,7 +229,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
   // Every statement of the script decided, and the profile's own guards applied, before anything
   // is sent. Only the identity and catalog lookups reach the box.
   async function plan(server: string, script: string): Promise<{ plan: Plan; conn: Conn }> {
-    const { policy } = deps.policyFor(server);
+    const { policy, runLog } = deps.policyFor(server);
     const conn = deps.conn(server);
     const who = await identityOf(server, conn, policy);
     const { lookups, answers } = recordLookups(sqlLookups(conn));
@@ -212,11 +240,11 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
       if (refused) p.refused = refused;
       return p;
     });
-    return { conn, plan: { server, identity: who.identity, names: who.names, statements, lookups: answers, notes: [...who.notes, ...classification.notes] } };
+    return { conn, plan: { server, policy, runLog, identity: who.identity, names: who.names, statements, lookups: answers, notes: [...who.notes, ...classification.notes] } };
   }
 
   function log(p: Plan, conn: Conn, outcomes: string[], confirmed?: boolean): void {
-    deps.policyFor(p.server).runLog.record({
+    p.runLog.record({
       server: p.server,
       tool: "run_script",
       identity: p.identity,
@@ -298,10 +326,10 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
 
       const stopped = p.statements.filter(stopping);
       if (stopped.length) {
-        log(p, conn, p.statements.map((x) => (stopping(x) ? `denied: ${why(x)}` : "not sent: another statement was denied")));
+        log(p, conn, p.statements.map((x) => (stopping(x) ? `denied: ${why(x, p.identity)}` : "not sent: another statement was denied")));
         const text = [
           "Denied, nothing was sent:",
-          ...stopped.map((x) => `  statement ${p.statements.indexOf(x) + 1} (${x.statement.display.split("\n")[0]}): ${why(x)}`),
+          ...stopped.map((x) => `  statement ${p.statements.indexOf(x) + 1} (${x.statement.display.split("\n")[0]}): ${why(x, p.identity)}`),
           ASK,
           LIMITS,
         ].join("\n");
@@ -316,17 +344,26 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
           const text = `Denied, nothing was sent: ${no}.\n${ASK}\n${LIMITS}`;
           return result({ ...summary, ran: false, statements: p.statements.map((x, i) => ({ ...report(x, i), outcome: "not sent" })), limits: LIMITS }, text, true);
         }
+        // The wait may be long: a *CURLIB decided before it must still be the current library.
+        if ("curlib" in p.lookups) {
+          const now = (await sqlLookups(conn).currentLibrary().catch(() => undefined)) ?? null;
+          if (now !== (p.lookups.curlib ?? null)) {
+            const no = `the current library changed from ${p.lookups.curlib ?? "none"} to ${now ?? "unknown"} while confirming`;
+            log(p, conn, p.statements.map(() => `not sent: ${no}`), true);
+            return result({ ...summary, ran: false, statements: p.statements.map((x, i) => ({ ...report(x, i), outcome: "not sent" })), limits: LIMITS }, `Denied, nothing was sent: ${no}.\n${ASK}`, true);
+          }
+        }
       }
 
       const cap = maxRows ?? 100;
       const outcomes: string[] = [];
       const done: Record<string, unknown>[] = [];
       let stop: string | undefined;
+      // Like run_sql: past the limit the session is reset, which the next statement's generation check sees.
+      const limited = <T>(work: Promise<T>) =>
+        withTimeLimit(work, SQL_TIME_LIMIT_MS, () => void conn.close().catch(() => {}), `gave up after ${SQL_TIME_LIMIT_MS / 1000}s and reset the session, so it may still be running on the box`);
       for (const [i, x] of p.statements.entries()) {
         const r = report(x, i);
-        // shortcut: a reset during a statement's own send is seen before the next one, not before it ran.
-        if (!stop && conn.generation !== generation)
-          stop = "the connection to the IBM i was reset after the script was decided, so QTEMP, the library list and *CURLIB may not be what it was decided against";
         if (stop) {
           outcomes.push(`not sent: ${stop}`);
           done.push({ ...r, outcome: "not sent" });
@@ -335,17 +372,17 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
         try {
           if (x.statement.kind === "cl") {
             // The comment-stripped command: blanks outside quotes collapse, quoted values are kept.
-            const c = await conn.cl(x.statement.display);
+            const c = await limited(conn.cl(x.statement.display, undefined, generation));
             r.messages = c.messages;
             if (!c.ok) throw new Error(c.messages.map((m) => (m.id ? `[${m.id}] ${m.text}` : m.text)).join(" ") || "the command failed");
             outcomes.push("ok");
           } else if (/^\s*(\(|SELECT\b|VALUES\b|WITH\b)/i.test(x.statement.display)) {
             // As written: the display drops blank lines, which may sit inside a literal.
-            const q = await conn.query(x.statement.text, undefined, cap);
+            const q = await limited(conn.query(x.statement.text, undefined, cap, undefined, generation));
             Object.assign(r, { columns: q.columns.map((c) => c.name), rows: q.rows, truncated: q.truncated });
             outcomes.push(`${q.rows.length} row(s)${q.truncated ? `, truncated at ${cap}` : ""}`);
           } else {
-            const e = await conn.execute(x.statement.text);
+            const e = await limited(conn.execute(x.statement.text, undefined, undefined, generation));
             Object.assign(r, { rowsAffected: e.rowsAffected, messages: e.messages });
             outcomes.push(`${e.rowsAffected} row(s) affected`);
           }

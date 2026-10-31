@@ -9,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, LATEST_PROTOCOL_VERSION, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { builtinPolicy, classify, decide, loadPolicy, parsePolicy, recordLookups, runLogLines, statedLookups, type Policy } from "@ibmi-agent-kit/guard";
-import { CONFIRM_TIMEOUT_MS, type Conn } from "./guarded.js";
+import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine } from "./server.js";
 
@@ -290,42 +290,54 @@ const D4_ENFORCE = parsePolicy(readFileSync(D4_PATH, "utf8").replace("mode: { de
 const CONFIRM_POLICY = parsePolicy("version: 1\nmode: enforce\nrules:\n  - { classes: [danger], decision: deny }\n  - { classes: [write], decision: confirm }\n  - { decision: allow }\n", "confirm.yaml");
 
 type Row = Record<string, unknown>;
-// A box: answers the guard's own queries, records every script statement that reaches it.
-function stubConn(o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string } = {}) {
+// A box: answers the guard's own queries, records every script statement that reaches it. Like the
+// backend, a send checks the job generation after connecting and before sending.
+function stubConn(
+  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean } = {},
+) {
   const sent: string[] = [];
   const queries: string[] = [];
+  let curlibAsked = 0;
   const own = (sql: string): Row[] | undefined => {
     if (sql.startsWith("SELECT CURRENT SERVER")) return [{ RDB: o.rdb ?? "DEVRDB", USR: o.user ?? "JDOE" }];
     if (sql.includes("QSYS2.USER_INFO")) return o.userInfo === null ? [] : [o.userInfo ?? { G: "GRPDEV", S: "" }];
     if (sql.includes("AUTHORIZATION_LIST_USER_INFO")) return (o.authlists ?? []).map((a) => ({ A: a }));
-    if (/QSYS2\.(SYSSCHEMAS|SYSTABLES|LIBRARY_LIST_INFO)/.test(sql)) return [];
+    if (sql.includes("QSYS2.SYSVIEWDEP") && o.viewdepThrows) throw new Error("SQL0551 not authorized to SYSVIEWDEP");
+    if (sql.includes("QSYS2.LIBRARY_LIST_INFO")) {
+      const c = o.curlib?.[Math.min(curlibAsked++, o.curlib.length - 1)];
+      return c ? [{ S: c }] : [];
+    }
+    if (/QSYS2\.(SYSSCHEMAS|SYSTABLES|SYSVIEWDEP)/.test(sql)) return [];
     return undefined;
   };
-  const run = (sql: string) => {
+  const send = (sql: string, generation?: number) => {
+    if (o.resetOn && sql.includes(o.resetOn)) conn.generation!++; // the job dropped; connect opened a new one
+    if (generation !== undefined && generation !== conn.generation) throw new Error("the connection to the IBM i was reset after this was decided; not sent");
     sent.push(sql);
-    if (o.resetOn && sql.includes(o.resetOn)) conn.generation!++; // the job dropped and was reopened
     if (o.failOn && sql.includes(o.failOn)) throw new Error(`SQL0204 ${o.failOn} not found`);
   };
   const conn: Conn = {
     generation: 0,
     profile: { user: o.user ?? "JDOE", password: "Secret1x", readOnly: o.readOnly ?? false, blockedTables: o.blockedTables ?? [], blockedCl: [] },
-    async query(sql, _params, maxRows = 100) {
+    async query(sql, _params, maxRows = 100, _reporter, generation) {
+      queries.push(sql);
       const rows = own(sql);
-      if (rows) {
-        queries.push(sql);
-        return { rows, columns: [], truncated: false };
-      }
-      run(sql);
+      if (rows) return { rows, columns: [], truncated: false };
+      queries.pop();
+      send(sql, generation);
       const data = [{ A: 1 }, { A: 2 }, { A: 3 }];
       return { rows: data.slice(0, maxRows), columns: [{ name: "A" }], truncated: data.length > maxRows };
     },
-    async execute(sql) {
-      run(sql);
+    async execute(sql, _params, _reporter, generation) {
+      send(sql, generation);
       return { rowsAffected: 1, messages: [] };
     },
-    async cl(command) {
-      run(command);
+    async cl(command, _reporter, generation) {
+      send(command, generation);
       return { ok: true, messages: [] };
+    },
+    async close() {
+      conn.generation!++;
     },
   };
   return { conn, sent, queries };
@@ -557,6 +569,7 @@ test("5.3: accept with confirm true runs everything after one question, logged c
 const ANSWERS: [string, () => Promise<ElicitResult>][] = [
   ["accept with confirm false", async () => ({ action: "accept", content: { confirm: false } })],
   ["decline", async () => ({ action: "decline" })],
+  ["cancel", async () => ({ action: "cancel" })],
   ["no answer before the timeout", () => new Promise<never>(() => {})],
 ];
 for (const [name, answer] of ANSWERS) {
@@ -574,16 +587,103 @@ for (const [name, answer] of ANSWERS) {
   });
 }
 
-test("5.2: a connection reset after the script was decided stops it and says so", async () => {
+test("5.2: a connection reset after the script was decided: the statement after it is not sent", async () => {
   const k = await guardedKit({ stub: stubConn({ resetOn: "MYLIB.B" }) });
   try {
     const r = await k.call("run_script", { script: "INSERT INTO MYLIB.A VALUES 1;\nINSERT INTO MYLIB.B VALUES 2;\nINSERT INTO MYLIB.C VALUES 3" });
     assert.equal(r.error, true);
-    assert.deepEqual(k.stub.sent, ["INSERT INTO MYLIB.A VALUES 1", "INSERT INTO MYLIB.B VALUES 2"]);
-    assert.deepEqual(r.s.statements.map((x: any) => x.outcome), ["ok", "ok", "not sent"]);
-    assert.match(r.text, /reset after the script was decided/);
+    assert.deepEqual(k.stub.sent, ["INSERT INTO MYLIB.A VALUES 1"]);
+    assert.deepEqual(r.s.statements.map((x: any) => x.outcome), ["ok", "failed", "not sent"]);
+    assert.match(r.s.statements[1].error, /reset after this was decided/);
   } finally {
     await k.close();
+  }
+});
+
+test("5.2: *CURLIB after CHGCURLIB in the script is refused although the box answers JDOE", async () => {
+  const k = await guardedKit({ stub: stubConn({ curlib: ["JDOE"] }) });
+  try {
+    const r = await k.call("run_script", { script: "CL: CHGCURLIB LVORD\nCL: CLRPFM FILE(*CURLIB/ORDERS)" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /statement 2 .*the script changes the current library; name the library/);
+    assert.deepEqual(k.stub.sent, []);
+  } finally {
+    await k.close();
+  }
+});
+
+test("5.3: a current library that changes while confirming stops the script", async () => {
+  const k = await guardedKit({
+    policy: CONFIRM_POLICY,
+    stub: stubConn({ curlib: ["JDOE", "OTHER"] }),
+    elicit: async () => ({ action: "accept", content: { confirm: true } }),
+  });
+  try {
+    const r = await k.call("run_script", { script: "CL: CLRPFM FILE(*CURLIB/X)" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /current library changed from JDOE to OTHER while confirming/);
+    assert.deepEqual(k.stub.sent, []);
+  } finally {
+    await k.close();
+  }
+});
+
+test("5.3: observe mode with a confirm rule and no elicitation runs without asking, logged confirm/not enforced", async () => {
+  const observe = parsePolicy("version: 1\nmode: observe\nrules:\n  - { classes: [write], decision: confirm }\n  - { decision: allow }\n", "observe.yaml");
+  const k = await guardedKit({ policy: observe });
+  try {
+    const r = await k.call("run_script", { script: "DELETE FROM MYLIB.A WHERE K = 1" });
+    assert.equal(r.error, false, r.text);
+    assert.deepEqual(k.stub.sent, ["DELETE FROM MYLIB.A WHERE K = 1"]);
+    const [line] = k.log();
+    assert.deepEqual([line.decision, line.enforced, line.effective, line.confirmed], ["confirm", false, "allow", undefined]);
+  } finally {
+    await k.close();
+  }
+});
+
+test("5.1: supplemental groups as ten-character slots, full or padded, and blank-separated", async () => {
+  assert.deepEqual(supplementalGroups("GRPDEV0001GRPQA00001"), ["GRPDEV0001", "GRPQA00001"]);
+  assert.deepEqual(supplementalGroups("GRPDEV0001GRPQA     "), ["GRPDEV0001", "GRPQA"]);
+  assert.deepEqual(supplementalGroups("GRPDEV GRPQA"), ["GRPDEV", "GRPQA"]);
+  assert.deepEqual(supplementalGroups(""), []);
+  const k = await guardedKit({ policy: D4, stub: stubConn({ userInfo: { G: "*NONE", S: "GRPDEV0001GRPQA     " } }) });
+  try {
+    const { s } = await k.call("policy_check", { script: "SELECT * FROM LVORD.T" });
+    assert.deepEqual(s.roles, ["qa"]);
+  } finally {
+    await k.close();
+  }
+});
+
+test("5.2: a failed alias/view lookup denies the write through QTEMP.A, even observing", async () => {
+  const k = await guardedKit({ stub: stubConn({ viewdepThrows: true }) });
+  try {
+    const r = await k.call("run_script", { script: "INSERT INTO QTEMP.A VALUES 1" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /could not resolve alias\/view bases of QTEMP\.A: QSYS2\.SYSVIEWDEP: SQL0551/);
+    assert.deepEqual(k.stub.sent, []);
+  } finally {
+    await k.close();
+  }
+});
+
+test("5.2: a statement-level deny (partition conflict on COMMIT) still names its reason; runaway catalog views are refused", async () => {
+  const k = await guardedKit({ policy: D4, stub: stubConn({ rdb: "QARDB" }), system: "DEVBOX" });
+  try {
+    const r = await k.call("run_script", { script: "COMMIT" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /statement 1 \(COMMIT\): denied: System DEVBOX, RDB QARDB map to different partitions/);
+  } finally {
+    await k.close();
+  }
+  const b = await guardedKit();
+  try {
+    const r = await b.call("run_script", { script: "SELECT * FROM QSYS2.SYSPARTITIONINDEXSTAT" });
+    assert.match(r.text, /refusing syspartitionindexstat/);
+    assert.deepEqual(b.stub.sent, []);
+  } finally {
+    await b.close();
   }
 });
 

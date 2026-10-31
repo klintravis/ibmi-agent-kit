@@ -142,8 +142,8 @@ text; each line also stores the identity and the lookup answers used, so it can 
   policy. `IBMI_KIT_POLICY` is an absolute path; each file is loaded once, every listed profile's
   at startup (a missing or invalid one refuses to start), a profile added later on first use; with
   none, the built-in observe policy, which still denies `danger` and `unqualified`. A connection
-  reset after the script was decided (the backend's job generation changed) stops `run_script`
-  before the next statement. The profile's own guards (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`)
+  reset after the script was decided (the backend's job generation, checked after connecting and before each send) stops `run_script`
+  without sending that statement; `run_script` statements take `run_sql`'s time limit and runaway refusal, and after a confirmation a looked-up current library is read again and must not have changed. The profile's own guards (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`)
   refuse in every mode, observe included.
 
 ### D9. Policy tests and replay as a CLI on the server package
