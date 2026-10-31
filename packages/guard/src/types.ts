@@ -26,6 +26,9 @@ export interface Operation {
   command?: string; // CL command name
   via?: string[]; // how it was reached: ["QCMDEXC"], ["RUNSQL"], ["alias QTEMP.A"]
   reason?: string; // why a danger or unqualified, in words for the user
+  // A danger whose only cause is an unqualified CL command missing from the table: observe mode
+  // logs it and lets it run (execution-policy spec).
+  code?: "unknown_command";
 }
 
 export interface Lookups {

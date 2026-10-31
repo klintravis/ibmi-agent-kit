@@ -11,7 +11,8 @@ import type { ObjectRef, OpClass, Operation } from "./types.js";
 const NO_OBJECT = new Set(["*NONE", "*SAME", "*N", "*DFT", "*CRTDFT", "*LDA", "*GDA", "*PDA", "*CURRENT", "*PRV", "*BLANK", "*SRCMBRTXT", "*GEN", "*NOCHK"]);
 // RDB values that mean this database.
 const LOCAL_RDB = new Set(["*LOCAL", "*NONE", "*CURRENT"]);
-const IBM_LIBS = new Set(["QSYS", "QSYS2", "*LIBL"]);
+const LIBL = new Set(["*LIBL", "*NLVLIBL"]); // qualifiers that search the library list
+const IBM_LIBS = new Set(["QSYS", "QSYS2", ...LIBL]);
 // Library special values that are never a reference to another parameter (*FROMLIB, *SAVLIB are).
 const SPECIAL_LIBS = new Set(["*LIBL", "*CURLIB", "*ALL", "*ALLUSR", "*USRLIBL", "*ALLAVL"]);
 
@@ -105,7 +106,13 @@ export function classifyClText(text: string, run: Run): Operation[] {
   if ("error" in parsed) return fail(parsed.error);
   const { name, lib } = parsed;
   const entry = run.commands[name];
-  if (!entry) return fail(`${name} is not in the command table`, name);
+  if (!entry) {
+    // Only a command found through the library list may be one this table has not met yet; a
+    // qualified one is someone's own command, and the qualifier rule decides it.
+    if (!lib || LIBL.has(lib)) return [danger("cl", `${name} is not in the command table`, run, { command: name, code: "unknown_command" })];
+    if (lib === "QSYS" || lib === "QSYS2") return fail(`${lib}/${name} is not in the command table`, name);
+    return fail(`${lib}/${name} is not the IBM command: only QSYS, QSYS2 or the library the command table names may qualify it`, name);
+  }
   if (entry.library) {
     if (lib !== entry.library) return fail(`${name} must be qualified to its product library: ${entry.library}/${name}`, name);
   } else if (lib && !IBM_LIBS.has(lib)) {
