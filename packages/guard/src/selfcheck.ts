@@ -939,3 +939,13 @@ test("decide: the built-in policy allows and logs, denying only danger and unqua
   const frob = await run("CL: FROBCMD X");
   assert.deepEqual([frob.decision, frob.effective], ["deny", "allow"]);
 });
+
+test("decide: an identity without a partition is decided on unknown_partition", async () => {
+  const r = await decideScript("DELETE FROM LVORD.T", { user: "JDOE", groups: ["GRPDEV"] });
+  assert.deepEqual([r.operations[0].partition, r.effective], ["prod", "deny"]);
+});
+
+test("decide: a literal command through QCMDEXC that is not in the table is unknown_command", async () => {
+  const r = await decideScript("CALL QSYS2.QCMDEXC('FROBCMD X')", as("dev", "dev"));
+  assert.deepEqual([r.operations[0].reason, r.effective], ["unknown_command", "allow"]);
+});

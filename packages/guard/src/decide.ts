@@ -117,7 +117,8 @@ export function decide(operations: Operation[], identity: Identity, policy: Poli
   const roles = rolesOf(identity, policy);
   const modeOf = (partition: string | undefined): Mode => (partition && policy.mode.partitions[partition]) || policy.mode.default;
   const decided = operations.map((op): OperationDecision => {
-    const partition = op.partition ?? identity.partition;
+    // An identity built without a partition is an unknown box, never "no partition".
+    const partition = op.partition ?? identity.partition ?? policy.unknownPartition;
     const d = (decision: Verdict, reason: OperationDecision["reason"], message: string, hard: boolean): OperationDecision => {
       const r: OperationDecision = { operation: op, decision, enforced: decision !== "allow" && (hard || modeOf(partition) === "enforce"), reason, message };
       if (partition) r.partition = partition;
