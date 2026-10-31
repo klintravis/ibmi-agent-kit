@@ -109,7 +109,12 @@ export function classifyClText(text: string, run: Run): Operation[] {
   if (!entry) {
     // Only a command found through the library list may be one this table has not met yet; a
     // qualified one is someone's own command, and the qualifier rule decides it.
-    if (!lib || LIBL.has(lib)) return [danger("cl", `${name} is not in the command table`, run, { command: name, code: "unknown_command" })];
+    // A command that carries another command (CMD, RQSDTA) may run it anywhere: never just observed.
+    const carries = parsed.params.has("CMD") || parsed.params.has("RQSDTA");
+    if (!lib || LIBL.has(lib)) {
+      if (carries) return fail(`${name} is not in the command table and carries a command (CMD or RQSDTA) the guard does not see`, name);
+      return [danger("cl", `${name} is not in the command table`, run, { command: name, code: "unknown_command" })];
+    }
     if (lib === "QSYS" || lib === "QSYS2") return fail(`${lib}/${name} is not in the command table`, name);
     return fail(`${lib}/${name} is not the IBM command: only QSYS, QSYS2 or the library the command table names may qualify it`, name);
   }

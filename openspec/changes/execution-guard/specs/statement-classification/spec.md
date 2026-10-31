@@ -114,7 +114,9 @@ libraries, and optionally the partition a parameter's library belongs to. The ki
 commands; a policy MAY add or override commands. A command not in the table, or qualified to a
 library other than `QSYS`, `QSYS2` or one the table names, SHALL classify as `danger`. A command
 missing from the table and unqualified (or qualified `*LIBL`/`*NLVLIBL`) SHALL carry the reason
-`unknown_command`; a qualified one SHALL not, so the qualifier rule wins.
+`unknown_command`; a qualified one SHALL not, so the qualifier rule wins. Nor SHALL an unknown
+command with a `CMD(` or `RQSDTA(` parameter, since it may run that command where the guard does
+not see it.
 
 #### Scenario: Display with an outfile
 - **WHEN** a command is `DSPOBJD OBJ(A/*ALL) OBJTYPE(*FILE) OUTPUT(*OUTFILE) OUTFILE(B/OUT)`

@@ -168,3 +168,28 @@ commands:
   CHGSYSVAL: { class: danger, reason: "changes a system value" }
   CHGSYSLIBL: { class: danger, reason: "changes the system library list" }
   RCLSTG:   { class: danger, reason: "reclaims storage for the whole system" }
+  # run a command later or elsewhere, where the guard does not see it
+  ADDJOBSCDE: { class: danger, reason: "schedules a command to run later" }
+  CHGJOBSCDE: { class: danger, reason: "changes a scheduled command" }
+  ADDAJE:   { class: danger, reason: "adds an autostart job to a subsystem" }
+  CHGAJE:   { class: danger, reason: "changes a subsystem's autostart job" }
+  CHGJOBD:  { class: danger, reason: "changes a job description, which can carry request data run by every job using it" }
+  SBMDBJOB: { class: danger, reason: "submits a job stream the guard does not see" }
+  STRS36PRC: { class: danger, reason: "runs a System/36 procedure the guard does not see" }
+  TFRCTL:   { class: danger, reason: "transfers control to a program the guard does not see" }
+  ADDEXITPGM: { class: danger, reason: "registers an exit program that runs for other users" }
+  # change what a command or object means for everyone
+  CHGCMDDFT: { class: danger, reason: "changes a command's defaults for everyone" }
+  CHGCMD:   { class: danger, reason: "changes a command for everyone" }
+  CHGAUT:   { class: danger, reason: "changes authority" }
+  CHGOWN:   { class: danger, reason: "changes an object's owner" }
+  CHGOBJAUD: { class: danger, reason: "changes object auditing" }
+  DLTAUTL:  { class: danger, reason: "deletes an authorization list" }
+  CHGAUTLE: { class: danger, reason: "changes an authorization list entry" }
+  DLTJRNRCV: { class: danger, reason: "deletes a journal receiver" }
+  # the integrated file system: paths are not libraries the policy can match
+  RMVLNK:   { class: danger, reason: "removes an IFS link" }
+  DEL:      { class: danger, reason: "deletes an IFS object" }
+  RMVDIR:   { class: danger, reason: "removes an IFS directory" }
+  RNM:      { class: danger, reason: "renames an IFS object" }
+  MOV:      { class: danger, reason: "moves an IFS object" }
