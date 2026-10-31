@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact.
 // One 5250 session: transport, screen, and settle logic. The host says it is done twice, by
 // unlocking the keyboard and then definitively by sending a read command, so nothing here polls.
 
@@ -14,7 +15,7 @@ import {
   buildSaveScreenReply,
 } from "./inbound.js";
 import { ScreenBuffer, type Field, type ParsedRecord } from "./screen.js";
-import { lastPaintedRow, messageLine } from "./snapshot.js";
+import { lastPaintedRow, messageLine, structuralSignature } from "./snapshot.js";
 import { ScreenStack, type Exchange, type Move } from "./stack.js";
 import { Telnet5250Connection } from "./telnet.js";
 import { NOOP_REPORTER, type Profile, type Reporter } from "./types.js";
@@ -39,6 +40,7 @@ export class Session extends EventEmitter {
   private recordCount = 0;
   private lastReadWasAllFields = false;
   private closed = false;
+  private firstContact = true; // until a caller sends the first AID key
   private seen: Omit<Exchange, "key" | "selected"> = { saved: false, restored: false, cleared: false };
   private typed = new Map<string, string>();
   readonly stack = new ScreenStack();
@@ -211,6 +213,7 @@ export class Session extends EventEmitter {
   }
 
   async pressKey(key: string, reporter: Reporter = NOOP_REPORTER): Promise<void> {
+    this.firstContact = false;
     this.seen = { saved: false, restored: false, cleared: false };
     const name = normaliseKey(key);
     const aid = KEY_TO_AID[name];
@@ -254,16 +257,24 @@ export class Session extends EventEmitter {
     this.screen.typeInto(input[0], this.profile.user, this.encoder);
     this.screen.typeInto(pw, this.profile.password, this.encoder);
 
-    const landing = [this.profile.initialProgram, this.profile.initialMenu, this.profile.initialLibrary];
-    landing.forEach((val, i) => {
-      if (val && input[i + 2]) this.screen.typeInto(input[i + 2], val, this.encoder);
-    });
+    // A custom screen has no program/menu/library fields to fill, whatever else it paints.
+    const custom = !this.looksLikeStandardSignOn();
+    if (!custom) {
+      const landing = [this.profile.initialProgram, this.profile.initialMenu, this.profile.initialLibrary];
+      landing.forEach((val, i) => {
+        if (val && input[i + 2]) this.screen.typeInto(input[i + 2], val, this.encoder);
+      });
+    }
+    const before = custom ? structuralSignature(this.screen) : undefined;
 
     await this.pressKey("Enter", reporter);
 
     const msg = messageLine(this.screen);
     if (msg && /CPF1[01]\d\d|CPF22\d\d/.test(msg)) throw new Error(`sign on failed: ${msg}`);
-    if (this.looksLikeSignOn()) {
+    // The first-contact rule no longer holds once a key was sent, so a custom screen is judged by
+    // whether the same record format came back.
+    const still = custom ? before !== undefined && structuralSignature(this.screen) === before : this.looksLikeSignOn();
+    if (still) {
       throw new Error(`still on the sign on screen after Enter${msg ? `: ${msg}` : ""}`);
     }
   }
@@ -313,6 +324,20 @@ export class Session extends EventEmitter {
   // Structural, so it holds on a translated screen. The text match is an alternative and never a
   // requirement: ANDing the two disengaged this on a French box.
   looksLikeSignOn(): boolean {
+    return this.looksLikeStandardSignOn() || this.looksLikeCustomSignOn();
+  }
+
+  // A customised sign on (PUB400): user field then one nondisplay password field, and nothing else.
+  // Only on first contact, so a later nondisplay field (an application PIN prompt) is never taken for it.
+  private looksLikeCustomSignOn(): boolean {
+    if (!this.firstContact) return false;
+    const input = this.screen.inputFields();
+    if (input.length < 2) return false;
+    const [first, ...later] = input;
+    return first.length <= 10 && !isNondisplay(first.attr) && later.filter((f) => isNondisplay(f.attr)).length === 1;
+  }
+
+  private looksLikeStandardSignOn(): boolean {
     const input = this.screen.inputFields();
     const stacked = input.filter((f) => f.length === 10 && f.col === input[0]?.col);
     if (stacked.length < 4) return false;

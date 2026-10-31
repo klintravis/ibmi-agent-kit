@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): added the tools.js import-side-effect check.
+// Modified by ibmi-agent-kit (2026): added the tools.js import-side-effect check; custom sign on screen tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -576,6 +576,61 @@ test("typing onto a sign on screen is refused", () => {
   assert.throws(() => stub.typeInto(s.inputFields()[0], "C"), /QMAXSIGN/);
   // establish() writes to the buffer directly, so signing on still works.
   assert.doesNotThrow(() => s.typeInto(s.inputFields()[0], "SOMEUSER", (x) => encode(x, 37)));
+});
+
+// PUB400's first screen: a displayed 10 character user field and a 128 character nondisplay password.
+const pub400 = (firstContact: boolean) => {
+  const screen = new ScreenBuffer(24, 80, 37);
+  screen.fields = [
+    field({ id: "f1", row: 5, col: 25, length: 10, attr: 0x20, monocase: true }),
+    field({ id: "f2", row: 6, col: 25, length: 128, attr: 0x27 }),
+  ];
+  const pressed: string[] = [];
+  const stub: Session = Object.assign(Object.create(Session.prototype), {
+    screen,
+    firstContact,
+    encoder: enc,
+    profile: { user: "MYUSER", password: "S3CRET", initialProgram: "PGM", initialMenu: "MNU", initialLibrary: "LIB" },
+    pressKey: async (k: string) => {
+      pressed.push(k);
+      screen.fields = [];
+    },
+  });
+  return { stub, screen, pressed };
+};
+
+test("a two field custom sign on screen is recognised on first contact only", async () => {
+  const { stub, screen, pressed } = pub400(true);
+  assert.equal(stub.looksLikeSignOn(), true);
+  await stub.signOn();
+  assert.deepEqual(pressed, ["Enter"]);
+  // pressKey was stubbed to clear the fields, so read the buffer cells the user and password went to.
+  const cells = (row: number, n: number) => screen.line(row).slice(24, 24 + n);
+  assert.equal(cells(5, 10).trim(), "MYUSER");
+  assert.equal(screen.text().includes("S3CRET"), false, "nondisplay stays masked");
+  assert.equal(decode(Buffer.from(screen.chars.slice(5 * 80 + 24, 5 * 80 + 30))), "S3CRET", "password went into f2");
+  assert.equal(screen.line(7).includes("PGM"), false, "no landing values typed");
+  assert.equal(screen.line(8).includes("MNU"), false);
+
+  // The same layout after a caller pressed a key (an application PIN prompt) is not a sign on.
+  assert.equal(pub400(false).stub.looksLikeSignOn(), false);
+  // One input field, or two nondisplay fields, or a nondisplay first field, is not it either.
+  const odd = pub400(true);
+  odd.screen.fields = [field({ id: "f1", length: 10 })];
+  assert.equal(odd.stub.looksLikeSignOn(), false, "one field");
+  odd.screen.fields = [field({ id: "f1", length: 10 }), field({ id: "f2", attr: 0x27 }), field({ id: "f3", attr: 0x27 })];
+  assert.equal(odd.stub.looksLikeSignOn(), false, "two nondisplay");
+  odd.screen.fields = [field({ id: "f1", length: 11 }), field({ id: "f2", attr: 0x27 })];
+  assert.equal(odd.stub.looksLikeSignOn(), false, "user field longer than 10");
+  odd.screen.fields = [field({ id: "f1", length: 10, attr: 0x27 }), field({ id: "f2", attr: 0x27 })];
+  assert.equal(odd.stub.looksLikeSignOn(), false, "nondisplay first field");
+});
+
+test("the standard sign on layout is still recognised after a key was pressed", () => {
+  const s = new ScreenBuffer(24, 80, 37);
+  s.apply(fixture("signon.bin"));
+  const stub: Session = Object.assign(Object.create(Session.prototype), { screen: s, firstContact: false });
+  assert.equal(stub.looksLikeSignOn(), true);
 });
 
 test("every nondisplay attribute is recognised, and the colours are right", () => {
