@@ -51,6 +51,7 @@ export interface VerbContext {
   exec: Executor;
   refusal?(s: ClassifiedStatement): string | undefined; // the profile's own guards
   confirm(needs: ConfirmItem[]): Promise<string | undefined>; // why not, or undefined for a yes
+  recheck?(answers: Answers): Promise<string | undefined>; // after a yes: a looked-up current library that changed
   log?(call: Pick<CallRecord, "tool" | "lookups" | "notes" | "statements">): void; // the run log
   renew?(): Promise<VerbContext>; // the same on the connection's current job, after a reset
 }
@@ -287,8 +288,10 @@ export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]
   const asked = needs(ready.flatMap((p) => p.decided));
   let confirmed: boolean | undefined;
   if (asked.length) {
-    const no = await ctx.confirm(asked);
+    let no = await ctx.confirm(asked);
     confirmed = no === undefined;
+    // One confirmation covers the call, so a current library that moved for one verb runs none.
+    for (const p of ready) no ??= await ctx.recheck?.(p.answers);
     if (no !== undefined) for (const p of ready) p.error = `nothing was sent: ${no}`;
   }
   const results: VerbResult[] = [];

@@ -86,6 +86,14 @@ export function sqlLookups(conn: Conn): Lookups {
   };
 }
 
+// After a confirmation, whose wait may be long: a *CURLIB decided before it must still be the
+// current library. Why not, or undefined when it was not looked up or has not changed.
+export async function curlibMoved(conn: Conn, answers: Answers): Promise<string | undefined> {
+  if (!("curlib" in answers)) return undefined;
+  const now = (await sqlLookups(conn).currentLibrary().catch(() => undefined)) ?? null;
+  return now === (answers.curlib ?? null) ? undefined : `the current library changed from ${answers.curlib ?? "none"} to ${now ?? "unknown"} while confirming`;
+}
+
 // --- identity and partition, once per connection (design D5) ---
 
 interface Box {
@@ -317,6 +325,7 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
       lookups: sqlLookups(conn),
       refusal: (s) => profileRefusal(s, conn.profile),
       confirm: (needs) => confirm(server, who.identity, needs),
+      recheck: (answers) => curlibMoved(conn, answers),
       exec: {
         query: (sql, params, maxRows) => limited(conn.query(sql, params, maxRows, undefined, generation)),
         execute: (sql, params) => conn.execute(sql, params, undefined, generation),
@@ -384,14 +393,10 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
           const text = `Denied, nothing was sent: ${no}.\n${ASK}\n${LIMITS}`;
           return result({ ...summary, ran: false, statements: p.statements.map((x, i) => ({ ...report(x, i), outcome: "not sent" })), limits: LIMITS }, text, true);
         }
-        // The wait may be long: a *CURLIB decided before it must still be the current library.
-        if ("curlib" in p.lookups) {
-          const now = (await sqlLookups(conn).currentLibrary().catch(() => undefined)) ?? null;
-          if (now !== (p.lookups.curlib ?? null)) {
-            const no = `the current library changed from ${p.lookups.curlib ?? "none"} to ${now ?? "unknown"} while confirming`;
-            log(p, conn, p.statements.map(() => `not sent: ${no}`), true);
-            return result({ ...summary, ran: false, statements: p.statements.map((x, i) => ({ ...report(x, i), outcome: "not sent" })), limits: LIMITS }, `Denied, nothing was sent: ${no}.\n${ASK}`, true);
-          }
+        const moved = await curlibMoved(conn, p.lookups);
+        if (moved) {
+          log(p, conn, p.statements.map(() => `not sent: ${moved}`), true);
+          return result({ ...summary, ran: false, statements: p.statements.map((x, i) => ({ ...report(x, i), outcome: "not sent" })), limits: LIMITS }, `Denied, nothing was sent: ${moved}.\n${ASK}`, true);
         }
       }
 

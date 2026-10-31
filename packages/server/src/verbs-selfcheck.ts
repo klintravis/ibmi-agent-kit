@@ -48,11 +48,14 @@ type Row = Record<string, unknown>;
 // A box: answers the guard's own identity and catalog queries, and records every verb statement
 // that reaches it with the job generation it ran on. Like the backend, a send checks the job
 // generation before sending. `resetOn` drops the job once, as the statement is about to be sent.
-function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: string) => Row[]; fail?: string[]; resetOn?: string; readOnly?: boolean; blockedTables?: string[] } = {}) {
+// `curlib`: the current library each time it is asked, the last repeating.
+function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: string) => Row[]; fail?: string[]; resetOn?: string; readOnly?: boolean; blockedTables?: string[]; curlib?: string[] } = {}) {
   const sent: string[] = [];
+  let curlibAsked = 0;
   const own = (sql: string): Row[] | undefined => {
     if (sql.startsWith("SELECT CURRENT SERVER")) return [{ RDB: o.rdb ?? "DEVRDB", USR: o.user ?? "JDOE" }];
     if (sql.includes("QSYS2.USER_INFO")) return [{ G: o.group ?? "GRPDEV", S: "" }];
+    if (sql.includes("QSYS2.LIBRARY_LIST_INFO") && o.curlib) return [{ S: o.curlib[Math.min(curlibAsked++, o.curlib.length - 1)] }];
     if (/AUTHORIZATION_LIST_USER_INFO|QSYS2\.(SYSSCHEMAS|SYSTABLES|SYSVIEWDEP|LIBRARY_LIST_INFO)/.test(sql)) return [];
     return undefined;
   };
@@ -178,6 +181,16 @@ test("verb_run: one confirmation covers every confirm; declined or unavailable s
   const none = await run({ set }, { verb: "V" });
   assert.deepEqual(none.sent, []);
   assert.match(none.text, /confirmation is unavailable in this client/);
+});
+
+test("verb_run: a current library that changes while confirming sends nothing; unchanged, the verb runs", async () => {
+  const { set } = verbs({ "c.yaml": verb("CUR", "steps:\n  - cl: CLRPFM FILE(*CURLIB/T)\n") });
+  const moved = await run({ set, elicit: YES, box: box({ curlib: ["LVLIB", "OTHER"] }) }, { verb: "CUR" });
+  assert.deepEqual(moved.sent, []);
+  assert.match(moved.s.results[0].error, /^nothing was sent: the current library changed from LVLIB to OTHER while confirming$/);
+  assert.deepEqual(moved.log.map((l) => [l.confirmed, l.outcome]), [[true, "not run"]]);
+  const same = await run({ set, elicit: YES, box: box({ curlib: ["LVLIB"] }) }, { verb: "CUR" });
+  assert.deepEqual(same.sent, ["0: CLRPFM FILE(*CURLIB/T)"]);
 });
 
 test("verb_run: a requires_absent hit runs neither that setup nor its cleanup", async () => {
