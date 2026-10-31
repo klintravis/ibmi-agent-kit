@@ -1,0 +1,206 @@
+# Policy file reference
+
+The execution policy is one YAML file that tells the [guard](../packages/guard/README.md) what each user may do in which library. It decides `run_script` and `policy_check`. Status: the guard does not yet decide `run_sql`, `compile_member`, the source tools or the 5250 tools, and its catalog lookups are not yet verified on a live IBM i.
+
+The guard catches mistakes. It classifies the text it is given, not what called programs or triggers do. IBM i object authority stays the real boundary.
+
+## Turn it on
+
+Set `IBMI_KIT_POLICY` in a profile file to the absolute path of the policy. Without it the built-in policy applies: observe mode, one `allow` rule, so nothing is blocked except `danger` and unqualified operations, and every statement is logged.
+
+```sh
+# ~/.ibmi-agent-kit/.env.pub400
+IBMI_KIT_POLICY=/home/me/policies/pub400.yaml
+IBMI_PARTITION=play
+```
+
+```powershell
+# Windows
+IBMI_KIT_POLICY=C:\Users\me\policies\pub400.yaml
+```
+
+A missing or invalid policy stops the server at startup and names the file. A relative path is refused. Keep the policy, the profile and any verb files out of the agent's reach with client permission rules, so the agent cannot edit them.
+
+## Rollout
+
+1. Start with `mode: observe`: everything is decided and logged, nothing extra is blocked.
+2. Read the run log (`<profile folder>/runs/`), write `policy test` cases, and run `ibmi-agent-kit policy replay <candidate>` to see which logged statements would change.
+3. Switch partitions to `enforce` one at a time with the per-partition `mode` map.
+
+## Fields
+
+| Field | Required | What it is |
+|---|---|---|
+| `version` | yes | Must be `1`. |
+| `mode` | no | `observe`, `enforce`, or a map `{ default: observe, prod: enforce }`. Default `enforce`. |
+| `partitions` | no | Named boxes. Each lists `systems` (5250 System names), `rdbs` (SQL RDB names) or both. |
+| `unknown_partition` | with `partitions` | The partition used for a box no entry names. |
+| `command_files` | no | Files of CL command entries, relative to the policy's folder, merged in order. |
+| `commands` | no | CL command entries written in the policy; applied after the files. |
+| `environments` | no | Named groups of libraries, matched by exact name or pattern. First match wins. |
+| `roles` | no | Named groups of users, by group profile, authorization list or user name. |
+| `default_role` | no | The role held by a user no role matches. |
+| `rules` | yes | The decisions. First match wins; no match is deny. |
+
+Unknown keys are errors. Names (partition, environment, role) are letters, digits, `_` and `-`; `any` is reserved.
+
+### Partitions
+
+```yaml
+partitions:
+  - { name: play, systems: [PUB400], rdbs: [PUB400] }
+  - { name: prod, systems: [PRODBOX], rdbs: [PRODRDB] }
+unknown_partition: prod
+```
+
+The partition of a connection comes from the 5250 System name, the SQL RDB name (`CURRENT SERVER`) and the profile's `IBMI_PARTITION`. Every name that maps must map to the same partition, and a declared partition must exist; a disagreement is a conflict and denies everything, in every mode. If nothing maps, `unknown_partition` applies. A system or RDB may be listed by one partition only. Note: the 5250 System name is not read by the guard yet (a stub), so today the RDB name and `IBMI_PARTITION` decide.
+
+A three-part SQL name or a CL `RDB()` parameter that names a listed RDB is decided on that partition; one that names an unlisted RDB is `danger`.
+
+### Environments
+
+```yaml
+environments:
+  - { name: scratch,  libraries: [QTEMP] }
+  - { name: personal, match: ["${USER}", "${USER}1"] }
+  - { name: system,   match: ["Q*", "SYS*"] }
+```
+
+- `libraries`: exact system names. `match`: patterns using `*` and `${USER}` (the signed-on user). Give at least one.
+- `partitions`: optional list; the entry applies only on those partitions.
+- Order matters: the first entry that applies and names the library wins, exact names before patterns within it. Put narrow entries before wide ones (`QT*` before `Q*`).
+- Two names are built in and reserved: `unmatched` (no entry names the library) and `unqualified` (an unqualified read or call).
+- A library with a long SQL schema name is resolved to its system name by a catalog lookup; one that cannot be resolved is `unmatched`.
+
+Loading warns on stderr when an entry or rule can never match because an earlier one covers it.
+
+### Roles
+
+```yaml
+roles:
+  - { name: dev,        groups: [GRPDEV] }
+  - { name: qa,         groups: [GRPQA], authlists: [AUTLQA] }
+  - { name: contractor, users: ["CTR*"] }
+default_role: analyst
+```
+
+A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match.
+
+### Rules
+
+```yaml
+rules:
+  - { classes: [danger], decision: deny }
+  - { env: scratch, classes: [read, write, ddl], decision: allow }
+  - { roles: [dev], partition: play, env: personal, decision: allow }
+  - { roles: [dev], env: personal, classes: [ddl], decision: confirm }
+  - { classes: [read], decision: allow }
+```
+
+| Key | Matches | Omitted |
+|---|---|---|
+| `roles` | the operation if the user holds any listed role | any role |
+| `partition` | the operation's partition | any |
+| `env` | the library's environment | any |
+| `classes` | the operation's class | any |
+| `decision` | `allow`, `confirm` or `deny` | required |
+
+Each key takes one value, a list, or `any`. Rules are checked in order and the first that matches every key decides one operation. A statement takes the most restrictive decision of its operations. `confirm` asks the user (see below). A rule that names the class `unqualified` is an error: nothing can allow an unqualified change.
+
+Always denied, in every mode: `danger` operations (a command not in the table, a statement the guard cannot read safely, an RDB no partition lists), `unqualified` operations (a change with no library; name the library), and a partition conflict. In observe mode an unknown unqualified CL command is only logged (as denied, not enforced) and runs.
+
+### Classes
+
+| Class | What |
+|---|---|
+| `read` | Queries, display commands |
+| `write` | INSERT, UPDATE, DELETE, MERGE and the like |
+| `ddl` | CREATE, ALTER, DROP, object-creating and deleting commands |
+| `compile` | Compile commands |
+| `call` | CALL, program and command invocations |
+| `liblist` | Library list changes |
+| `promote` | Change-management promotion (usually via a command file) |
+| `danger` | Never allowed |
+| your own | Created with `class_by_param` or `class` in a command entry, such as `promote_qa` |
+
+### Modes
+
+`observe` decides and logs and lets the statement run as if allowed. `enforce` applies the decision. The map form sets a mode per partition:
+
+```yaml
+mode: { default: observe, prod: enforce }
+```
+
+While observing, the command table's `danger` entries are the boundary: an IBM command missing from the table runs. Qualified unknown commands (`MYLIB/FROBCMD`) are denied in every mode.
+
+### Command tables
+
+The shipped table is `packages/guard/src/commands.yaml`. A command not in any table is `danger`. A policy adds entries in `commands:` or in files named by `command_files` (each file holds only a `commands:` section; rules, environments and roles cannot be included). A file that redefines a command the shipped table calls `danger` produces a warning.
+
+```yaml
+# cm-product.yaml: an invented change-management product
+commands:
+  CMPRM:
+    class_by_param: { param: LEVEL, values: { QA: promote_qa, PROD: promote_prod }, default: danger }
+    positional: [REQ, LEVEL]
+```
+
+| Entry key | Meaning |
+|---|---|
+| `class` or `class_by_param` | Exactly one. `class_by_param` picks a class from a parameter's value, with a `default`. |
+| `library` | The product library the command must be qualified to; otherwise `danger`. |
+| `positional` | Keyword order for values written without a keyword. |
+| `params` | Parameters that name an `object`, `library` or `rdb`, optionally `{ kind, class, partition }`. |
+| `writes` | Object parameters that are written when given (for example `OUTFILE`). |
+| `nested_sql` | The parameter holding an SQL statement, classified as SQL (`RUNSQL`). |
+| `reason` | Shown with a `danger` class. |
+
+## Confirmation
+
+`confirm` rules make `run_script` ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
+
+## Example
+
+[examples/three-partitions.yaml](../examples/three-partitions.yaml) is a complete policy with three partitions, environments, four roles and a command file ([cm-product.yaml](../examples/cm-product.yaml)), and [examples/three-partitions.tests.yaml](../examples/three-partitions.tests.yaml) tests it. Every name in it is invented.
+
+## Test a policy
+
+```sh
+ibmi-agent-kit policy test examples/three-partitions.yaml examples/three-partitions.tests.yaml
+```
+
+A test file is a YAML list of cases:
+
+```yaml
+- name: dev writes own library
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: |
+    UPDATE JDOE.T SET A = 1;
+    CL: CRTBNDRPG PGM(JDOE/P)
+  lookups:
+    schemas: { LONGSCHEMANAME: LONGSCH }   # optional: long name -> system name
+  expect: [allow, deny]                    # one decision per statement, or one for the script
+```
+
+`as` takes `user`, `groups`, `authlists`, `partition` and `curlib`. `expect` is the policy's decision, so an observe-mode deny is still tested as deny. Exit 0 all cases passed, 1 a case failed, 2 a bad file. In a team, run it in CI.
+
+Before enforcing, replay the run log under the candidate:
+
+```sh
+ibmi-agent-kit policy replay candidate.yaml --since 14
+```
+
+It prints each logged statement whose decision changes, and a count. It reads the run log in the first profile folder.
+
+To check one script without a connection from an agent, call `policy_check` with `as` and, optionally, `policy`.
+
+## Run log
+
+See [Run log in the guard README](../packages/guard/README.md#run-log). It is a local, editable record, not an audit trail.
+
+## Limits
+
+- The guard sees the text it is given: not what a called program, trigger, menu option or prompted field does, and not options typed on a list screen.
+- A decision is made against the job as it was when the script was planned; a job lost or reset in between refuses the send.
+- Not yet verified on a live IBM i: the catalog lookups and the supplemental-group format.
+- Not yet wired in: `run_sql`, the source tools and the 5250 tools keep their own checks.
