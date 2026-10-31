@@ -574,3 +574,65 @@ test("policy: command_files merge in order, then the policy's own commands", () 
   assert.equal(p.commands.FROB.class, "write");
   assert.equal(p.commands.ZAP.class, "ddl");
 });
+
+// --- reference checks and shadow warnings (task 2.2) ---
+
+const PARTS = "partitions:\n  - { name: dev, systems: [DEVBOX] }\n  - { name: qa, rdbs: [QARDB] }\nunknown_partition: qa\n";
+
+test("policy refs: a rule naming an undefined environment is refused naming the rule and the name", () => {
+  const text = "version: 1\nenvironments:\n  - { name: integ, match: [\"IN*\"] }\nrules:\n  - { classes: [read], decision: allow }\n  - { env: intgr, decision: allow }\n";
+  assert.throws(() => parsePolicy(text, "team.yaml"), /team\.yaml: rule 2: env intgr is not defined/);
+});
+
+test("policy refs: undefined role, partition and class; reserved and duplicate names", () => {
+  const bad = (body: string, re: RegExp) => assert.throws(() => parsePolicy("version: 1\n" + PARTS + body, "p.yaml"), re);
+  bad("rules:\n  - { roles: [dve], decision: allow }\n", /rule 1: role dve is not defined/);
+  bad("rules:\n  - { partition: prd, decision: allow }\n", /rule 1: partition prd is not defined/);
+  bad("rules:\n  - { classes: [promote_qa], decision: allow }\n", /rule 1: class promote_qa is not defined/);
+  bad("rules:\n  - { classes: [unqualified], decision: allow }\n", /rule 1: class unqualified can never be matched/);
+  bad("mode: { default: observe, prd: enforce }\nrules: []\n", /mode: partition prd is not defined/);
+  bad("default_role: nobody\nrules: []\n", /default_role: role nobody is not defined/);
+  bad("environments:\n  - { name: x, libraries: [X], partitions: [prd] }\nrules: []\n", /environment x: partition prd is not defined/);
+  bad("environments:\n  - { name: unmatched, libraries: [X] }\nrules: []\n", /environment unmatched is reserved/);
+  bad("roles:\n  - { name: any, users: [X] }\nrules: []\n", /role "any" is reserved/);
+  bad("roles:\n  - { name: dev, users: [X] }\n  - { name: dev, users: [Y] }\nrules: []\n", /role dev is defined twice/);
+  bad("commands:\n  PRMOBJ: { class: promote, params: { TOLIB: { kind: library, partition: prd } } }\nrules: []\n", /command PRMOBJ: partition prd is not defined/);
+  assert.throws(() => parsePolicy("version: 1\npartitions:\n  - { name: dev, rdbs: [A] }\n  - { name: qa, rdbs: [A] }\nunknown_partition: qa\nrules: []\n", "p.yaml"), /RDB A is listed by partitions dev and qa/);
+  assert.throws(() => parsePolicy("version: 1\npartitions:\n  - { name: dev, rdbs: [A] }\nrules: []\n", "p.yaml"), /unknown_partition is required/);
+});
+
+test("policy refs: reserved environments and custom classes from a command table are usable", () => {
+  const p = parsePolicy(
+    "version: 1\ncommands:\n  CMPRM: { class_by_param: { param: LEVEL, values: { QA: promote_qa }, default: danger } }\nrules:\n  - { env: [unmatched, unqualified], classes: [read], decision: allow }\n  - { classes: promote_qa, decision: confirm }\n",
+    "p.yaml",
+  );
+  assert.deepEqual(p.warnings, []);
+});
+
+test("policy shadows: Q* before QT* on the same partitions warns naming both", () => {
+  const p = parsePolicy("version: 1\nenvironments:\n  - { name: system, match: [\"Q*\"] }\n  - { name: test, match: [\"QT*\"] }\nrules: []\n", "p.yaml");
+  assert.deepEqual(p.warnings, ["p.yaml: environment test can never match: environment system comes first and covers it"]);
+});
+
+test("policy shadows: QT* on one partition before Q* everywhere does not warn", () => {
+  const p = parsePolicy("version: 1\n" + PARTS + "environments:\n  - { name: test, match: [\"QT*\"], partitions: [qa] }\n  - { name: system, match: [\"Q*\"] }\nrules: []\n", "p.yaml");
+  assert.deepEqual(p.warnings, []);
+});
+
+test("policy shadows: an exact name an earlier entry covers warns", () => {
+  const p = parsePolicy("version: 1\nenvironments:\n  - { name: live, match: [\"LV*\"] }\n  - { name: blocked, libraries: [PAYLIB, LVPAY] }\nrules: []\n", "p.yaml");
+  assert.deepEqual(p.warnings, ["p.yaml: environment blocked: LVPAY can never match: environment live comes first and covers it"]);
+});
+
+test("policy shadows: a rule after a catch-all warns", () => {
+  const p = parsePolicy("version: 1\nroles:\n  - { name: dev, groups: [GRPDEV] }\nrules:\n  - { classes: [read], decision: allow }\n  - { roles: any, decision: deny }\n  - { roles: [dev], classes: [read], decision: deny }\n  - { classes: [write], decision: allow }\n", "p.yaml");
+  assert.deepEqual(p.warnings, [
+    "p.yaml: rule 3 can never match: rule 1 comes first and matches everything it does",
+    "p.yaml: rule 4 can never match: rule 2 comes first and matches everything it does",
+  ]);
+});
+
+test("policy shadows: the D4 example and the built-in policy load without warnings", () => {
+  assert.deepEqual(loadPolicy(EXAMPLE).warnings, []);
+  assert.deepEqual(builtinPolicy().warnings, []);
+});

@@ -4,7 +4,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
-import { builtinCommands, commandTableSchema, issueLines, mergeCommands, parseCommandFile, parseYaml, type CommandTable } from "./commands.js";
+import { BUILTIN_CLASSES } from "./types.js";
+import { builtinCommands, commandTableSchema, customClasses, issueLines, mergeCommands, parseCommandFile, parseYaml, type CommandTable } from "./commands.js";
 
 export type Mode = "observe" | "enforce";
 export type Verdict = "allow" | "confirm" | "deny";
@@ -128,7 +129,96 @@ export function parsePolicy(text: string, file: string): Policy {
   };
   if (p.unknown_partition) policy.unknownPartition = p.unknown_partition;
   if (p.default_role) policy.defaultRole = p.default_role;
+  const errors = references(policy);
+  if (errors.length) throw new Error(errors.map((e) => `${file}: ${e}`).join("\n"));
+  policy.warnings = shadows(policy).map((w) => `${file}: ${w}`);
   return policy;
+}
+
+// Environment names rules may use without defining them.
+export const RESERVED_ENVS = ["unmatched", "unqualified"];
+
+// Every name a policy uses must be defined; returns the errors.
+function references(p: Policy): string[] {
+  const errors: string[] = [];
+  const set = (kind: string, list: { name: string }[]) => {
+    const s = new Set<string>();
+    for (const { name } of list) {
+      if (name === "any") errors.push(`${kind} "any" is reserved: it means anything in a rule`);
+      if (s.has(name)) errors.push(`${kind} ${name} is defined twice`);
+      s.add(name);
+    }
+    return s;
+  };
+  const partitions = set("partition", p.partitions);
+  const envs = set("environment", p.environments);
+  const roles = set("role", p.roles);
+  for (const r of RESERVED_ENVS) if (envs.has(r)) errors.push(`environment ${r} is reserved: it is what the guard calls ${r === "unmatched" ? "a library no entry matches" : "an unqualified read or call"}`);
+  for (const r of RESERVED_ENVS) envs.add(r);
+  const classes = new Set<string>([...BUILTIN_CLASSES, ...customClasses(p.commands)]);
+  const need = (what: string, kind: string, known: Set<string>, names: string[] | undefined) => {
+    for (const n of names ?? []) if (!known.has(n)) errors.push(`${what}: ${kind} ${n} is not defined`);
+  };
+
+  const seen = new Map<string, string>(); // SYSTEM:X / RDB:X → partition
+  for (const x of p.partitions)
+    for (const [kind, list] of [["system", x.systems], ["RDB", x.rdbs]] as const)
+      for (const n of list) {
+        const other = seen.get(`${kind}:${n}`);
+        if (other && other !== x.name) errors.push(`${kind} ${n} is listed by partitions ${other} and ${x.name}`);
+        seen.set(`${kind}:${n}`, x.name);
+      }
+  if (p.partitions.length && !p.unknownPartition) errors.push("unknown_partition is required when partitions are listed: it decides a box no partition names");
+  need("unknown_partition", "partition", partitions, p.unknownPartition ? [p.unknownPartition] : []);
+  need("mode", "partition", partitions, Object.keys(p.mode.partitions));
+  need("default_role", "role", roles, p.defaultRole ? [p.defaultRole] : []);
+  for (const e of p.environments) need(`environment ${e.name}`, "partition", partitions, e.partitions);
+  for (const [cmd, e] of Object.entries(p.commands))
+    for (const v of Object.values(e.params ?? {})) if (typeof v !== "string") need(`command ${cmd}`, "partition", partitions, v.partition ? [v.partition] : []);
+  p.rules.forEach((r, i) => {
+    const what = `rule ${i + 1}`;
+    need(what, "role", roles, r.roles);
+    need(what, "partition", partitions, r.partition);
+    need(what, "env", envs, r.env);
+    if (r.classes?.includes("unqualified")) errors.push(`${what}: class unqualified can never be matched: no rule decides an unqualified change`);
+    need(what, "class", classes, r.classes?.filter((c) => c !== "unqualified"));
+  });
+  return errors;
+}
+
+// Literal-prefix coverage only, so a warning is never wrong: X* covers XY and XY*; * covers all.
+// Anything holding ${USER} is left alone.
+function covers(q: string, x: string): boolean {
+  if (q.includes("${USER}") || x.includes("${USER}")) return false;
+  if (q === x) return true;
+  const star = q.indexOf("*");
+  return star === q.length - 1 && x.startsWith(q.slice(0, -1));
+}
+
+// A list key that is absent means everything: absent covers all, a list covers its subsets.
+function within(earlier: string[] | undefined, later: string[] | undefined): boolean {
+  return !earlier || (!!later && later.every((x) => earlier.includes(x)));
+}
+
+// Environment entries, exact names and rules an earlier entry or rule always wins over.
+function shadows(p: Policy): string[] {
+  const warnings: string[] = [];
+  p.environments.forEach((e, j) => {
+    const earlier = p.environments.slice(0, j).filter((d) => within(d.partitions, e.partitions));
+    const by = (x: string) => earlier.find((d) => [...d.libraries, ...d.match].some((q) => covers(q, x)));
+    const whole = earlier.find((d) => [...e.libraries, ...e.match].every((x) => [...d.libraries, ...d.match].some((q) => covers(q, x))));
+    if (whole) warnings.push(`environment ${e.name} can never match: environment ${whole.name} comes first and covers it`);
+    else
+      for (const lib of e.libraries) {
+        const d = by(lib);
+        if (d) warnings.push(`environment ${e.name}: ${lib} can never match: environment ${d.name} comes first and covers it`);
+      }
+  });
+  p.rules.forEach((r, j) => {
+    const i = p.rules.slice(0, j).findIndex((q) => within(q.roles, r.roles) && within(q.partition, r.partition) && within(q.env, r.env) && within(q.classes, r.classes));
+    if (i >= 0) warnings.push(`rule ${j + 1} can never match: rule ${i + 1} comes first and matches everything it does`);
+  });
+  return warnings;
 }
 
 // Read the policy file once at startup; with no path, the built-in policy.
