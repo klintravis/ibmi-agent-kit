@@ -69,8 +69,9 @@ object plus every operation in its body.
 Every changed object SHALL name its library, in SQL (`LIB.OBJ`) or system (`LIB/OBJ`) naming,
 case-insensitively with delimited names normalised. `*CURLIB` SHALL be resolved to the job's
 current library at decision time. Any other unqualified changed object, or `*LIBL`, SHALL
-classify as `unqualified`, which no rule can allow. Unqualified reads are in environment
-`unqualified`.
+classify as `unqualified`, which no rule can allow. Unqualified reads and unqualified calls
+(procedures, functions, CL `CALL PGM(X)` or `*LIBL/X`) keep their class and are in environment
+`unqualified`, so rules decide them.
 
 #### Scenario: Unqualified update
 - **WHEN** a statement is `UPDATE T SET C = 1`
@@ -79,6 +80,10 @@ classify as `unqualified`, which no rule can allow. Unqualified reads are in env
 #### Scenario: Current library compile
 - **WHEN** a compile targets `*CURLIB` and the job's current library is `JDOE`
 - **THEN** it classifies as `compile` into `JDOE`
+
+#### Scenario: Unqualified call
+- **WHEN** a statement is `CALL MYPROC()` or a CL command is `CALL PGM(ORDVAL)`
+- **THEN** it classifies as `call` in environment `unqualified`, not as `unqualified`
 
 ### Requirement: Libraries are matched by their system name
 A library named by its long SQL schema name SHALL be resolved to its system name at decision
