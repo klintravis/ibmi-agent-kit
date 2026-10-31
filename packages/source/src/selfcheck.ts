@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): checks for the SQL transports, query, execute and cl, and a side-effect-free tools.ts.
+// Modified by ibmi-agent-kit (2026): checks for the SQL transports, query, execute and cl (incl. the job generation), and a side-effect-free tools.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -587,6 +587,16 @@ test("execute sends the values as bound parameters and the statement text unchan
   assert.equal(calls.length, 1);
   assert.equal(calls[0].sql, sql, "the statement text reaches the server as written");
   assert.deepEqual(calls[0].opts, { parameters: ["x' or '1'='1", 5] });
+});
+
+test("query, execute and cl refuse on a job other than the one decided against, before sending", async () => {
+  const { calls, be } = stubBackend(() => ({ success: true, has_results: false, update_count: 1 }));
+  await be.execute("UPDATE A.T SET C = 1", undefined, undefined, 0);
+  assert.equal(calls.length, 1, "the decided job sends");
+  await be.close(); // a reset: the next connect is a new job
+  for (const send of [() => be.execute("UPDATE A.T SET C = 2", undefined, undefined, 0), () => be.query("SELECT 1 FROM A.T", undefined, 1, undefined, 0), () => be.cl("dltf a/t", undefined, 0)])
+    await assert.rejects(send, /reset after this was decided/);
+  assert.equal(calls.length, 1, "nothing more reached the job");
 });
 
 test("query binds its values and reports truncation at maxRows", async () => {

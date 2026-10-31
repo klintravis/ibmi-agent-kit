@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public query(), execute(), cl() and a job generation counter.
+// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public query(), execute() and cl(), which refuse on a job other than the one the caller decided against, and a job generation counter.
 import type { Msg } from "@ibmi-agent-kit/core";
 import type { CompileError, CompileOpts, CompileResult, LibraryListAction, LibraryListChange, LibraryListEntry, MemberMeta, MemberRef, Profile, Reporter, SearchMatch, SearchOpts, SearchResult, SqlColumn } from "./types.js";
 import { NOOP_REPORTER } from "./types.js";
@@ -10,7 +10,7 @@ import { transportFor, type Transport } from "./transport.js";
 const NAME = /^[A-Za-z#$@][A-Za-z0-9#$@_.]{0,9}$/; // trust boundary: spliced into SQL and CL, never bound
 const MAX_ROWS = 100_000;
 const SRCSEQ_WHOLE_MAX = 9999;   // srcseq is packed(6,2), so 9999.99 is the ceiling
-const SQL_TIME_LIMIT_MS = 10_000;
+export const SQL_TIME_LIMIT_MS = 10_000;
 
 // shared by every call, which is what serialize() protects. qtemp is private to the job.
 const READ_ALIAS = "MCPREAD", WRITE_ALIAS = "MCPWRITE", EVENT_ALIAS = "MCPEVENT";
@@ -225,21 +225,29 @@ export class MapepireBackend {
   // --- execute ---
   // no checks of their own: the kit server's execution guard (run_script) is their gate, and the
   // guard's own catalog lookups use query. Values are bound, never spliced into the statement.
-  async query(statement: string, params?: unknown[], maxRows = MAX_ROWS, reporter: Reporter = NOOP_REPORTER): Promise<{ rows: Row[]; columns: SqlColumn[]; truncated: boolean }> {
-    await this.connect(reporter);
-    return this.serialize(() => this.fetchRows(statement, maxRows, params as any[]));
+  // `generation`: the job the caller decided against; after connecting, inside the serialized turn,
+  // any other job (lost or reset since) refuses before anything is sent.
+  async query(statement: string, params?: unknown[], maxRows = MAX_ROWS, reporter: Reporter = NOOP_REPORTER, generation?: number): Promise<{ rows: Row[]; columns: SqlColumn[]; truncated: boolean }> {
+    return this.sendOn(generation, reporter, () => this.fetchRows(statement, maxRows, params as any[]));
   }
 
-  async execute(statement: string, params?: unknown[], reporter: Reporter = NOOP_REPORTER): Promise<{ rowsAffected: number; messages: Msg[] }> {
-    await this.connect(reporter);
-    return this.serialize(() => this.transport.execute(statement, params));
+  async execute(statement: string, params?: unknown[], reporter: Reporter = NOOP_REPORTER, generation?: number): Promise<{ rowsAffected: number; messages: Msg[] }> {
+    return this.sendOn(generation, reporter, () => this.transport.execute(statement, params));
   }
 
-  async cl(command: string, reporter: Reporter = NOOP_REPORTER): Promise<{ ok: boolean; messages: Msg[] }> {
-    await this.connect(reporter);
-    return this.serialize(async () => {
+  async cl(command: string, reporter: Reporter = NOOP_REPORTER, generation?: number): Promise<{ ok: boolean; messages: Msg[] }> {
+    return this.sendOn(generation, reporter, async () => {
       const { ok, messages } = await this.clResult(command);
       return { ok, messages };
+    });
+  }
+
+  private sendOn<T>(generation: number | undefined, reporter: Reporter, send: () => Promise<T>): Promise<T> {
+    return this.serialize(async () => {
+      await this.connect(reporter);
+      if (generation !== undefined && generation !== this.generation)
+        throw new Error("the connection to the IBM i was reset after this was decided, so QTEMP, the library list and the current library start fresh; not sent");
+      return send();
     });
   }
 

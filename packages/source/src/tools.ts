@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): the tool definitions moved here from index.ts into register(mcp, opts); titles and annotations added, list_servers optional.
+// Modified by ibmi-agent-kit (2026): the tool definitions moved here from index.ts into register(mcp, opts); titles and annotations added, list_servers optional; re-exports the runaway check, the time limit and its bound for the kit server.
 import { readFileSync } from "node:fs";
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ShapeOutput, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
@@ -8,6 +8,10 @@ import { listServers, loadProfileFor } from "./config.js";
 import { MapepireBackend } from "./mapepire.js";
 import { makeReporter, type ToolExtra, type ToolReporter } from "./report.js";
 import { findLocalCopy, sqlJson, textTable, typeFromPath, writeLocalCopy, writeSqlFile } from "./util.js";
+
+// for the kit server's run_script: the same runaway refusal and time limit as run_sql
+export { assertNotRunaway, withTimeLimit } from "./util.js";
+export { SQL_TIME_LIMIT_MS } from "./mapepire.js";
 
 // The source engine's tools, mountable on any McpServer. Importing this installs no process
 // handlers and writes nothing; the standalone bootstrap is index.ts, the kit server is another.

@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): the runaway-catalog check is its own export, assertNotRunaway, for the kit server's run_script.
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { MemberRef, SqlColumn } from "./types.js";
@@ -35,6 +36,12 @@ const RUNAWAY = /\bsyspartitionindex(?:stat|es)\b/i;
 const EDGE = "[^A-Z0-9#$@_]";
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// catalog views that can run for minutes once started; the kit's run_script refuses them too
+export function assertNotRunaway(sql: string): void {
+  const slow = RUNAWAY.exec(sql);
+  if (slow) throw new Error(`refusing ${slow[0].toLowerCase()}: it can run for minutes and nothing stops it once it starts. Use qsys.qadbkfld for the key fields of a file, and systools.related_objects for the logical files over one`);
+}
+
 export function assertSelectOnly(statement: string, blockedTables: string[] = []): string {
   const sql = statement.trim().replace(/;\s*$/, "");
   if (!sql) throw new Error("empty sql statement");
@@ -45,8 +52,7 @@ export function assertSelectOnly(statement: string, blockedTables: string[] = []
   if (WRITES.test(sql)) throw new Error("refusing a write inside a select");
   const fn = WRITE_FN.exec(sql);
   if (fn) throw new Error(`refusing to call ${fn[1].toLowerCase()}() from run_sql`);
-  const slow = RUNAWAY.exec(sql);
-  if (slow) throw new Error(`refusing ${slow[0].toLowerCase()}: it can run for minutes and nothing stops it once it starts. Use qsys.qadbkfld for the key fields of a file, and systools.related_objects for the logical files over one`);
+  assertNotRunaway(sql);
   const upper = sql.toUpperCase();
   const hit = blockedTables.find((t) => new RegExp(`(^|${EDGE})${escapeRegex(t.toUpperCase())}($|${EDGE})`).test(upper));
   if (hit) throw new Error(`${hit.toUpperCase()} is blocked by IBMI_BLOCKED_TABLES`);
