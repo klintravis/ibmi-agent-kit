@@ -1,6 +1,6 @@
 # @ibmi-agent-kit/source
 
-<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, SQL transports, mounting). -->
+<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, SQL transports, mounting, the kit's execution guard hook). -->
 
 The source and SQL engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-source-mcp.
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -154,6 +154,7 @@ This server logs into your IBM i over SSH and can read source and table rows, wr
 compile commands. Treat it like any tool that can act on the box.
 
 - **Least privilege first.** The server has exactly the authority of the profile in the env file. Give it one with only the authority the work needs, never `QSECOFR`. Everything below is defense in depth.
+- **Execution guard (kit server only).** Mounted in the kit server, `register(mcp, { guard })` gets the kit's execution guard, awaited before `run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list` changes and `compile_member` (given the final command and member type) act. A deny throws before anything is sent. The standalone `ibmi-agent-kit-source` bin has no guard; the checks below apply in both. See the [root README](../../README.md#safety).
 - **Read only mode.** `IBMI_READ_ONLY=true` allows read, search, list and `run_sql` only. Upload and compile are refused.
 - **Compile command guard.** The `command` override on `compile_member` runs as CL, so only `crt*` commands are allowed and a list of destructive verbs is refused. `IBMI_BLOCKED_CL` extends that list. See `assertCompileCommandAllowed` in [src/compile.ts](src/compile.ts).
 - **SQL is select only.** `run_sql` takes a statement from the model, so it is checked before it reaches Db2: one statement, starting with `select` or `with`, no comments, nothing that writes. Two less obvious writes are refused as well, `select * from final table (insert ...)` and `qsys2.qcmdexc` called as a function, which runs CL from inside a select. `IBMI_BLOCKED_TABLES` refuses named tables outright, for data that should never land in a conversation. Every table has two names, its SQL name and its 10 character system name, and blocking one does not block the other, so list both. A view or an alias over a blocked table gets past the check, so the profile's authority stays the real control. See `assertSelectOnly` in [src/util.ts](src/util.ts).

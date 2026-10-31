@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public query(), execute() and cl(), which refuse on a job other than the one the caller decided against, and a job generation counter.
+// Modified by ibmi-agent-kit (2026): sits on an SqlTransport (ssh or daemon, per IBMI_SQL_TRANSPORT); adds public query(), execute() and cl(), which refuse on a job other than the one the caller decided against, and a job generation counter; compile() awaits an optional guard check on the final command.
 import type { Msg } from "@ibmi-agent-kit/core";
 import type { CompileError, CompileOpts, CompileResult, LibraryListAction, LibraryListChange, LibraryListEntry, MemberMeta, MemberRef, Profile, Reporter, SearchMatch, SearchOpts, SearchResult, SqlColumn } from "./types.js";
 import { NOOP_REPORTER } from "./types.js";
@@ -417,7 +417,9 @@ export class MapepireBackend {
     return parseEvfevent(rows.map((r) => String(r.EVFEVENT ?? "")));
   }
 
-  async compile(opts: CompileOpts, reporter: Reporter = NOOP_REPORTER): Promise<CompileResult> {
+  // `check`: the kit's execution guard, given the final command; awaited outside serialize, since
+  // its own lookups queue on this connection.
+  async compile(opts: CompileOpts, reporter: Reporter = NOOP_REPORTER, check?: (command: string, type: string) => Promise<void>): Promise<CompileResult> {
     if (this.profile.readOnly) throw new Error("read-only mode (IBMI_READ_ONLY): compile is disabled");
     const { lib: srclib, srcf, mbr } = refNames(opts);
     const tgtlib = opts.targetLibrary ? validLibOrStar(opts.targetLibrary, "targetLibrary") : "*CURLIB";
@@ -430,6 +432,7 @@ export class MapepireBackend {
     }
     const command = buildCompileCommand(type, { tgtlib, name, srclib, srcfile: srcf, mbr }, opts.command);
     assertCompileCommandAllowed(command, this.profile.blockedCl);
+    await check?.(command, type);
 
     return this.serialize(async () => {
       await this.holdSpool();

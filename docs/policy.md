@@ -153,7 +153,7 @@ commands:
 
 ## Confirmation
 
-`confirm` rules make `run_script` and `verb_run` ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
+`confirm` rules make `run_script`, `verb_run` and the source tools (`run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list`, `compile_member`) ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
 
 ## Example
 
@@ -209,4 +209,5 @@ See [Run log in the guard README](../packages/guard/README.md#run-log). It is a 
 - The guard sees the text it is given: not what a called program, trigger, menu option or prompted field does, and not options typed on a list screen.
 - A decision is made against the job as it was when the script was planned; a job lost or reset in between refuses the send.
 - Not yet verified on a live IBM i: the catalog lookups and the supplemental-group format.
-- Not yet wired in: `run_sql`, the source tools and the 5250 tools keep their own checks.
+- Not yet wired in: the 5250 tools keep their own checks.
+- `compile_member` with no `targetLibrary` compiles into `*CURLIB`, decided as the job's current library; with none, it is denied as unqualified.

@@ -9,6 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, LATEST_PROTOCOL_VERSION, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { builtinPolicy, classify, decide, loadPolicy, parsePolicy, recordLookups, runLogLines, statedLookups, type Policy } from "@ibmi-agent-kit/guard";
+import { MapepireBackend } from "@ibmi-agent-kit/source/tools";
 import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine } from "./server.js";
@@ -308,7 +309,7 @@ type Row = Record<string, unknown>;
 // A box: answers the guard's own queries, records every script statement that reaches it. Like the
 // backend, a send checks the job generation after connecting and before sending.
 function stubConn(
-  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string } = {},
+  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string; member?: string[] } = {},
 ) {
   const sent: string[] = [];
   const queries: string[] = [];
@@ -341,6 +342,7 @@ function stubConn(
       queries.pop();
       send(sql, generation);
       if (o.hangOn && sql.includes(o.hangOn)) await new Promise<never>(() => {}); // a query that never returns
+      if (o.member && /from qtemp\.MCPREAD/i.test(sql)) return { rows: o.member.map((l) => ({ SRCDTA: l })), columns: [], truncated: false }; // the source engine reading a member
       const data = [{ A: 1 }, { A: 2 }, { A: 3 }];
       return { rows: data.slice(0, maxRows), columns: [{ name: "A" }], truncated: data.length > maxRows };
     },
@@ -359,13 +361,15 @@ function stubConn(
   return { conn, sent, queries };
 }
 
-async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number; sqlTimeLimitMs?: number } = {}) {
+async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; be?: MapepireBackend; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number; sqlTimeLimitMs?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "kit-runs-"));
   const notices: string[] = [];
   const stub = o.stub ?? stubConn();
+  const be = o.be;
   const kit = createServer({
     policy: o.policy ?? builtinPolicy(),
-    conn: () => stub.conn,
+    conn: () => be ?? stub.conn,
+    ...(be ? { sourceBackend: () => be } : {}),
     profileEnv: () => ({}),
     systemName: () => o.system,
     runLogDir: dir,
@@ -751,5 +755,145 @@ test("5.1: each profile's IBMI_KIT_POLICY is loaded at startup; a missing one re
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- source engine hooks (guarded-tools spec; task 6.1) ---
+
+// The source engine over the stub box: its tools' sends land in stub.sent, the guard's own
+// identity and catalog lookups in stub.queries.
+async function sourceKit(o: { policy?: Policy; member?: string[]; elicit?: (req: any) => Promise<ElicitResult> } = {}) {
+  const stub = stubConn({ member: o.member });
+  const localDir = mkdtempSync(join(tmpdir(), "kit-src-"));
+  const transport = {
+    connect: async () => {},
+    close: async () => {},
+    query: (sql: string, params?: unknown[], maxRows?: number) => stub.conn.query(sql, params, maxRows),
+    execute: (sql: string, params?: unknown[]) => stub.conn.execute(sql, params),
+    cl: (command: string) => stub.conn.cl(command),
+  };
+  const profile = { host: "box", user: "JDOE", password: "Secret1x", sshPort: 22, sqlTransport: "ssh" as const, mapepirePort: 8076, sourceFileCcsid: 37, localDir, readOnly: false, blockedCl: [], blockedTables: [] };
+  const be = new MapepireBackend(profile, transport as unknown as ConstructorParameters<typeof MapepireBackend>[1]);
+  const k = await guardedKit({ policy: o.policy ?? D4_ENFORCE, stub, be, ...(o.elicit ? { elicit: o.elicit } : {}) });
+  return { ...k, localDir, close: async () => (await k.close(), rmSync(localDir, { recursive: true, force: true })) };
+}
+
+const ORDVAL = { library: "JDOE", sourceFile: "QRPGLESRC", member: "ORDVAL", type: "RPGLE" };
+
+test("6.1: compile_member with an override target is decided as compile into LIVLIB, and the denied call never reaches the box", async () => {
+  const k = await sourceKit();
+  try {
+    const r = await k.call("compile_member", { ...ORDVAL, targetLibrary: "JDOE", command: "CRTBNDRPG PGM(LIVLIB/ORDVAL) SRCFILE(JDOE/QRPGLESRC) SRCMBR(ORDVAL)" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /no rule matches compile LIVLIB\.ORDVAL \(environment unmatched, partition dev\): denied/);
+    assert.match(r.text, /Ask the user how to proceed/);
+    assert.match(r.text, /IBM i authority remains the real boundary/);
+    assert.deepEqual(k.stub.sent, [], "nothing but the guard's lookups reaches the box");
+    const [line] = k.log();
+    assert.deepEqual([line.tool, line.kind, line.decision, line.operations[0].class, line.operations[0].object], ["compile_member", "cl", "deny", "compile", { lib: "LIVLIB", name: "ORDVAL" }]);
+    // The same call without the override compiles into JDOE.
+    const ok = await k.call("compile_member", { ...ORDVAL, targetLibrary: "JDOE" });
+    assert.equal(ok.error, false, ok.text);
+    const sent: string[] = k.stub.sent; // assert.deepEqual above narrowed it to []
+    assert.ok(sent.some((s) => s.startsWith("crtbndrpg pgm(JDOE/ORDVAL) srcfile(JDOE/QRPGLESRC)")), sent.join("\n"));
+    assert.equal(k.log()[1].outcome, "ok");
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.1: every built-in compile template is in the command table, so the policy can allow it", async () => {
+  const k = await sourceKit();
+  try {
+    for (const type of ["RPGLE", "SQLRPGLE", "CLLE", "CLP", "CBL", "CBLLE", "SQLCBLLE", "DSPF", "PRTF", "PF", "LF", "CMD", "SQL"]) {
+      const r = await k.call("compile_member", { ...ORDVAL, type, targetLibrary: "JDOE" });
+      assert.equal(r.error, false, `${type}: ${r.text}`);
+    }
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.1: an allowed call the engine itself refuses is logged with its failure", async () => {
+  const k = await sourceKit();
+  try {
+    const r = await k.call("run_sql", { statement: "delete from JDOE.T" }); // the policy allows dev writes to JDOE
+    assert.equal(r.error, true);
+    assert.deepEqual(k.stub.sent, []);
+    const [line] = k.log();
+    assert.deepEqual([line.decision, line.effective], ["allow", "allow"]);
+    assert.match(line.outcome, /^failed: .*select/i);
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.1: a denied run_sql, read_source_member, search_source, upload_source_member and manage_library_list never reach the box", async () => {
+  const k = await sourceKit();
+  try {
+    const cases: [string, Record<string, unknown>, RegExp][] = [
+      ["run_sql", { statement: "select * from PAYLIB.T" }, /rule 2 denies read PAYLIB\.T/],
+      ["read_source_member", { library: "paylib", sourceFile: "QRPGLESRC", member: "PAY1" }, /rule 2 denies read PAYLIB\.QRPGLESRC/],
+      ["search_source", { library: "PAYLIB", searchTerm: "x" }, /rule 2 denies read library PAYLIB/],
+      ["upload_source_member", { library: "LVORD", sourceFile: "QRPGLESRC", member: "X", content: "x" }, /no rule matches write LVORD\.QRPGLESRC/],
+      ["manage_library_list", { action: "add", library: "PAYLIB" }, /rule 2 denies liblist library PAYLIB/],
+    ];
+    for (const [tool, args, why] of cases) {
+      const r = await k.call(tool, args);
+      assert.equal(r.error, true, tool);
+      assert.match(r.text, why, tool);
+      assert.deepEqual(k.stub.sent, [], `${tool} reached the box`);
+    }
+    assert.deepEqual(readdirSync(k.localDir), [], "nothing was downloaded");
+    const read = k.log().find((l) => l.tool === "read_source_member");
+    assert.deepEqual([read.kind, read.text, read.raw], ["tool", "read_source_member PAYLIB/QRPGLESRC(PAY1)", [{ class: "read", object: { lib: "PAYLIB", name: "QRPGLESRC" }, source: "sql" }]]);
+    // An allowed one is logged and reaches the box; show is never decided.
+    const ok = await k.call("read_source_member", { library: "JDOE", sourceFile: "QRPGLESRC", member: "ORDVAL" });
+    assert.equal(ok.error, false, ok.text);
+    assert.ok(k.stub.sent.length > 0);
+    const lines = k.log().length;
+    await k.call("manage_library_list", { action: "show" });
+    assert.equal(k.log().length, lines);
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.1: an SQL member compiled with RUNSQLSTM is decided by its statements, read at decision time", async () => {
+  const bad = await sourceKit({ member: ["INSERT INTO JDOE.T VALUES 1;", "DELETE FROM PAYLIB.T;"] });
+  try {
+    const r = await bad.call("compile_member", { library: "JDOE", sourceFile: "QSQLSRC", member: "SETUP", type: "SQL" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /rule 2 denies write PAYLIB\.T/);
+    assert.ok(!bad.stub.sent.some((s) => /runsqlstm/i.test(s)), bad.stub.sent.join("\n"));
+    const lines = bad.log();
+    assert.deepEqual(lines.map((l) => l.kind), ["tool", "sql", "sql"]);
+    assert.deepEqual(lines[0].raw.map((o: any) => [o.class, o.object]), [["read", { lib: "JDOE", name: "QSQLSRC" }]]);
+    // A RUNSQLSTM whose statements cannot be read is danger.
+    const stmf = await bad.call("compile_member", { ...ORDVAL, command: "RUNSQLSTM SRCSTMF('/tmp/x.sql')" });
+    assert.match(stmf.text, /RUNSQLSTM must name SRCFILE\(LIB\/FILE\) and SRCMBR/);
+  } finally {
+    await bad.close();
+  }
+  const good = await sourceKit({ member: ["INSERT INTO JDOE.T VALUES 1;"] });
+  try {
+    const r = await good.call("compile_member", { library: "JDOE", sourceFile: "QSQLSRC", member: "SETUP", type: "SQL" });
+    assert.equal(r.error, false, r.text);
+    assert.ok(good.stub.sent.some((s) => s.startsWith("runsqlstm srcfile(JDOE/QSQLSRC) srcmbr(SETUP)")), good.stub.sent.join("\n"));
+  } finally {
+    await good.close();
+  }
+});
+
+test("6.1: a source tool whose write a rule asks to confirm sends nothing when declined", async () => {
+  const k = await sourceKit({ policy: CONFIRM_POLICY, elicit: async () => ({ action: "decline" }) });
+  try {
+    const r = await k.call("upload_source_member", { library: "JDOE", sourceFile: "QRPGLESRC", member: "ORDVAL", content: "x" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /the user chose decline/);
+    assert.deepEqual(k.stub.sent, []);
+    assert.deepEqual([k.log()[0].confirmed, k.log()[0].outcome], [false, "not sent: the user chose decline"]);
+  } finally {
+    await k.close();
   }
 });

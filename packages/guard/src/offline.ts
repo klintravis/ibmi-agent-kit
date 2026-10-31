@@ -201,15 +201,19 @@ export async function replayRunLog(candidate: Policy, lines: RunLogLine[]): Prom
         baseTables: (o) => (Object.hasOwn(answers.bases ?? {}, `${o.lib}.${o.name}`) || missed.push(`the base tables of ${o.lib}.${o.name}`), stated.baseTables(o)),
         currentLibrary: () => ("curlib" in answers || missed.push("the current library"), stated.currentLibrary()),
       };
-      const script = group.map((l) => (l.kind === "cl" ? `CL: ${l.text}\n` : `${l.text}\n;\n`)).join("");
-      ({ decisions } = await decideStatements(script, identity, candidate, lookups));
+      // A tool line's operations are decided as logged; the text lines are classified together.
+      const texts = group.filter((l) => l.kind !== "tool");
+      const script = texts.map((l) => (l.kind === "cl" ? `CL: ${l.text}\n` : `${l.text}\n;\n`)).join("");
+      const classified = texts.length ? (await decideStatements(script, identity, candidate, lookups)).decisions : [];
       if (missed.length) throw new Error(`the candidate looks up ${[...new Set(missed)].join(", ")}, which the logged run never did`);
+      if (classified.length !== texts.length) throw new Error(`its logged text splits into ${classified.length} statements, not ${texts.length}`);
+      decisions = group.map((l) => {
+        if (l.kind !== "tool") return classified.shift()!;
+        if (!Array.isArray(l.raw)) throw new Error(`line ${l.index} is a tool line without its operations`);
+        return decide(l.raw, identity, candidate);
+      });
     } catch (e) {
       skipped.push(`${at}: ${e instanceof Error ? e.message : String(e)}`);
-      continue;
-    }
-    if (decisions.length !== group.length) {
-      skipped.push(`${at}: its logged text splits into ${decisions.length} statements, not ${group.length}`);
       continue;
     }
     statements += group.length;

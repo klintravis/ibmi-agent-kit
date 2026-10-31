@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): the tool definitions moved here from index.ts into register(mcp, opts); titles and annotations added, list_servers optional; re-exports the runaway check, the time limit and its bound for the kit server.
+// Modified by ibmi-agent-kit (2026): the tool definitions moved here from index.ts into register(mcp, opts); titles and annotations added, list_servers optional; re-exports the runaway check, the time limit and its bound for the kit server; an optional execution guard awaited before run_sql, read_source_member, search_source, upload_source_member, manage_library_list changes and compile_member act.
 import { readFileSync } from "node:fs";
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ShapeOutput, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
@@ -12,6 +12,8 @@ import { findLocalCopy, sqlJson, textTable, typeFromPath, writeLocalCopy, writeS
 // for the kit server's run_script: the same runaway refusal and time limit as run_sql
 export { assertNotRunaway, withTimeLimit } from "./util.js";
 export { SQL_TIME_LIMIT_MS } from "./mapepire.js";
+// for the kit's guard hook: the names it decides are validated as the engine validates them
+export { MapepireBackend, validName } from "./mapepire.js";
 
 // The source engine's tools, mountable on any McpServer. Importing this installs no process
 // handlers and writes nothing; the standalone bootstrap is index.ts, the kit server is another.
@@ -21,15 +23,29 @@ const serverArg = z.string().optional().describe("which IBM i to use, named by a
 
 const done = (text: string) => ({ content: [{ type: "text" as const, text: text.trimEnd() }] });
 
-export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): { shutdown(): Promise<void>; backend(server?: string): MapepireBackend } {
+// The kit server's execution guard (design D6): awaited before a tool acts, it throws to refuse,
+// and may return a function told the call's outcome. compile_member's input carries the final
+// command and the member type.
+export type ToolGuard = (tool: string, input: Record<string, unknown>, server: string | undefined) => Promise<((outcome: string) => void) | void>;
+// One call's guard: `outcome` overrides "ok" for a call that returns but did not succeed.
+interface GuardCall {
+  check(input: Record<string, unknown>, server: string | undefined): Promise<void>;
+  outcome?: string;
+}
+
+export function register(
+  mcp: McpServer,
+  opts: { listServers?: boolean; guard?: ToolGuard; newBackend?: (server?: string) => MapepireBackend } = {},
+): { shutdown(): Promise<void>; backend(server?: string): MapepireBackend } {
   // --- helpers ---
   const backends = new Map<string, MapepireBackend>();
+  const guard: ToolGuard = opts.guard ?? (async () => {});
 
   function getBackend(server?: string): MapepireBackend {
     const key = server || "default"; // exact: core refuses a name that differs in case, a cache must not let it through
     let be = backends.get(key);
     if (!be) {
-      be = new MapepireBackend(loadProfileFor(server));
+      be = opts.newBackend ? opts.newBackend(server) : new MapepireBackend(loadProfileFor(server));
       backends.set(key, be);
     }
     return be;
@@ -41,13 +57,18 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
     annotations: ToolAnnotations,
     description: string,
     inputSchema: Args,
-    run: (args: ShapeOutput<Args>, r: ToolReporter) => Promise<string>,
+    run: (args: ShapeOutput<Args>, r: ToolReporter, g: GuardCall) => Promise<string>,
   ): void {
     const cb = (async (args: ShapeOutput<Args>, extra: ToolExtra) => {
       const r = makeReporter(mcp, extra, name);
+      let settle: ((outcome: string) => void) | undefined;
+      const g: GuardCall = { check: async (input, server) => void (settle = (await guard(name, input, server)) || undefined) };
       try {
-        return done(await run(args, r));
+        const text = await run(args, r, g);
+        settle?.(g.outcome ?? "ok");
+        return done(text);
       } catch (e) {
+        settle?.(`failed: ${e instanceof Error ? e.message : String(e)}`);
         return r.failResult(e);
       } finally {
         r.dispose();
@@ -68,8 +89,9 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       member: z.string().describe("member name, e.g. MYPGM"),
       server: serverArg,
     },
-    async ({ library, sourceFile, member, server }, r) => {
+    async ({ library, sourceFile, member, server }, r, g) => {
       const be = getBackend(server);
+      await g.check({ library, sourceFile, member }, server);
       const { content, meta } = await be.readMember({ library, sourceFile, member }, r);
       r.step("saving the local copy");
       const { path, backup } = writeLocalCopy(be.profile.localDir, { library, sourceFile, member }, meta.type, content);
@@ -99,8 +121,9 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       maxResults: z.number().int().positive().optional().describe("default 200"),
       server: serverArg,
     },
-    async ({ server, ...opts }, r) => {
+    async ({ server, ...opts }, r, g) => {
       const be = getBackend(server);
+      await g.check(opts, server);
       const { matches, truncated } = await be.searchSource(opts, r);
       const lines = matches.map(
         (m) => `${m.library}/${m.sourceFile}(${m.member})${m.type ? ` [${m.type}]` : ""} ${m.seqNbr}: ${m.line}`,
@@ -142,8 +165,9 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       currentLibrary: z.string().optional().describe("for replace: also set the current library"),
       server: serverArg,
     },
-    async ({ action, library, libraries, position, currentLibrary, server }, r) => {
+    async ({ action, library, libraries, position, currentLibrary, server }, r, g) => {
       const be = getBackend(server);
+      if (action !== "show") await g.check({ action, library, libraries, currentLibrary }, server);
       const entries = action === "show"
         ? await be.readLibraryList(r)
         : await be.changeLibraryList(action, { library, libraries, position, currentLibrary }, r);
@@ -200,8 +224,9 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       json: z.boolean().optional().describe("return { columns, rows } inline as JSON instead of a text table, for exact values (default false)"),
       server: serverArg,
     },
-    async ({ statement, maxRows, file, json, server }, r) => {
+    async ({ statement, maxRows, file, json, server }, r, g) => {
       const be = getBackend(server);
+      await g.check({ statement }, server);
       const { rows, columns, truncated, cap } = await be.runSql(statement, maxRows ?? (file ? Infinity : undefined), r);
       const count = `${rows.length} row(s)${truncated ? ` (truncated at ${cap}, raise maxRows or narrow the select)` : ""}`;
       if (file) return `${count} written to ${writeSqlFile(be.profile.localDir, sqlJson(columns, rows))}\n\n${textTable(columns, [])}`;
@@ -225,9 +250,10 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       text: z.string().optional().describe("member text description, shown in PDM next to the member. Used only when creating. Max 50 characters."),
       server: serverArg,
     },
-    async ({ library, sourceFile, member, localPath, content, create, memberType, text, server }, r) => {
+    async ({ library, sourceFile, member, localPath, content, create, memberType, text, server }, r, g) => {
       const be = getBackend(server);
       const ref = { library, sourceFile, member };
+      await g.check(ref, server);
       let body = content;
       let sourcePath: string | undefined;
       if (body === undefined) {
@@ -261,9 +287,10 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       type: z.string().optional().describe("override the detected member type, e.g. RPGLE"),
       server: serverArg,
     },
-    async ({ server, ...opts }, r) => {
+    async ({ server, ...opts }, r, g) => {
       const be = getBackend(server);
-      const res = await be.compile(opts, r);
+      const res = await be.compile(opts, r, (command, type) => g.check({ ...opts, command, type }, server));
+      if (!res.success) g.outcome = `failed: the compile failed with ${res.errors.length} error(s)`;
       const errs = res.errors.map((e) => `  [sev ${e.severity}]${e.line ? ` line ${e.line}` : ""} ${e.msgId ?? ""}: ${e.text}`).join("\n");
       return (
         `Command: ${res.command}\n` +

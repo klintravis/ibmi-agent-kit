@@ -4,7 +4,7 @@ The execution guard's pure half: it classifies SQL statements and CL commands, l
 
 The guard catches mistakes, it is not a security boundary. It classifies only the text it is given. It does not see what called programs, triggers, application menu options or prompted fields do, and options typed on a list screen are not command lines. IBM i object authority stays the real boundary.
 
-Status: the guard decides `run_script`, `verb_run` and `policy_check` only. It is not yet wired into `run_sql`, `compile_member`, the source tools or the 5250 tools, which keep their own checks. The catalog queries it uses (`USER_INFO`, `AUTHORIZATION_LIST_USER_INFO`, `SYSSCHEMAS`, `SYSVIEWDEP`, `SYSTABLES`, `LIBRARY_LIST_INFO`) and the format of the supplemental group list are not yet verified on a live IBM i.
+Status: the guard decides `run_script`, `verb_run`, `policy_check` and, through the server's hook, the source tools (`run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list` changes, `compile_member`). It is not yet wired into the 5250 tools, which keep their own checks. The catalog queries it uses (`USER_INFO`, `AUTHORIZATION_LIST_USER_INFO`, `SYSSCHEMAS`, `SYSVIEWDEP`, `SYSTABLES`, `LIBRARY_LIST_INFO`) and the format of the supplemental group list are not yet verified on a live IBM i.
 
 ## How a statement is decided
 
@@ -24,7 +24,7 @@ Mode can be set per partition. Known limit while observing: the command table's 
 
 ## Run log
 
-Each `run_script` and `verb_run` statement is decided, confirmed if the policy says so, and appended as one JSON line to `<profile folder>/runs/YYYY-MM-DD.jsonl` (UTC date; the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` by default). A line holds the time, server, tool, identity, roles, mode, policy hash, redacted statement text, each operation's class and decision, the rule number, `decision` (what the policy says) and `effective` (what happened), whether it was confirmed, the outcome, and the catalog answers the decision used. Passwords in CL parameters and SQL clauses, and the profile's own password, are replaced by `***`. The log is a local record the user can edit, not an audit trail. A write failure warns once on stderr and does not stop the call.
+Each `run_script` and `verb_run` statement, and each guarded source tool call, is decided, confirmed if the policy says so, and appended as one JSON line to `<profile folder>/runs/YYYY-MM-DD.jsonl` (UTC date; the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` by default). A line holds the time, server, tool, identity, roles, mode, policy hash, redacted statement text, each operation's class and decision, the rule number, `decision` (what the policy says) and `effective` (what happened), whether it was confirmed, the outcome, and the catalog answers the decision used. A source tool with no statement text (`read_source_member`, `search_source`, `upload_source_member`, `manage_library_list`) logs `kind: tool`, a readable text such as `read_source_member MYLIB/QRPGLESRC(ORDVAL)`, and the operations it built in `raw`, which `policy replay` decides again as they are. Passwords in CL parameters and SQL clauses, and the profile's own password, are replaced by `***`. The log is a local record the user can edit, not an audit trail. A write failure warns once on stderr and does not stop the call.
 
 ## Offline: `policy test` and `policy replay`
 

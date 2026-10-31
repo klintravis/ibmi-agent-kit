@@ -1,25 +1,33 @@
-// The server's half of the execution guard (design D5, D7): who and where a connection is, the
-// catalog lookups, `run_script`, `policy_check` and the confirmation, and the same context for
-// verbs (verbs.ts). The guard package decides;
+// The server's half of the execution guard (design D5-D7): who and where a connection is, the
+// catalog lookups, `run_script`, `policy_check` and the confirmation, the same context for verbs
+// (verbs.ts), and the source engine's tool hook. The guard package decides;
 // this file does the I/O. Engines never write to stdout, and neither does this.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Msg } from "@ibmi-agent-kit/core";
-import { assertNotRunaway, withTimeLimit } from "@ibmi-agent-kit/source/tools";
+import { assertNotRunaway, validName, withTimeLimit } from "@ibmi-agent-kit/source/tools";
 import {
+  classify,
+  decide,
   decideStatements,
   detectPartition,
   loadPolicy,
+  parseCl,
   recordLookups,
   runPolicyTests,
+  stripClComments,
   type Answers,
   type ClassifiedStatement,
+  type CommandEntry,
   type Decision,
   type Identity,
   type Lookups,
+  type ObjectRef,
+  type Operation,
   type PartitionNames,
   type Policy,
   type RunLog,
+  type ToolStatement,
   type VerbSet,
 } from "@ibmi-agent-kit/guard";
 import { checkVerb, QUERY, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
@@ -45,6 +53,8 @@ export interface GuardDeps {
   sqlTimeLimitMs: number; // run_script queries, as run_sql
   notice(message: string): void; // stderr
   verbs(server: string): VerbSet; // the server's verbs (project-verbs), for policy_check's verb input
+  // A source member's text, for compile_member's SQL members and RUNSQLSTM (the source engine).
+  memberText(server: string, ref: { library: string; sourceFile: string; member: string }): Promise<string>;
 }
 
 export const CONFIRM_TIMEOUT_MS = 120_000;
@@ -208,7 +218,7 @@ function report(p: { statement: { kind?: string; display: string }; decision: De
 
 const stopping = (p: Planned) => p.refused !== undefined || p.decision.effective === "deny";
 // A statement with no operations (COMMIT) is denied only at statement level, by a partition conflict.
-const why = (p: Planned, identity: Identity) =>
+const why = (p: { refused?: string; decision: Decision }, identity: Identity) =>
   p.refused ??
   (p.decision.operations
     .filter((o) => o.enforced && o.decision === "deny")
@@ -216,7 +226,100 @@ const why = (p: Planned, identity: Identity) =>
     .join("; ") ||
     `denied: ${p.decision.reason === "partition_conflict" && identity.conflict ? identity.conflict : (p.decision.reason ?? "no reason given")}`);
 
-export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(server: string): Promise<VerbContext> } {
+// --- engine tools (design D6, D8) ---
+
+type MemberRef = { library: string; sourceFile: string; member: string };
+const libRef = (name: string): ObjectRef => ({ lib: name, name, type: "*LIB" });
+const toolStatement = (text: string, operations: Operation[]): ToolStatement => ({ kind: "tool", text, display: text, operations });
+// For compile_member only: RUNSQLSTM read as a read of its source file, whose member's statements
+// are then decided themselves. The command table keeps it danger everywhere else.
+const RUNSQLSTM_READ: CommandEntry = { class: "read", positional: ["SRCFILE", "SRCMBR"], params: { SRCFILE: "object" } };
+const MEMBER = /^[A-Z#$@][A-Z0-9#$@_.]{0,9}$/;
+
+// What an engine tool call does, as statements (run_sql, compile_member's final command and member
+// statements) or as the operations it builds (the rest). Names go through the engine's own
+// validation first, so the object decided is the one the engine touches.
+export async function toolStatements(
+  tool: string,
+  input: Record<string, unknown>,
+  policy: Policy,
+  lookups: Lookups,
+  memberText: (ref: MemberRef) => Promise<string>,
+): Promise<{ statements: (ClassifiedStatement | ToolStatement)[]; notes: string[] }> {
+  const name = (v: unknown, what: string) => validName(String(v ?? ""), what);
+  const ctx = { lookups, commands: policy.commands, rdbs: policy.rdbs };
+  switch (tool) {
+    case "read_source_member":
+    case "upload_source_member": {
+      const [l, f, m] = [name(input.library, "library"), name(input.sourceFile, "sourceFile"), name(input.member, "member")];
+      const op: Operation = { class: tool === "read_source_member" ? "read" : "write", object: { lib: l, name: f }, source: "sql" };
+      return { statements: [toolStatement(`${tool} ${l}/${f}(${m})`, [op])], notes: [] };
+    }
+    case "search_source": {
+      const l = name(input.library, "library");
+      const f = input.sourceFile ? name(input.sourceFile, "sourceFile") : undefined;
+      const op: Operation = { class: "read", object: f ? { lib: l, name: f } : libRef(l), source: "sql" };
+      return { statements: [toolStatement(`search_source ${f ? `${l}/${f}` : l}`, [op])], notes: [] };
+    }
+    case "manage_library_list": {
+      // As the engine builds its command: replace drops QTEMP, the others take `library`.
+      const names =
+        input.action === "replace"
+          ? [...((input.libraries as unknown[] | undefined) ?? []).map((l) => name(l, "library")).filter((l) => l !== "QTEMP"), ...(input.currentLibrary ? [name(input.currentLibrary, "currentLibrary")] : [])]
+          : [name(input.library, "library")];
+      const ops: Operation[] = names.length ? names.map((l) => ({ class: "liblist", object: libRef(l), source: "cl" })) : [{ class: "liblist", source: "cl", command: "CHGLIBL" }];
+      return { statements: [toolStatement(`manage_library_list ${input.action} ${names.join(" ")}`.trim(), ops)], notes: [] };
+    }
+    case "run_sql": {
+      const c = await classify(String(input.statement ?? ""), ctx);
+      return { statements: c.statements, notes: c.notes };
+    }
+    case "compile_member": {
+      const command = String(input.command ?? "");
+      if (/[\r\n]/.test(command)) throw new Error("refused: the compile command must be one line");
+      const notes: string[] = [];
+      const statements: (ClassifiedStatement | ToolStatement)[] = [];
+      let member: MemberRef | undefined;
+      const parsed = parseCl(stripClComments(command).text);
+      if (!("error" in parsed) && parsed.name === "RUNSQLSTM") {
+        const c = await classify(`CL: ${command}`, { ...ctx, commands: { ...policy.commands, RUNSQLSTM: RUNSQLSTM_READ } });
+        notes.push(...c.notes);
+        const ops = c.operations;
+        const src = ops.find((o) => o.command === "RUNSQLSTM" && o.object?.lib && !o.object.lib.startsWith("*"))?.object;
+        const params = new Map(parsed.params);
+        parsed.positional.forEach((v, i) => params.set(["SRCFILE", "SRCMBR"][i], v));
+        const mbr = params.get("SRCMBR")?.trim().toUpperCase();
+        if (src && mbr && MEMBER.test(mbr) && !params.has("SRCSTMF")) member = { library: src.lib!, sourceFile: src.name, member: mbr };
+        else ops.push({ class: "danger", source: "cl", command: "RUNSQLSTM", reason: "RUNSQLSTM must name SRCFILE(LIB/FILE) and SRCMBR(member), so the statements it runs can be read and decided" });
+        statements.push(toolStatement(command, ops));
+      } else {
+        const c = await classify(`CL: ${command}`, ctx);
+        notes.push(...c.notes);
+        statements.push(...c.statements);
+        if (String(input.type ?? "").toLowerCase() === "sql") member = { library: name(input.library, "library"), sourceFile: name(input.sourceFile, "sourceFile"), member: name(input.member, "member") };
+      }
+      if (member) {
+        let text: string;
+        try {
+          text = await memberText(member);
+        } catch (e) {
+          throw new Error(`refused: cannot read ${member.library}/${member.sourceFile}(${member.member}) to decide its statements: ${(e as Error).message}`);
+        }
+        const c = await classify(text, ctx);
+        notes.push(...c.notes);
+        statements.push(...c.statements);
+      }
+      return { statements, notes };
+    }
+    default:
+      throw new Error(`refused: ${tool} has no execution guard`);
+  }
+}
+
+export function registerGuarded(
+  mcp: McpServer,
+  deps: GuardDeps,
+): { verbContext(server: string): Promise<VerbContext>; tool(tool: string, input: Record<string, unknown>, server: string | undefined): Promise<(outcome: string) => void> } {
   const boxes = new Map<string, Promise<Box>>();
 
   async function identityOf(server: string, conn: Conn, policy: Policy): Promise<{ identity: Identity; names: PartitionNames; notes: string[] }> {
@@ -337,8 +440,49 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
     };
   }
 
-  const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
   const key = (server?: string) => server || "default";
+
+  // The source engine's hook (design D6): an engine tool call decided and confirmed before the
+  // engine acts. Throws to refuse (logged then); otherwise returns what logs the call's outcome.
+  async function guardTool(tool: string, input: Record<string, unknown>, server: string | undefined): Promise<(outcome: string) => void> {
+    const s = key(server);
+    const { policy, runLog } = deps.policyFor(s);
+    const conn = deps.conn(s);
+    const who = await identityOf(s, conn, policy);
+    const { lookups, answers } = recordLookups(sqlLookups(conn));
+    const { statements, notes } = await toolStatements(tool, input, policy, lookups, (ref) => deps.memberText(s, ref));
+    const planned = statements.map((statement) => ({ statement, decision: decide(statement.operations, who.identity, policy) }));
+    const record = (outcome: (p: (typeof planned)[number]) => string, confirmed?: boolean) =>
+      runLog.record({
+        server: s,
+        tool,
+        identity: who.identity,
+        ...(Object.keys(who.names).length ? { names: who.names } : {}),
+        lookups: answers,
+        notes: [...who.notes, ...notes],
+        secret: conn.profile.password,
+        statements: planned.map((p) => ({ ...p, outcome: outcome(p), ...(confirmed !== undefined && p.decision.effective === "confirm" ? { confirmed } : {}) })),
+      });
+
+    const denied = planned.filter((p) => p.decision.effective === "deny");
+    if (denied.length) {
+      record((p) => (p.decision.effective === "deny" ? `denied: ${why(p, who.identity)}` : "not sent: another operation was denied"));
+      throw new Error([`Denied, ${tool} did nothing:`, ...denied.map((p) => `  ${p.statement.display.split("\n")[0]}: ${why(p, who.identity)}`), ASK, LIMITS].join("\n"));
+    }
+    const needs = planned.filter((p) => p.decision.effective === "confirm");
+    if (needs.length) {
+      const no = await confirm(s, who.identity, needs.map((p, i) => ({ label: `${tool}${needs.length > 1 ? ` ${i + 1}` : ""}`, decision: p.decision, display: p.statement.display })));
+      const stop = no ?? (await curlibMoved(conn, answers));
+      if (stop) {
+        record(() => `not sent: ${stop}`, no === undefined);
+        throw new Error(`Denied, ${tool} did nothing: ${stop}.\n${ASK}\n${LIMITS}`);
+      }
+    }
+    // Allowed: logged once the engine says how the call ended.
+    return (outcome) => record(() => outcome, needs.length ? true : undefined);
+  }
+
+  const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
   const result = (structured: Record<string, unknown>, text: string, isError = false) => ({
     content: [{ type: "text" as const, text }],
     structuredContent: structured,
@@ -524,5 +668,5 @@ export function registerGuarded(mcp: McpServer, deps: GuardDeps): { verbContext(
     );
   };
 
-  return { verbContext };
+  return { verbContext, tool: guardTool };
 }

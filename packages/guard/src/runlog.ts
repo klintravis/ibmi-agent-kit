@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { Decision, Identity, RoleSource } from "./decide.js";
 import { spansOf } from "./lexer.js";
 import type { Mode, Policy, Verdict } from "./policy.js";
-import type { Lookups, ObjectRef, OpClass, Statement } from "./types.js";
+import type { Lookups, ObjectRef, OpClass, Operation, Statement } from "./types.js";
 
 // --- redaction ---
 
@@ -203,9 +203,10 @@ export interface RunLogLine {
   partition?: string;
   mode: Mode;
   policy: string; // Policy.hash
-  kind: "sql" | "cl";
+  kind: "sql" | "cl" | "tool";
   text: string; // redacted
   operations: LoggedOperation[];
+  raw?: Operation[]; // kind tool: the operations as the tool built them, which replay decides again
   rule?: number; // the rule behind the statement's decision
   decision: Verdict;
   effective: Verdict;
@@ -226,6 +227,15 @@ export interface PartitionNames {
   declared?: string;
 }
 
+// A tool call with no statement text (read_source_member, manage_library_list ...): a readable
+// text and the operations the tool built, each with its own partition and env (design D8).
+export interface ToolStatement {
+  kind: "tool";
+  text: string;
+  display: string;
+  operations: Operation[];
+}
+
 export interface CallRecord {
   server: string;
   tool: string;
@@ -233,7 +243,7 @@ export interface CallRecord {
   names?: PartitionNames;
   lookups: Answers;
   notes?: string[];
-  statements: { statement: Statement; decision: Decision; confirmed?: boolean; outcome: string }[];
+  statements: { statement: Statement | ToolStatement; decision: Decision; confirmed?: boolean; outcome: string }[];
   // The profile password: removed from every string of every line, whatever the case.
   secret?: string;
   time?: Date;
@@ -296,6 +306,7 @@ export function runLogLines(call: CallRecord, policy: Policy): RunLogLine[] {
       enforced: d.enforced,
       outcome,
     };
+    if (statement.kind === "tool") line.raw = statement.operations;
     if (partition !== undefined) line.partition = partition;
     const rule = statementRule(d);
     if (rule) line.rule = rule;

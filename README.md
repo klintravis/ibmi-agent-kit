@@ -126,14 +126,22 @@ statement of a verb, its nested verbs and its cleanup, and for every verb of a t
 as one script before the first is sent; a verb runs with the signed-on user's rules, so sharing
 one grants nothing. `policy_check` makes the same decisions but only reports them. Without a
 policy file the guard only observes and logs, apart from statements it always denies.
-`run_script` and `verb_run` decisions go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
+
+The source tools are decided the same way before they act: `run_sql`, `read_source_member` and
+`search_source` as reads of their table, source file or library; `upload_source_member` as a write
+to the member's source file; `manage_library_list` changes as `liblist` on each library (`show` is
+not decided); `compile_member` from its final command, `command` override included, plus the
+member's statements, read at decision time, for an SQL member or `RUNSQLSTM`. A denied call sends
+nothing to the IBM i, and the source engine's own checks still apply.
+`compile_member`'s default target `*CURLIB` is decided as the job's current library; with none, the
+compile is denied as unqualified, so pass `targetLibrary`.
+These decisions, and those of `run_script` and `verb_run`, go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
 [docs/policy.md](docs/policy.md) for the policy file, and [docs/verbs.md](docs/verbs.md) for verbs.
 
 Limits, stated plainly: the guard sees only the text it is given, not what called programs or
-triggers do; IBM i authority remains the real boundary. It is not yet wired into `run_sql`,
-`compile_member`, the other source tools or the 5250 tools, which keep their own checks. The
-source tools use `IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES` and `IBMI_BLOCKED_CL` (compile commands
-only). The 5250 tools use `IBMI_RESTRICTED` (an allowlist, on by default), `IBMI_ALLOWED_CL` and
+triggers do; IBM i authority remains the real boundary. It is not yet wired into the 5250 tools,
+which keep their own checks. The source tools also use `IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES` and
+`IBMI_BLOCKED_CL` (compile commands only). The 5250 tools use `IBMI_RESTRICTED` (an allowlist, on by default), `IBMI_ALLOWED_CL` and
 `IBMI_BLOCKED_CL` (the last applies only when restricted is off); they ignore `IBMI_READ_ONLY`.
 The guard's catalog lookups have not yet been verified on a live IBM i.
 
@@ -146,7 +154,7 @@ as a YAML file; see [docs/verbs.md](docs/verbs.md).
 ## Roadmap
 
 `unified-kit` is done; `execution-guard` is in progress (the guard decides `run_script`,
-`verb_run` and `policy_check`; wiring it into the other tools and a live check are open).
+`verb_run`, `policy_check` and the source tools; the 5250 tools and a live check are open).
 `project-verbs` is in progress (`verb_list`, `verb_run` and `policy_check` verb input are done;
 an example verb and a live check are open). Next: `config-bootstrap`, a company pilot. See
 `docs/idea.md`.

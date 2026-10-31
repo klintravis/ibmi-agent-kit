@@ -31,13 +31,14 @@ Use `policy_check` first to see what the policy would decide. A query in `run_sc
 
 ### Confirmation
 
-A rule with `decision: confirm` makes `run_script` or `verb_run` ask the user once, through MCP elicitation, listing every statement that needs it. Only an accepted form with `confirm: true` runs it. A client without elicitation support, a decline, a cancel or no answer within 120 seconds all deny. The server writes one line to stderr per client saying whether confirmation is available.
+A rule with `decision: confirm` makes `run_script`, `verb_run` or a guarded source tool ask the user once, through MCP elicitation, listing every statement that needs it. Only an accepted form with `confirm: true` runs it. A client without elicitation support, a decline, a cancel or no answer within 120 seconds all deny. The server writes one line to stderr per client saying whether confirmation is available.
 
 ### Policy, partition and run log
 
 - Each profile may set `IBMI_KIT_POLICY` (absolute path) to a policy file; unset means the built-in observe policy. Every listed profile's policy is loaded at startup, so a missing or invalid file stops the server and names it. A profile added later loads on first use.
 - `IBMI_PARTITION` in the profile declares the partition; it must agree with what the 5250 System name and the SQL RDB name map to. The 5250 System name is not yet read by the guard (a stub), so today the RDB name and the declaration decide.
-- `run_script` and `verb_run` decisions are logged to `runs/YYYY-MM-DD.jsonl` in the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`) is set. See the [guard README](../guard/README.md#run-log).
+- The source engine's tools are decided through a hook the server passes to it: `run_sql`, `read_source_member` and `search_source` as reads, `upload_source_member` as a write, `manage_library_list` changes as `liblist`, and `compile_member` from its final command plus, for an SQL member or `RUNSQLSTM`, the member's statements read at decision time. A denied or unconfirmed call fails before the engine sends anything; the engine's own checks still apply. The call's outcome (`ok`, or `failed:` with the reason) is logged once the engine finishes.
+- `run_script`, `verb_run` and guarded source tool decisions are logged to `runs/YYYY-MM-DD.jsonl` in the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`) is set. See the [guard README](../guard/README.md#run-log).
 - Identity is read once per server from the catalog. If the job is lost or reset (for example after the query time limit), later statements are refused rather than sent on a new job.
 - The profile's own checks (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`, the runaway check) apply in every mode and also refuse.
 

@@ -5,7 +5,7 @@ import { CONFIG_DIRS, listServers, resolveProfileEnv } from "@ibmi-agent-kit/cor
 import { loadPolicy, RunLog, type Policy } from "@ibmi-agent-kit/guard";
 import { CONFIRM_TIMEOUT_MS, registerGuarded, type GuardDeps } from "./guarded.js";
 import { KEYS, register as registerScreen } from "@ibmi-agent-kit/screen/tools";
-import { register as registerSource, SQL_TIME_LIMIT_MS } from "@ibmi-agent-kit/source/tools";
+import { register as registerSource, SQL_TIME_LIMIT_MS, type MapepireBackend } from "@ibmi-agent-kit/source/tools";
 import { registerVerbTools, verbLoader } from "./verbs.js";
 
 export interface Engine {
@@ -21,6 +21,7 @@ export interface ServerDeps extends Partial<Omit<GuardDeps, "policyFor">> {
   extra?: (mcp: McpServer) => void;
   policy?: Policy; // every server decides with this one instead of its profile's IBMI_KIT_POLICY
   runLogDir?: string;
+  sourceBackend?: (server?: string) => MapepireBackend; // the source engine's connection, for a stub transport
 }
 
 // No process state is touched here: no listeners, no exit, no stdout. index.ts owns the process.
@@ -32,7 +33,9 @@ export interface ServerDeps extends Partial<Omit<GuardDeps, "policyFor">> {
 export function createServer(deps: ServerDeps = {}): KitServer {
   const mcp = new McpServer({ name: "ibmi-agent-kit", version: "0.1.0" }, { capabilities: { logging: {} } });
   const screen = registerScreen(mcp, { listServers: false });
-  const source = registerSource(mcp, { listServers: false });
+  // The guard is registered below, once the source engine's connections exist; calls come later.
+  let guard: ReturnType<typeof registerGuarded> | undefined;
+  const source = registerSource(mcp, { listServers: false, guard: (tool, input, server) => guard!.tool(tool, input, server), newBackend: deps.sourceBackend });
   deps.extra?.(mcp);
 
   const notice = deps.notice ?? ((m: string) => console.error(m));
@@ -55,9 +58,10 @@ export function createServer(deps: ServerDeps = {}): KitServer {
   if (!deps.policy) for (const server of listServers()) policyFor(server);
 
   const verbs = deps.verbs ?? verbLoader(profileEnv);
-  const guard = registerGuarded(mcp, {
+  guard = registerGuarded(mcp, {
     policyFor,
     conn: deps.conn ?? ((server) => source.backend(server)),
+    memberText: deps.memberText ?? (async (server, ref) => (await source.backend(server).readMember(ref)).content),
     profileEnv,
     systemName: deps.systemName ?? (() => undefined), // group 6: the screen engine's sign-on System field
     confirmTimeoutMs: deps.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS,

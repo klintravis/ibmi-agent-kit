@@ -53,6 +53,7 @@ import {
   runLogLines,
   statedLookups,
   type RunLogLine,
+  type ToolStatement,
 } from "./index.js";
 
 // --- helpers ---
@@ -1876,6 +1877,22 @@ test("Before enforcing: a stricter candidate lists exactly the statements whose 
       ["DELETE FROM QTEMP.B", "dev", "allow/allow/3", "deny/deny/-"],
     ],
   );
+});
+
+test("replay: a tool line's logged operations are decided again without classify, beside the call's text lines", async () => {
+  const who = as("dev", "dev");
+  const raw: Operation[] = [{ class: "write", object: { lib: "INORD", name: "QRPGLESRC" }, source: "sql" }];
+  const tool: ToolStatement = { kind: "tool", text: "upload_source_member INORD/QRPGLESRC(ORDVAL)", display: "upload_source_member INORD/QRPGLESRC(ORDVAL)", operations: raw };
+  const c = await classify("SELECT * FROM INORD.T", { ...d4ctx(), lookups: lookups() });
+  const statements = [tool, ...c.statements].map((s) => ({ statement: s, decision: decide(s.operations, who, D4), outcome: "ok" }));
+  const lines = JSON.parse(JSON.stringify(runLogLines({ server: "dev1", tool: "compile_member", identity: who, lookups: {}, statements }, D4))) as RunLogLine[];
+  assert.deepEqual([lines[0].kind, lines[0].raw, lines[1].kind, lines[1].raw], ["tool", raw, "sql", undefined]);
+  assert.deepEqual(await replayRunLog(D4, lines), { statements: 2, changes: [], skipped: [] });
+  const strict = parsePolicy(readFileSync(EXAMPLE, "utf8").replace("partition: dev, env: [personal, devlibs, integ]", "partition: dev, env: [personal, devlibs]"), EXAMPLE);
+  const r = await replayRunLog(strict, lines);
+  assert.deepEqual(r.changes.map((x) => [x.line.text, x.before.decision, x.after.decision]), [["upload_source_member INORD/QRPGLESRC(ORDVAL)", "allow", "deny"]], "the read stays allowed by the read rule");
+  const noOps = await replayRunLog(D4, [{ ...lines[0], raw: undefined }]);
+  assert.match(noOps.skipped[0] ?? "", /line 0 is a tool line without its operations/);
 });
 
 test("replay: a log line whose text no longer splits the same is skipped and named", async () => {

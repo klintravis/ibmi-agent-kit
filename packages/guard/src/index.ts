@@ -38,6 +38,6 @@ export type { CleanupStep, Layer, SetupStep, Substituted, TemplateKind, Value, V
 export { decidePlans, decideVerb, isPlannedVerb, plannedStatements, planVerb } from "./verbplan.js";
 export type { DecidedStatement, Planned, PlannedRole, PlannedVerb } from "./verbplan.js";
 export { RunLog,recordLookups, redact, runLogLines, statedLookups, statementRule } from "./runlog.js";
-export type { Answers, CallRecord, LoggedOperation, PartitionNames, RunLogLine } from "./runlog.js";
+export type { Answers, CallRecord, LoggedOperation, PartitionNames, RunLogLine, ToolStatement } from "./runlog.js";
 export { decideStatements, describeFailure, loadPolicyTests, parsePolicyTests, replayRunLog, runPolicyTests } from "./offline.js";
 export type { PolicyTest, ReplayChange, ReplayOutcome, TestResult } from "./offline.js";

@@ -32,7 +32,7 @@
 
 ## 6. Engine hooks (guarded-tools spec; D6)
 
-- [ ] 6.1 Source: await the guard in `run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list` and `compile_member` (final command string; member text fetched for SQL type or RUNSQLSTM), with modification notices; verify pre-existing source checks pass and new selfchecks prove the override-target case is decided against `LIVLIB` and a denied call never reaches the stub transport
+- [x] 6.1 Source: await the guard in `run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list` and `compile_member` (final command string; member text fetched for SQL type or RUNSQLSTM), with modification notices; verify pre-existing source checks pass and new selfchecks prove the override-target case is decided against `LIVLIB` and a denied call never reaches the stub transport
 - [ ] 6.2 Screen: `pressKey` `guarded` option and the pre-AID command-line decision, `session_open` decision for `program`/`library`, sign-on System-field parse, with modification notices; verify pre-existing screen checks pass and new selfchecks with a fake screen prove F9-then-Enter on a denied command sends nothing, engine-internal sign-off is never decided, and the System field is read from a captured PUB400-style sign-on screen
 
 ## 7. Documentation

@@ -35,7 +35,7 @@ function readRunLog(dir: string, sinceDays: number | undefined): { lines: RunLog
         typeof l.call === "string" &&
         typeof l.index === "number" &&
         typeof l.text === "string" &&
-        (l.kind === "sql" || l.kind === "cl") &&
+        (l.kind === "sql" || l.kind === "cl" || (l.kind === "tool" && Array.isArray(l.raw))) &&
         typeof l.identity?.user === "string" &&
         typeof l.time === "string" &&
         !Number.isNaN(Date.parse(l.time)) &&
