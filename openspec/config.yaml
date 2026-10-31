@@ -10,7 +10,7 @@ context: |
   Each user signs on with their own IBM i credentials. IBM i object authority is the real
   boundary; the kit's guard catches mistakes, it does not stop a determined user.
   Knowledge of a company's system belongs in Claude skills, not in this MCP.
-  Must run without Docker on Windows, macOS and Linux with Node >= 18.15.
+  Must run without Docker on Windows, macOS and Linux with Node >= 20.
   Tests follow the engines' style: one src/selfcheck.ts per package run by `node --test` via
   `npm run check`, no test framework dependency, stubs instead of a live IBM i.
 

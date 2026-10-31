@@ -2,7 +2,7 @@
 
 ### Requirement: One stdio server mounts every engine
 The kit SHALL provide one MCP server over stdio, started by the `ibmi-agent-kit` command, that
-exposes every screen-engine and source-engine tool. It SHALL run on Node 18.15 or later on Windows,
+exposes every screen-engine and source-engine tool. It SHALL run on Node 20 or later on Windows,
 macOS and Linux without Docker.
 
 #### Scenario: Combined tool list

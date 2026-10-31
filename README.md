@@ -10,7 +10,7 @@ friends (source), `run_sql`, and one `list_servers`. Each package README lists i
 
 ## Install
 
-From this repo, with Node 18.15 or newer. Nothing is published to npm.
+From this repo, with Node 20 or newer. Nothing is published to npm.
 
 ```sh
 git clone https://github.com/klintravis/ibmi-agent-kit

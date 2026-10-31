@@ -27,7 +27,7 @@
     "NOTICE"
   ],
   "engines": {
-    "node": ">=18.15"
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc",

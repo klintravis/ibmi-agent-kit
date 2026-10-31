@@ -3,7 +3,7 @@
 ### Requirement: Quiet check output
 Each package's `check` script SHALL run its self-check with the `dot` test reporter, so a passing
 run prints one character per test and a failing run prints each failed test's name and assertion
-message. The packages SHALL declare `engines.node` of `>=18.15`.
+message. The packages SHALL declare `engines.node` of `>=20`.
 
 #### Scenario: All tests pass
 - **WHEN** `npm run check` passes

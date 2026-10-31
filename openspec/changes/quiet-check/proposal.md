@@ -7,9 +7,11 @@ only need failures; the noise costs context and hides the one red line.
 
 - Each package's `check` script runs `node --test --test-reporter=dot dist/selfcheck.js`: one dot
   per passing test, and for a failure the test name, assertion message, diff and stack.
-- **BREAKING (minor):** `engines.node` rises from `>=18` to `>=18.15` in the five packages and
-  the `config.yaml` context line, because `--test-reporter` first shipped in 18.15 (and 19.6).
-  CI's Node 18 leg resolves to the latest 18.x, so it is unaffected.
+- **BREAKING (minor):** `engines.node` rises from `>=18` to `>=20` in the five packages, the
+  `config.yaml` context line, the READMEs and the CI matrix (now Node 20 and 22). Owner ruling
+  (2026-10-31): drop Node 18. CI run 41215541271 showed the dot reporter on Node 18 prints only `X`
+  for a failure, with no test name or message. Node 18 is EOL since April 2025 and
+  `@hono/node-server` in the lockfile already needs `>=20`.
 
 Out of scope: package source and tests, no MCP tools added or changed, no custom reporter, no
 printed pass/fail totals (the dot reporter prints none; the exit code and the absence of a

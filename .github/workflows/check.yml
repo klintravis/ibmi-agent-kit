@@ -1,4 +1,4 @@
-# Runs `npm run check` (build + self-checks) on Windows, macOS and Linux across Node 18 and 22.
+# Runs `npm run check` (build + self-checks) on Windows, macOS and Linux across Node 20 and 22.
 name: check
 
 on:
@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
-        node: [18, 22]
+        node: [20, 22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
