@@ -31,18 +31,18 @@ A rule with `decision: confirm` makes `run_script` ask the user once, through MC
 
 - Each profile may set `IBMI_KIT_POLICY` (absolute path) to a policy file; unset means the built-in observe policy. Every listed profile's policy is loaded at startup, so a missing or invalid file stops the server and names it. A profile added later loads on first use.
 - `IBMI_PARTITION` in the profile declares the partition; it must agree with what the 5250 System name and the SQL RDB name map to. The 5250 System name is not yet read by the guard (a stub), so today the RDB name and the declaration decide.
-- Decisions are logged to `<first profile folder>/runs/YYYY-MM-DD.jsonl`. See the [guard README](../guard/README.md#run-log).
-- The job's identity (user, groups, authorization lists) is read once per connection from the catalog, not decided. If a script changes the job, `run_script` refuses to send on a different job from the one it decided against.
+- `run_script` decisions are logged to `runs/YYYY-MM-DD.jsonl` in the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` is set. See the [guard README](../guard/README.md#run-log).
+- Identity is read once per server from the catalog. If the job is lost or reset (for example after the query time limit), later statements are refused rather than sent on a new job.
 - The profile's own checks (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`, the runaway check) apply in every mode and also refuse.
 
 ## `policy` command
 
 ```sh
-ibmi-agent-kit policy test <policy> <tests>
-ibmi-agent-kit policy replay <candidate-policy> [--since <days>]
+node <repo>/packages/server/dist/index.js policy test <policy> <tests>
+node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--since <days>]
 ```
 
-Offline, no IBM i, output on stdout. Details in the [guard README](../guard/README.md#offline-policy-test-and-policy-replay).
+`npm link -w packages/server` puts `ibmi-agent-kit` on PATH so you can shorten the command. Offline, no IBM i, output on stdout. Details in the [guard README](../guard/README.md#offline-policy-test-and-policy-replay).
 
 ## Logging and shutdown
 

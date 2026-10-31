@@ -8,15 +8,11 @@ The guard catches mistakes. It classifies the text it is given, not what called 
 
 Set `IBMI_KIT_POLICY` in a profile file to the absolute path of the policy. Without it the built-in policy applies: observe mode, one `allow` rule, so nothing is blocked except `danger` and unqualified operations, and every statement is logged.
 
-```sh
-# ~/.ibmi-agent-kit/.env.pub400
-IBMI_KIT_POLICY=/home/me/policies/pub400.yaml
-IBMI_PARTITION=play
-```
-
-```powershell
-# Windows
+```ini
+# %USERPROFILE%\.ibmi-agent-kit\.env.pub400   (Linux and macOS: ~/.ibmi-agent-kit/.env.pub400)
 IBMI_KIT_POLICY=C:\Users\me\policies\pub400.yaml
+# Linux and macOS: IBMI_KIT_POLICY=/home/me/policies/pub400.yaml
+IBMI_PARTITION=play
 ```
 
 A missing or invalid policy stops the server at startup and names the file. A relative path is refused. Keep the policy, the profile and any verb files out of the agent's reach with client permission rules, so the agent cannot edit them.
@@ -24,7 +20,7 @@ A missing or invalid policy stops the server at startup and names the file. A re
 ## Rollout
 
 1. Start with `mode: observe`: everything is decided and logged, nothing extra is blocked.
-2. Read the run log (`<profile folder>/runs/`), write `policy test` cases, and run `ibmi-agent-kit policy replay <candidate>` to see which logged statements would change.
+2. Read the run log (the first folder in `CONFIG_DIRS()`, so `~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` is set), write `policy test` cases, and run `policy replay <candidate>` (see [Test a policy](#test-a-policy)) to see which logged statements would change.
 3. Switch partitions to `enforce` one at a time with the per-partition `mode` map.
 
 ## Fields
@@ -107,7 +103,7 @@ rules:
 
 Each key takes one value, a list, or `any`. Rules are checked in order and the first that matches every key decides one operation. A statement takes the most restrictive decision of its operations. `confirm` asks the user (see below). A rule that names the class `unqualified` is an error: nothing can allow an unqualified change.
 
-Always denied, in every mode: `danger` operations (a command not in the table, a statement the guard cannot read safely, an RDB no partition lists), `unqualified` operations (a change with no library; name the library), and a partition conflict. In observe mode an unknown unqualified CL command is only logged (as denied, not enforced) and runs.
+Always denied, in every mode: `danger` operations (a qualified command not in the table, or an unknown command that names a program or command to run (`CMD`, `PGM`, …); also a statement the guard cannot read safely, an RDB no partition lists), `unqualified` operations (a change with no library; name the library), and a partition conflict. In observe mode an unknown unqualified CL command is only logged (as denied, not enforced) and runs.
 
 ### Classes
 
@@ -166,31 +162,29 @@ commands:
 ## Test a policy
 
 ```sh
-ibmi-agent-kit policy test examples/three-partitions.yaml examples/three-partitions.tests.yaml
+node <repo>/packages/server/dist/index.js policy test examples/three-partitions.yaml examples/three-partitions.tests.yaml
 ```
 
-A test file is a YAML list of cases:
+`npm link -w packages/server` puts `ibmi-agent-kit` on PATH, so `ibmi-agent-kit policy test …` works too. A test file is a YAML list of cases (this one is in `examples/three-partitions.tests.yaml`):
 
 ```yaml
-- name: dev writes own library
+- name: dev scratch
   as: { user: JDOE, groups: [GRPDEV], partition: dev }
   script: |
-    UPDATE JDOE.T SET A = 1;
-    CL: CRTBNDRPG PGM(JDOE/P)
-  lookups:
-    schemas: { LONGSCHEMANAME: LONGSCH }   # optional: long name -> system name
-  expect: [allow, deny]                    # one decision per statement, or one for the script
+    DELETE FROM QTEMP.T;
+    CL: CRTBNDRPG PGM(QTEMP/P)
+  expect: [allow, deny]   # one decision per statement, or one for the script
 ```
 
-`as` takes `user`, `groups`, `authlists`, `partition` and `curlib`. `expect` is the policy's decision, so an observe-mode deny is still tested as deny. Exit 0 all cases passed, 1 a case failed, 2 a bad file. In a team, run it in CI.
+`lookups` is optional: `schemas` maps a long schema name to its system name, and `bases` maps an alias or view to its base tables (`LIB.NAME`). `as` takes `user`, `groups`, `authlists`, `partition` and `curlib`. `expect` is the policy's decision, so an observe-mode deny is still tested as deny. Exit 0 all cases passed, 1 a case failed, 2 a bad file. In a team, run it in CI.
 
 Before enforcing, replay the run log under the candidate:
 
 ```sh
-ibmi-agent-kit policy replay candidate.yaml --since 14
+node <repo>/packages/server/dist/index.js policy replay candidate.yaml --since 14
 ```
 
-It prints each logged statement whose decision changes, and a count. It reads the run log in the first profile folder.
+It prints each logged statement whose decision changes, and a count. It reads the run log in the first folder in `CONFIG_DIRS()` (`~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` is set).
 
 To check one script without a connection from an agent, call `policy_check` with `as` and, optionally, `policy`.
 

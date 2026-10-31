@@ -35,7 +35,15 @@ Pass `server` (a name from `list_servers`) to pick which IBM i; omit it for the 
 
 | Tool | Package | What it does | Read-only / changes / runs code |
 |---|---|---|---|
-| `compile_member` | source | Compiles a source member and parses the compile messages | runs code |
+| `run_tests` | screen | Replays Markdown screen regression tests against a program | changes; runs code |
+| `screen_do` | screen | Types into fields and presses keys on the 5250 screen | changes; runs code |
+| `screen_snapshot` | screen | Returns the current screen | read-only |
+| `session_close` | screen | Signs off and closes a 5250 session | changes |
+| `session_open` | screen | Signs on and opens a 5250 session, optionally starting a program | changes; runs code |
+| `list_servers` | server | Lists configured servers and open sessions | read-only |
+| `policy_check` | server | Shows what the execution policy would decide for a script, without running it | read-only |
+| `run_script` | server | Runs SQL and CL after the execution policy decides every statement | changes; runs code |
+| `compile_member` | source | Compiles a source member and parses the compile messages | changes; runs code |
 | `list_libraries` | source | Lists libraries | read-only |
 | `list_members` | source | Lists the members of a source file | read-only |
 | `list_source_files` | source | Lists source files in a library | read-only |
@@ -44,16 +52,8 @@ Pass `server` (a name from `list_servers`) to pick which IBM i; omit it for the 
 | `run_sql` | source | Runs a SQL select | read-only |
 | `search_source` | source | Searches source members for text | read-only |
 | `upload_source_member` | source | Uploads a local file to a source member | changes |
-| `run_tests` | screen | Replays Markdown screen regression tests against a program | runs code |
-| `screen_do` | screen | Types into fields and presses keys on the 5250 screen | changes; runs code |
-| `screen_snapshot` | screen | Returns the current screen | read-only |
-| `session_close` | screen | Signs off and closes a 5250 session | changes |
-| `session_open` | screen | Signs on and opens a 5250 session, optionally starting a program | changes; runs code |
-| `list_servers` | server | Lists configured servers and open sessions | read-only |
-| `policy_check` | server | Shows what the execution policy would decide for a script, without running it | read-only |
-| `run_script` | server | Runs SQL and CL after the execution policy decides every statement | changes; runs code |
 
-The last column follows each tool's MCP annotation. Each package README has the arguments and details.
+The last column is each tool's MCP annotation (read-only or destructive) plus whether it runs a program or command. Each package README has the arguments and details.
 
 ## Profiles
 
@@ -72,7 +72,8 @@ the process environment. Copy `packages/source/.env.example` or `packages/screen
 as a starting point. `list_servers` shows the folders searched and the open sessions.
 
 Protected settings are read from the profile file only, never from the environment, so an MCP
-registration cannot lift a safety setting: `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`,
+registration's env cannot override them (`IBMI_KIT_CONFIG_DIR` does choose which profile folder
+is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`,
 `IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`,
 `IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_MAPEPIRE_CA`,
 `IBMI_MAPEPIRE_JAR`, and every `IBMI_*_PORT`
@@ -115,18 +116,20 @@ The kit replaces `ibm-i-5250-mcp` and `ibm-i-source-mcp`.
 
 ## Safety
 
-`run_script` and `policy_check` run every SQL statement and CL command through the execution
-guard: each is classified, matched against a policy file (roles, environments, partitions, rules)
-and allowed, confirmed with the user, or denied before anything is sent. Without a policy file the
-guard only observes and logs, apart from statements it always denies. Decisions go to a local run
-log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
+`run_script` runs every SQL statement and CL command through the execution guard: each is
+classified, matched against a policy file (roles, environments, partitions, rules) and allowed,
+confirmed with the user, or denied before anything is sent. `policy_check` makes the same
+decisions but only reports them. Without a policy file the guard only observes and logs, apart
+from statements it always denies. `run_script` decisions go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
 [docs/policy.md](docs/policy.md) for the policy file.
 
 Limits, stated plainly: the guard sees only the text it is given, not what called programs or
 triggers do; IBM i authority remains the real boundary. It is not yet wired into `run_sql`,
-`compile_member`, the other source tools or the 5250 tools, which keep their own checks
-(`IBMI_READ_ONLY`, `IBMI_BLOCKED_*`). Its catalog lookups have not yet been verified on a live
-IBM i.
+`compile_member`, the other source tools or the 5250 tools, which keep their own checks. The
+source tools use `IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES` and `IBMI_BLOCKED_CL` (compile commands
+only). The 5250 tools use `IBMI_RESTRICTED` (an allowlist, on by default), `IBMI_ALLOWED_CL` and
+`IBMI_BLOCKED_CL` (the last applies only when restricted is off); they ignore `IBMI_READ_ONLY`.
+The guard's catalog lookups have not yet been verified on a live IBM i.
 
 ## Words
 
