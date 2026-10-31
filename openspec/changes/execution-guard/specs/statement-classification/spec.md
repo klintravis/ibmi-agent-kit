@@ -80,6 +80,28 @@ classify as `unqualified`, which no rule can allow. Unqualified reads are in env
 - **WHEN** a compile targets `*CURLIB` and the job's current library is `JDOE`
 - **THEN** it classifies as `compile` into `JDOE`
 
+### Requirement: Libraries are matched by their system name
+A library named by its long SQL schema name SHALL be resolved to its system name at decision
+time, and environments SHALL match the system name only, so SQL and CL naming of one library
+always land in the same environment.
+
+#### Scenario: Long schema name
+- **WHEN** a statement writes `ORDER_HISTORY.T` and that schema's system name is `ORDER00001`
+- **THEN** the write is matched against environments as `ORDER00001`
+
+### Requirement: Statements reaching another database are danger unless mapped
+`CONNECT`, `SET CONNECTION`, `DISCONNECT`, an `RDB(...)` CL parameter, and a three-part name
+(`RDB.LIB.OBJ`) SHALL classify as `danger`, unless the RDB is listed by a partition, in which case
+the operation SHALL be decided against that partition's environments.
+
+#### Scenario: Unmapped remote insert
+- **WHEN** a statement is `INSERT INTO OTHERRDB.LIB.T VALUES (1)` and no partition lists `OTHERRDB`
+- **THEN** it classifies as `danger`
+
+#### Scenario: Mapped remote read
+- **WHEN** a statement reads `QARDB.QTORD.T` and partition `qa` lists `rdbs: [QARDB]`
+- **THEN** it classifies as `read` of `QTORD` on partition `qa`
+
 ### Requirement: CL commands come from a closed table
 CL SHALL be classified only by a command table giving each command a class (`read`, `write`,
 `ddl`, `compile`, `call`, `liblist`, `promote`, `danger`), the parameters that name objects or
@@ -98,6 +120,20 @@ library other than `QSYS`, `QSYS2` or one the table names, SHALL classify as `da
 
 #### Scenario: Look-alike command
 - **WHEN** a command is `MYLIB/DSPOBJD OBJ(A/X) OBJTYPE(*FILE)`
+- **THEN** it classifies as `danger`
+
+### Requirement: Commands can take their class from a parameter value
+A command entry MAY declare `class_by_param` (a parameter, a map of its values to classes, and a
+default class) and the product `library` it must be qualified to. Classes other than the built-in
+ones SHALL be declared by being used in a command entry, and rules SHALL be able to name them, so a
+change-management product that promotes by request and level can be governed per level.
+
+#### Scenario: Promote by level
+- **WHEN** `CMPRM` declares `class_by_param: { param: LEVEL, values: { QA: promote_qa, PROD: promote_prod }, default: danger }`
+- **THEN** `CMPRM REQ(1234) LEVEL(QA)` classifies as `promote_qa` and `LEVEL(PROD)` as `promote_prod`
+
+#### Scenario: Unlisted level
+- **WHEN** `CMPRM REQ(1234) LEVEL(HOTFIX)` is classified
 - **THEN** it classifies as `danger`
 
 ### Requirement: Opaque statements classify as danger
