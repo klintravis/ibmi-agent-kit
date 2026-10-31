@@ -135,6 +135,33 @@ function lex(text: string): Lexed {
   return out;
 }
 
+// Where a text's '...' literals (with their unescaped content), "delimited" names and comments
+// stand, as lex() reads them; nothing is marked after a lexing error. For redaction.
+export function spansOf(text: string): { strings: { start: number; end: number; value: string }[]; names: [number, number][]; skips: Map<number, number>; comments: [number, number][] } {
+  const lexed = lex(text);
+  const strings: { start: number; end: number; value: string }[] = [];
+  const names: [number, number][] = [];
+  const skips = new Map<number, number>();
+  const comments: [number, number][] = lexed.comments.map(([s, e]) => [s, e]);
+  for (const t of lexed.items) {
+    if (t.type === "cl") {
+      // A CL: line is one item to the splitter; its literals and comments are read from its text.
+      CL_LINE.lastIndex = t.start;
+      const from = t.start + CL_LINE.exec(text)![0].length;
+      const inner = spansOf(text.slice(from, t.end));
+      for (const s of inner.strings) strings.push({ ...s, start: s.start + from, end: s.end + from });
+      for (const [s, e] of inner.names) names.push([s + from, e + from]);
+      for (const [s, e] of inner.skips) skips.set(s + from, e + from);
+      for (const [s, e] of inner.comments) comments.push([s + from, e + from]);
+    }
+    if (t.type === "string") strings.push({ start: t.start, end: t.end, value: t.value });
+    if (t.type === "delim") names.push([t.start, t.end]);
+    if (t.type === "string" || t.type === "delim") skips.set(t.start, t.end);
+  }
+  for (const [s, e] of lexed.comments) skips.set(s, e);
+  return { strings, names, skips, comments };
+}
+
 // Comments out, blank lines dropped: what a confirmation shows.
 function displayOf(text: string, from: number, to: number, comments: Lexed["comments"]): string {
   let s = "";

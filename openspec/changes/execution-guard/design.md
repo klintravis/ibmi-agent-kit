@@ -125,8 +125,8 @@ All `confirm` operations of one tool call are gathered into one `elicitInput` wi
 
 ### D8. Run log
 `<first config dir>/runs/YYYY-MM-DD.jsonl`, appended synchronously; `redact()` applied to statement
-text; policy hash = SHA-256 of the file bytes; each line also stores the identity and the lookup
-answers used, so it can be replayed.
+text; policy hash = SHA-256 of the policy text, the shipped commands.yaml and each command file's
+text; each line also stores the identity and the lookup answers used, so it can be replayed.
 
 ### D9. Policy tests and replay as a CLI on the server package
 `ibmi-agent-kit policy test <policy> <tests>` and `ibmi-agent-kit policy replay <candidate>

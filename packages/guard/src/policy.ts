@@ -1,11 +1,12 @@
 // The execution policy (design D4): one YAML file, loaded once at startup. Loading validates the
 // shape strictly, merges the command tables, and leaves a normalised `Policy` that matching and
 // `decide` read without further checks.
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { z } from "zod";
 import { BUILTIN_CLASSES } from "./types.js";
-import { builtinCommands, commandTableSchema, customClasses, issueLines, mergeCommands, parseCommandFile, parseYaml, type CommandTable } from "./commands.js";
+import { builtinCommands, builtinCommandsText, commandTableSchema, customClasses, issueLines, mergeCommands, parseCommandFile, parseYaml, type CommandTable } from "./commands.js";
 
 export type Mode = "observe" | "enforce";
 export type Verdict = "allow" | "confirm" | "deny";
@@ -21,6 +22,7 @@ export interface Rule {
 
 export interface Policy {
   source: string; // the policy file, or "built-in"
+  hash: string; // SHA-256 of the policy text, the shipped commands.yaml and each command file, for the run log
   mode: { default: Mode; partitions: Record<string, Mode> };
   partitions: { name: string; systems: string[]; rdbs: string[] }[];
   unknownPartition?: string;
@@ -93,13 +95,16 @@ export function parsePolicy(text: string, file: string): Policy {
 
   const shipped = builtinCommands();
   const tables: CommandTable[] = [shipped];
+  const hash = createHash("sha256").update(text).update("\0").update(builtinCommandsText());
   const overrides: string[] = [];
   for (const f of p.command_files ?? []) {
     const path = resolve(dirname(file), f);
     const rel = relative(dirname(resolve(file)), path);
     if (isAbsolute(f) || !rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error(`${file}: command_files: ${f} must be a relative path inside the policy's folder`);
     if (!existsSync(path)) throw new Error(`${file}: command_files: ${path} not found`);
-    const table = parseCommandFile(readFileSync(path, "utf8"), path);
+    const body = readFileSync(path, "utf8");
+    hash.update("\0").update(body);
+    const table = parseCommandFile(body, path);
     for (const cmd of Object.keys(table)) if (shipped[cmd]?.class === "danger") overrides.push(`${f} overrides ${cmd}, which the shipped table classes danger`);
     tables.push(table);
   }
@@ -113,6 +118,7 @@ export function parsePolicy(text: string, file: string): Policy {
 
   const policy: Policy = {
     source: file,
+    hash: hash.digest("hex"),
     mode: { default: dflt ?? "enforce", partitions: byPartition },
     partitions,
     environments: (p.environments ?? []).map((e) => {

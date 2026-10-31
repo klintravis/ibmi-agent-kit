@@ -125,11 +125,14 @@ export function paramSpecs(e: CommandEntry): Map<string, ParamSpec> {
 }
 
 let shipped: CommandTable | undefined;
+let shippedText: string | undefined;
 // The commands.yaml next to this file (copied into dist by the build).
 export function builtinCommands(): CommandTable {
-  if (!shipped) {
-    const url = new URL("./commands.yaml", import.meta.url);
-    shipped = parseCommandFile(readFileSync(url, "utf8"), "commands.yaml");
-  }
+  if (!shipped) shipped = parseCommandFile(builtinCommandsText(), "commands.yaml");
   return shipped;
+}
+
+// Its text, for the policy hash.
+export function builtinCommandsText(): string {
+  return (shippedText ??= readFileSync(new URL("./commands.yaml", import.meta.url), "utf8"));
 }

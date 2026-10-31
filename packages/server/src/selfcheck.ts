@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { classify, decide, loadPolicy, recordLookups, runLogLines, statedLookups } from "@ibmi-agent-kit/guard";
+import { policyCli } from "./policy-cli.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine } from "./server.js";
 
 const BIN = fileURLToPath(new URL("./index.js", import.meta.url));
@@ -184,6 +186,97 @@ test("the bin speaks only JSON-RPC on stdout and exits when stdin closes", { tim
     assert.match(stderr, /\[ibmi-agent-kit\] shutdown complete/);
   } finally {
     if (child.exitCode === null) child.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- policy CLI (policy-testing spec; tasks 3.1, 3.2) ---
+
+const EXAMPLES = fileURLToPath(new URL("../../../examples/", import.meta.url));
+
+function runBin(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((done, fail) => {
+    const child = spawn(process.execPath, [BIN, ...args], { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
+    child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
+    child.on("error", fail);
+    child.on("close", (code) => done({ code, stdout, stderr }));
+  });
+}
+
+test("policy test: the example suite passes and exits 0, without starting MCP", async () => {
+  const r = await runBin(["policy", "test", join(EXAMPLES, "three-partitions.yaml"), join(EXAMPLES, "three-partitions.tests.yaml")]);
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^\d+ cases passed\r?\n$/);
+  assert.doesNotMatch(r.stderr, /MCP server ready/);
+});
+
+test("policy test: a mutated policy names the failing case and the rule, and exits 1", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kit-policy-"));
+  try {
+    const text = readFileSync(join(EXAMPLES, "three-partitions.yaml"), "utf8");
+    writeFileSync(join(dir, "policy.yaml"), text.replace("{ env: blocked, decision: deny }", "{ env: blocked, decision: allow }"));
+    copyFileSync(join(EXAMPLES, "cm-product.yaml"), join(dir, "cm-product.yaml"));
+    const r = await runBin(["policy", "test", join(dir, "policy.yaml"), join(EXAMPLES, "three-partitions.tests.yaml")]);
+    assert.equal(r.code, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /FAIL analyst blocked: expected deny, got allow/);
+    assert.match(r.stdout, /rule 2 allows read PAYLIB\.T/);
+    assert.match(r.stdout, /4 of \d+ cases failed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("policy test: usage and load errors exit 2", async () => {
+  assert.equal(await policyCli(["test", "only-one"], () => {}, () => {}), 2);
+  const err: string[] = [];
+  assert.equal(await policyCli(["test", join(EXAMPLES, "nope.yaml"), join(EXAMPLES, "three-partitions.tests.yaml")], () => {}, (t) => err.push(t)), 2);
+  assert.match(err.join("\n"), /policy file not found/);
+});
+
+test("policy replay: lists what a candidate changes in the run log; --since leaves older days out", async () => {
+  const { root, env } = emptyConfig();
+  try {
+    const policyPath = join(EXAMPLES, "three-partitions.yaml");
+    const d4 = loadPolicy(policyPath);
+    const runs = join(root, "config", "runs");
+    mkdirSync(runs, { recursive: true });
+    const who = { user: "JDOE", groups: ["GRPDEV"], authlists: [], partition: "dev" };
+    for (const time of [new Date(Date.now() - 30 * 86_400_000), new Date()]) {
+      const { lookups, answers } = recordLookups(statedLookups());
+      const c = await classify("DELETE FROM INORD.T", { lookups, commands: d4.commands, rdbs: d4.rdbs });
+      const statements = c.statements.map((s) => ({ statement: s, decision: decide(s.operations, who, d4), outcome: "1 row" }));
+      const lines = runLogLines({ server: "dev1", tool: "run_script", identity: who, lookups: answers, statements, time }, d4);
+      writeFileSync(join(runs, `${lines[0].time.slice(0, 10)}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    }
+    writeFileSync(join(runs, "notes.txt"), "not a log file");
+    // Lines that are not run-log lines: counted and named on stderr, never replayed.
+    const good = JSON.parse(readFileSync(join(runs, `${new Date().toISOString().slice(0, 10)}.jsonl`), "utf8").split("\n")[0]);
+    const broken = [{ ...good, time: "yesterday" }, { ...good, index: "0" }, { ...good, decision: "maybe" }, { ...good, effective: undefined }];
+    // A call whose first line is missing: replayed calls go on, this one is skipped and counted.
+    appendFileSync(join(runs, `${new Date().toISOString().slice(0, 10)}.jsonl`), JSON.stringify({ ...good, call: "lost-first-line", index: 1 }) + "\n");
+    writeFileSync(join(runs, "2000-01-01.jsonl"), [...broken.map((l) => JSON.stringify(l)), "{not json"].join("\n") + "\n");
+    const candidate = join(root, "candidate.yaml");
+    writeFileSync(candidate, readFileSync(policyPath, "utf8").replace("partition: dev, env: [personal, devlibs, integ]", "partition: dev, env: [personal, devlibs]"));
+    copyFileSync(join(EXAMPLES, "cm-product.yaml"), join(root, "cm-product.yaml"));
+
+    const all = await runBin(["policy", "replay", candidate], env);
+    assert.equal(all.code, 0, all.stdout + all.stderr);
+    assert.match(all.stdout, /JDOE dev1 run_script partition dev: DELETE FROM INORD\.T\r?\n  allow by rule 6 -> deny \(runs: allow\)\r?\n/);
+    assert.match(all.stdout, /2 of 2 statements change under .*; 1 calls skipped \(see stderr\)/);
+    assert.match(all.stderr, /skipped call lost-first-line .*a line is missing/);
+    assert.match(all.stderr, /skipped 5 unreadable line\(s\)/);
+    const recent = await runBin(["policy", "replay", candidate, "--since", "14"], env);
+    assert.match(recent.stdout, /1 of 1 statements change/);
+    assert.doesNotMatch(recent.stderr, /unreadable/, "day files before the cutoff are not read");
+    const same = await runBin(["policy", "replay", policyPath], env);
+    assert.match(same.stdout, /^0 of 2 statements change/);
+    const bad = await runBin(["policy", "replay", candidate, "--since", "two"], env);
+    assert.equal(bad.code, 2);
+    assert.match(bad.stderr, /--since takes a whole number of days/);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

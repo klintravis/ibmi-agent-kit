@@ -102,7 +102,7 @@ export interface Decision {
 
 const RANK: Record<Verdict, number> = { allow: 0, confirm: 1, deny: 2 };
 const VERB: Record<Verdict, string> = { allow: "allows", confirm: "asks to confirm", deny: "denies" };
-const worst = (vs: Verdict[]): Verdict => vs.reduce<Verdict>((a, b) => (RANK[b] > RANK[a] ? b : a), "allow");
+export const worst = (vs: Verdict[]): Verdict => vs.reduce<Verdict>((a, b) => (RANK[b] > RANK[a] ? b : a), "allow");
 
 function describe(op: Operation): string {
   const o = op.object;

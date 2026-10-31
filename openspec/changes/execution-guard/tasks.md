@@ -17,16 +17,16 @@
 
 ## 3. Policy testing (policy-testing spec; D9)
 
-- [ ] 3.1 Implement offline decisions (stated identity and lookups), the test-file schema, and `ibmi-agent-kit policy test`; ship `examples/three-partitions.tests.yaml` covering every role × environment allow and deny; selfcheck: the example suite passes, a mutated policy makes the named case fail with exit code 1
-- [ ] 3.2 Implement `ibmi-agent-kit policy replay <candidate> [--since N]` over run-log lines (which store identity and lookups); selfcheck with a fixture log: a stricter candidate lists exactly the statements whose decision changes
+- [x] 3.1 Implement offline decisions (stated identity and lookups), the test-file schema, and `ibmi-agent-kit policy test`; ship `examples/three-partitions.tests.yaml` covering every role × environment allow and deny; selfcheck: the example suite passes, a mutated policy makes the named case fail with exit code 1
+- [x] 3.2 Implement `ibmi-agent-kit policy replay <candidate> [--since N]` over run-log lines (which store identity and lookups); selfcheck with a fixture log: a stricter candidate lists exactly the statements whose decision changes
 
 ## 4. Run log (run-log spec; D8)
 
-- [ ] 4.1 Implement `redact` and `RunLog` (lines include identity and lookup answers for replay); selfcheck: password-bearing CL parameters and SQL clauses become `***`, profile password never present, observed deny line has `enforced: false`, unwritable folder warns once and does not throw; verify all pass
+- [x] 4.1 Implement `redact` and `RunLog` (lines include identity and lookup answers for replay); selfcheck: password-bearing CL parameters and SQL clauses become `***`, profile password never present, observed deny line has `enforced: false`, unwritable folder warns once and does not throw; verify all pass
 
 ## 5. Server: decision context, tools and confirmation (guarded-tools spec; D5, D7)
 
-- [ ] 5.1 Implement the server's `lookups` over the transport and per-connection identity and partition resolution (D5); selfcheck with a stub transport: profile `dev` on a box whose RDB maps to prod decides as prod, System/RDB disagreement denies, empty `USER_INFO` → `default_role` logged, authorization-list role found
+- [ ] 5.1 Implement the server's `lookups` over the transport and per-connection identity and partition resolution (D5); selfcheck with a stub transport: profile `dev` on a box whose RDB maps to prod decides as prod, System/RDB disagreement denies, empty `USER_INFO` → `default_role` logged, authorization-list role found; decide how non-text tools (read_source_member, upload_source_member, manage_library_list, session_open) are logged so replay re-decides them (e.g. replay the logged operations for those kinds)
 - [ ] 5.2 Add `run_script` (destructive) and `policy_check` (read-only, optional `policy` and `as` for offline decisions) with structured content and `maxRows` bounds, honouring `IBMI_READ_ONLY` and `IBMI_BLOCKED_TABLES`; the tool layer decides every operation of the whole script before sending anything; selfcheck: one deny sends nothing, `FROBCMD X` then `PWRDWNSYS` sends nothing, an unmapped `CONNECT` then a `DELETE` sends nothing, declined confirmation sends nothing, failure stops later statements, read-only profile refuses an allowed update, `policy_check` sends only lookups, and with `policy`/`as` sends nothing
 - [ ] 5.3 Implement confirmation (D7): one elicitation per call, 120 s timeout, `confirm === true` required, operations shown before comment-stripped text, startup notice; selfcheck with an in-memory client: no capability → deny message, accept+true runs and logs `confirmed`, accept+false/decline/timeout deny
 

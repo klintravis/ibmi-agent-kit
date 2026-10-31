@@ -1,0 +1,240 @@
+# Policy tests for three-partitions.yaml: every role in every environment, each allowed and denied
+# case the policy has. Run: ibmi-agent-kit policy test three-partitions.yaml three-partitions.tests.yaml
+# `expect` is one decision per statement (or one for the whole script). It is the policy's decision:
+# on an observe-mode partition a deny is logged and run, and is still tested here as deny.
+# Users: JDOE (dev or qa by group), CTR01 (contractor by name), ANL01 (analyst). A personal
+# library is the user's own name.
+
+# --- analyst: reads anywhere but the blocked library; writes only in QTEMP ---
+- name: analyst scratch
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: CRTBNDRPG PGM(QTEMP/P)
+  expect: [allow, allow, deny]
+- name: analyst personal
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM ANL01.T; DELETE FROM ANL01.T
+  expect: [allow, deny]
+- name: analyst blocked
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM PAYLIB.T
+  expect: deny
+- name: analyst test
+  as: { user: ANL01, groups: [GRPANL], partition: qa }
+  script: SELECT * FROM QTORD.T; DELETE FROM QTORD.T
+  expect: [allow, deny]
+- name: analyst system
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM QSYS2.SYSTABLES; DELETE FROM QSYS2.X
+  expect: [allow, deny]
+- name: analyst devlibs
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM DVORD.T; DELETE FROM DVORD.T
+  expect: [allow, deny]
+- name: analyst integ
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM INORD.T; DELETE FROM INORD.T
+  expect: [allow, deny]
+- name: analyst stage_qa
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM SQORD.T; DELETE FROM SQORD.T
+  expect: [allow, deny]
+- name: analyst stage_prod
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM SPORD.T; DELETE FROM SPORD.T
+  expect: [allow, deny]
+- name: analyst live
+  as: { user: ANL01, groups: [GRPANL], partition: prod }
+  script: SELECT * FROM LVORD.T; DELETE FROM LVORD.T
+  expect: [allow, deny]
+
+# --- contractor: QTEMP, and reads in personal, devlibs and integ; nothing else ---
+- name: contractor scratch
+  as: { user: CTR01, partition: dev }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: CRTBNDRPG PGM(QTEMP/P)
+  expect: [allow, allow, deny]
+- name: contractor personal
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM CTR01.T; DELETE FROM CTR01.T
+  expect: [allow, deny]
+- name: contractor blocked
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM PAYLIB.T
+  expect: deny
+- name: contractor test
+  as: { user: CTR01, partition: qa }
+  script: SELECT * FROM QTORD.T
+  expect: deny
+- name: contractor system
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM QSYS2.SYSTABLES
+  expect: deny
+- name: contractor devlibs
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM DVORD.T; DELETE FROM DVORD.T
+  expect: [allow, deny]
+- name: contractor integ
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM INORD.T; DELETE FROM INORD.T
+  expect: [allow, deny]
+- name: contractor stage_qa
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM SQORD.T
+  expect: deny
+- name: contractor stage_prod
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM SPORD.T
+  expect: deny
+- name: contractor live
+  as: { user: CTR01, partition: prod }
+  script: SELECT * FROM LVORD.T
+  expect: deny
+
+# --- dev: everything in personal, devlibs and integ on dev; reads elsewhere ---
+- name: dev scratch
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: |
+    DELETE FROM QTEMP.T;
+    CL: CRTBNDRPG PGM(QTEMP/P)
+  expect: [allow, deny]
+- name: dev personal
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: |
+    DELETE FROM JDOE.T;
+    CL: CRTBNDRPG PGM(JDOE/P)
+  expect: [allow, allow]
+- name: dev blocked
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: SELECT * FROM PAYLIB.T
+  expect: deny
+- name: dev test
+  as: { user: JDOE, groups: [GRPDEV], partition: qa }
+  script: SELECT * FROM QTORD.T; DELETE FROM QTORD.T
+  expect: [allow, deny]
+- name: dev system
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: SELECT * FROM QSYS2.SYSTABLES; DELETE FROM QSYS2.X
+  expect: [allow, deny]
+- name: dev devlibs
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: |
+    DELETE FROM DVORD.T;
+    CREATE TABLE CR1234.N (A INT);
+    CL: CRTBNDRPG PGM(DVORD/P)
+  expect: [allow, allow, allow]
+- name: dev integ
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: DELETE FROM INORD.T; INSERT INTO INORD.T SELECT * FROM LVORD.T
+  expect: [allow, allow]
+- name: dev stage_qa
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: SELECT * FROM SQORD.T; DELETE FROM SQORD.T
+  expect: [allow, deny]
+- name: dev stage_prod
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: SELECT * FROM SPORD.T; DELETE FROM SPORD.T
+  expect: [allow, deny]
+- name: dev live
+  as: { user: JDOE, groups: [GRPDEV], partition: prod }
+  script: SELECT * FROM LVORD.T; DELETE FROM LVORD.T
+  expect: [allow, deny]
+
+# --- qa: as dev on dev, plus read, write and call in test on qa ---
+- name: qa scratch
+  as: { user: JDOE, groups: [GRPQA], partition: qa }
+  script: |
+    DELETE FROM QTEMP.T;
+    CL: CRTBNDRPG PGM(QTEMP/P)
+  expect: [allow, deny]
+- name: qa personal
+  as: { user: JDOE, groups: [GRPQA], partition: dev }
+  script: DELETE FROM JDOE.T
+  expect: allow
+- name: qa blocked
+  as: { user: JDOE, groups: [GRPQA], partition: qa }
+  script: SELECT * FROM PAYLIB.T
+  expect: deny
+- name: qa test
+  as: { user: JDOE, groups: [GRPQA], partition: qa }
+  script: DELETE FROM QTORD.T; CALL QTORD.P(); CREATE TABLE QTORD.N (A INT)
+  expect: [allow, allow, deny]
+- name: qa system
+  as: { user: JDOE, groups: [GRPQA], partition: qa }
+  script: SELECT * FROM QSYS2.SYSTABLES; DELETE FROM QSYS2.X
+  expect: [allow, deny]
+- name: qa devlibs
+  as: { user: JDOE, groups: [GRPQA], partition: dev }
+  script: DELETE FROM DVORD.T
+  expect: allow
+- name: qa integ
+  as: { user: JDOE, groups: [GRPQA], partition: dev }
+  script: DELETE FROM INORD.T
+  expect: allow
+- name: qa stage_qa
+  as: { user: JDOE, groups: [GRPQA], partition: dev }
+  script: SELECT * FROM SQORD.T; DELETE FROM SQORD.T
+  expect: [allow, deny]
+- name: qa stage_prod
+  as: { user: JDOE, groups: [GRPQA], partition: dev }
+  script: SELECT * FROM SPORD.T; DELETE FROM SPORD.T
+  expect: [allow, deny]
+- name: qa live
+  as: { user: JDOE, groups: [GRPQA], partition: prod }
+  script: SELECT * FROM LVORD.T; DELETE FROM LVORD.T
+  expect: [allow, deny]
+
+# --- classes on no library, and the rest ---
+- name: qa promotes to QA on dev, not to PROD
+  as: { user: JDOE, groups: [GRPQA], partition: dev }
+  script: |
+    CL: CMPRM REQ(1042) LEVEL(QA)
+    CL: CMPRM REQ(1042) LEVEL(PROD)
+  expect: [allow, deny]
+- name: dev cannot promote
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: "CL: CMPRM REQ(1042) LEVEL(QA)"
+  expect: deny
+- name: library list for dev and qa, not analysts
+  as: { user: JDOE, groups: [GRPDEV], partition: prod }
+  script: "CL: ADDLIBLE LVORD"
+  expect: allow
+- name: analyst cannot change the library list
+  as: { user: ANL01, groups: [GRPANL], partition: prod }
+  script: "CL: ADDLIBLE LVORD"
+  expect: deny
+- name: danger is denied for everyone
+  as: { user: JDOE, groups: [GRPDEV, GRPQA], partition: dev }
+  script: "CL: PWRDWNSYS"
+  expect: deny
+- name: QTEMP alias to a live table is a live write
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: DELETE FROM QTEMP.A
+  lookups: { bases: { QTEMP.A: [LVORD.ORDERS] } }
+  expect: deny
+# unmatched: a library no environment names; unqualified: a read or call with no library. An
+# unqualified change (DELETE FROM T) is denied before any rule.
+- name: analyst unmatched and unqualified
+  as: { user: ANL01, groups: [GRPANL], partition: dev }
+  script: SELECT * FROM XYZLIB.T; DELETE FROM XYZLIB.T; SELECT * FROM T; CALL P()
+  expect: [allow, deny, allow, deny]
+- name: contractor unmatched and unqualified
+  as: { user: CTR01, partition: dev }
+  script: SELECT * FROM XYZLIB.T; SELECT * FROM T
+  expect: [deny, deny]
+- name: dev unmatched and unqualified
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  script: SELECT * FROM XYZLIB.T; DELETE FROM XYZLIB.T; SELECT * FROM T; CALL P(); DELETE FROM T
+  expect: [allow, deny, allow, deny, deny]
+- name: qa unmatched and unqualified
+  as: { user: JDOE, groups: [GRPQA], partition: qa }
+  script: SELECT * FROM XYZLIB.T; DELETE FROM XYZLIB.T; SELECT * FROM T; CALL P()
+  expect: [allow, deny, allow, deny]
+- name: a user in no role group gets the default role
+  as: { user: JDOE, partition: dev }
+  script: DELETE FROM DVORD.T
+  expect: deny

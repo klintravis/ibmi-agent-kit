@@ -40,6 +40,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@ibmi-agent-kit/core": "^0.1.0",
+    "@ibmi-agent-kit/guard": "^0.1.0",
     "@ibmi-agent-kit/screen": "^0.2.0",
     "@ibmi-agent-kit/source": "^0.7.0",
     "@modelcontextprotocol/sdk": "^1.19.0"

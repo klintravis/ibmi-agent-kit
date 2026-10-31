@@ -4,7 +4,8 @@
 // stubbed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +38,17 @@ import {
   type Operation,
   type VerbParam,
   type VerbSources,
+  describeFailure,
+  loadPolicyTests,
+  parsePolicyTests,
+  runPolicyTests,
+  RunLog,
+  recordLookups,
+  redact,
+  replayRunLog,
+  runLogLines,
+  statedLookups,
+  type RunLogLine,
 } from "./index.js";
 
 // --- helpers ---
@@ -1323,4 +1335,479 @@ test("verbs: ${p} doubles quotes inside literals and refuses a value that would 
   assert.equal(substitute("VALUES 1;", "sql", n, {}).text, "VALUES 1;");
   const semi: Record<string, VerbParam> = { s: { type: "string", allowed: ["IN1; DELETE FROM T"] } };
   assert.throws(() => substitute("SELECT * FROM ORD${s}.T", "sql", semi, { s: "IN1; DELETE FROM T" }), /substituted: one SQL statement per step/);
+});
+
+// --- run log (run-log spec; task 4.1) ---
+
+test("redact: password-bearing CL parameters become ***, wherever they stand", () => {
+  const rows: [string, string][] = [
+    ["CHGUSRPRF USRPRF(X) PASSWORD(SECRET1)", "CHGUSRPRF USRPRF(X) PASSWORD(***)"],
+    ["chgusrprf usrprf(x) password ( 'a)b' )", "chgusrprf usrprf(x) password (***)"],
+    ["CHGPWD CURPWD(OLD1) NEWPWD(NEW1)", "CHGPWD CURPWD(***) NEWPWD(***)"],
+    ["CHGDSTPWD PWD(X1) PWRDVPWD(Y1)", "CHGDSTPWD PWD(***) PWRDVPWD(***)"],
+    ["CHGUSRPRF JDOE SECRET1", "CHGUSRPRF JDOE ***"],
+    ["QSYS/CRTUSRPRF JDOE 'SEC RET'", "QSYS/CRTUSRPRF JDOE '***'"],
+    ["CHGUSRPRF JDOE STATUS(*ENABLED)", "CHGUSRPRF JDOE STATUS(*ENABLED)"],
+    ["CALL QSYS2.QCMDEXC('CHGUSRPRF X PASSWORD(''S3'')')", "CALL QSYS2.QCMDEXC('CHGUSRPRF X PASSWORD(***)')"],
+    ["CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE S3')", "CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE ***')"],
+    ["CHGUSRPRF X PASSWORD(UNCLOSED", "CHGUSRPRF X PASSWORD(***"],
+    ["CHGUSRPRF USRPRF(BOB) /* Bob's reset */ PASSWORD('Winter25')", "CHGUSRPRF USRPRF(BOB) /* *** */ PASSWORD(***)"],
+    ["RUNRMTCMD CMD('dir') RMTLOCNAME(HOST1 *IP) RMTUSER(BOB) RMTPWD(Winter25)", "RUNRMTCMD CMD('dir') RMTLOCNAME(HOST1 *IP) RMTUSER(BOB) RMTPWD(***)"],
+    ["CHGUSRPRF JDOE /* new */ SECRET1", "CHGUSRPRF JDOE /* *** */ ***"],
+    ["CHGUSRPRF /* x */ JDOE SECRET1", "CHGUSRPRF /* *** */ JDOE ***"],
+    ["CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE /* x */ S3')", "CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE /* *** */ ***')"],
+    ["CHGUSRPRF 'JDOE' SECRET1", "CHGUSRPRF 'JDOE' ***"],
+    ["CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE ''NEWPW1''')", "CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE ''***''')"],
+    ["CALL QSYS2.QCMDEXC('CHGUSRPRF X PASSWORD(''pa)ss'')')", "CALL QSYS2.QCMDEXC('CHGUSRPRF X PASSWORD(***)')"],
+    ["SELECT 1 FROM A.T WHERE CMD LIKE '%PASSWORD(%' AND X = 1", "SELECT 1 FROM A.T WHERE CMD LIKE '%PASSWORD(***' AND X = 1"],
+  ];
+  for (const [text, want] of rows) assert.equal(redact(text), want, text);
+  for (const [text] of rows.slice(-3, -1)) assert.ok(!/NEWPW1|pa\)ss/.test(redact(text)), text);
+});
+
+test("redact: SQL nested in a RUNSQL literal is redacted as SQL, quotes doubled again", () => {
+  const rows: [string, string][] = [
+    ["RUNSQL SQL('SET ENCRYPTION PASSWORD = ''x''')", "RUNSQL SQL('SET ENCRYPTION PASSWORD = ''***''')"],
+    ["RUNSQL SQL('CONNECT TO R USER U USING ''pw''')", "RUNSQL SQL('CONNECT TO R USER U USING ''***''')"],
+    ["QSYS/RUNSQL COMMIT(*NONE) SQL('SELECT DECRYPT_CHAR(C, ''k1'') FROM A.T') NAMING(*SQL)", "QSYS/RUNSQL COMMIT(*NONE) SQL('SELECT DECRYPT_CHAR(C, ''***'') FROM A.T') NAMING(*SQL)"],
+    ["runsql 'SET ENCRYPTION PASSWORD ''y'''", "runsql 'SET ENCRYPTION PASSWORD ''***'''"],
+    ["CALL QSYS2.QCMDEXC('RUNSQL SQL(''SET ENCRYPTION PASSWORD = ''''z'''''')')", "CALL QSYS2.QCMDEXC('RUNSQL SQL(''SET ENCRYPTION PASSWORD = ''''***'''''')')"],
+    ["RUNSQL SQL('SELECT ''PASSWORD = '' FROM A.T')", "RUNSQL SQL('SELECT ''PASSWORD = '' FROM A.T')"],
+    ["SELECT 'RUNSQL SQL(x)' FROM A.T", "SELECT 'RUNSQL SQL(x)' FROM A.T"],
+    ["RUNSQL /* Bob's */ SQL('SET ENCRYPTION PASSWORD = ''x''')", "RUNSQL /* *** */ SQL('SET ENCRYPTION PASSWORD = ''***''')"],
+  ];
+  for (const [text, want] of rows) assert.equal(redact(text), want, text);
+});
+
+test("redact: every literal's content is redacted as SQL too, whatever command or statement holds it", () => {
+  const rows: [string, string][] = [
+    ["EXECUTE IMMEDIATE 'SET ENCRYPTION PASSWORD = ''Winter25'''", "EXECUTE IMMEDIATE 'SET ENCRYPTION PASSWORD = ''***'''"],
+    ["PREPARE S FROM 'SET ENCRYPTION PASSWORD = ''Winter25'''", "PREPARE S FROM 'SET ENCRYPTION PASSWORD = ''***'''"],
+    ["RUNSQL DATSEP('/') SQL('SET ENCRYPTION PASSWORD = ''Winter25''')", "RUNSQL DATSEP('/') SQL('SET ENCRYPTION PASSWORD = ''***''')"],
+  ];
+  for (const [text, want] of rows) assert.equal(redact(text), want, text);
+  const text = "RUNQRY2 STMT('SET ENCRYPTION PASSWORD = ''Winter25''')";
+  assert.equal(redact(text), "RUNQRY2 STMT('SET ENCRYPTION PASSWORD = ''***''')", "a policy's own nested_sql: command needs no table");
+  const p = parsePolicy("version: 1\ncommands:\n  RUNQRY2: { class: read, nested_sql: STMT }\nrules:\n  - { decision: allow }\n", "p.yaml");
+  const c = { statement: { kind: "cl" as const, text, display: text }, decision: decide([], { user: "JDOE" }, p), outcome: "ok" };
+  const [line] = runLogLines({ server: "dev1", tool: "run_script", identity: { user: "JDOE" }, lookups: {}, statements: [c] }, p);
+  assert.ok(!line.text.includes("Winter25"), line.text);
+});
+
+test("redact: ENCRYPT_* and DECRYPT_* password arguments become ***, outside literals", () => {
+  const rows: [string, string][] = [
+    ["INSERT INTO A.T VALUES ENCRYPT_RC2('data', 'pw4', 'hint')", "INSERT INTO A.T VALUES ENCRYPT_RC2('data', '***', 'hint')"],
+    ["SELECT DECRYPT_CHAR(C, :PW) FROM A.T", "SELECT DECRYPT_CHAR(C, ***) FROM A.T"],
+    ["SELECT encrypt_aes(SUBSTR(C, 1, 2),'p,w') FROM A.T", "SELECT encrypt_aes(SUBSTR(C, 1, 2),'***') FROM A.T"],
+    ["SELECT ENCRYPT_TDES(C, (SELECT P FROM B.K)) FROM A.T", "SELECT ENCRYPT_TDES(C, (SELECT P FROM B.K)) FROM A.T"],
+    ["SELECT 'ENCRYPT_RC2(x, y)' FROM A.T", "SELECT 'ENCRYPT_RC2(x, ***)' FROM A.T"],
+    ["SELECT DECRYPT_BIT(ENCRYPT_RC2(C, 'a1'), 'b2') FROM A.T", "SELECT DECRYPT_BIT(ENCRYPT_RC2(C, '***'), '***') FROM A.T"],
+    ["SELECT /* Bob's key */ DECRYPT_CHAR(C, 'k1') FROM A.T", "SELECT /* *** */ DECRYPT_CHAR(C, '***') FROM A.T"],
+    ["SELECT DECRYPT_CHAR(C /* Bob's */, 'k2') FROM A.T", "SELECT DECRYPT_CHAR(C /* *** */, '***') FROM A.T"],
+    ["SELECT DECRYPT_CHAR(C, UPPER(TRIM('k3')) || :K4, 'hint') FROM A.T", "SELECT DECRYPT_CHAR(C, UPPER(TRIM('***')) || :K4, 'hint') FROM A.T"],
+  ];
+  for (const [text, want] of rows) assert.equal(redact(text), want, text);
+});
+
+test("redact: password-bearing SQL clauses become ***, quotes kept", () => {
+  const rows: [string, string][] = [
+    ["CREATE USER X IDENTIFIED BY 'pw1'", "CREATE USER X IDENTIFIED BY '***'"],
+    ["SET ENCRYPTION PASSWORD = 'pw2' WITH HINT 'h'", "SET ENCRYPTION PASSWORD = '***' WITH HINT 'h'"],
+    ["set encryption password :pw", "set encryption password ***"],
+    ["UPDATE A.T SET PASSWORD = 'it''s' WHERE ID = 1", "UPDATE A.T SET PASSWORD = '***' WHERE ID = 1"],
+    ["CONNECT TO PRODRDB USER JDOE USING 'pw3'", "CONNECT TO PRODRDB USER JDOE USING '***'"],
+    ["-- PASSWORD = hunter2\nSELECT 1 FROM A.T", "-- ***\nSELECT 1 FROM A.T"],
+    ["DELETE FROM DVORD.T /* PASSWORD( see ticket */ WHERE ID = 7", "DELETE FROM DVORD.T /* *** */ WHERE ID = 7"],
+    ["SELECT \"PWD(\" FROM LVORD.T", "SELECT \"PWD(\" FROM LVORD.T"],
+    ["UPDATE APPLIB.USERS SET STATUS = 'X' /* PASSWORD = Winter25 */ WHERE ID = 7", "UPDATE APPLIB.USERS SET STATUS = 'X' /* *** */ WHERE ID = 7"],
+    ["-- new PASSWORD = Winter25 for BOB", "-- ***"],
+    ["SET ENCRYPTION /* k */ PASSWORD 'Winter25'", "SET ENCRYPTION /* *** */ PASSWORD '***'"],
+    ["CONNECT TO PRODRDB /* p */ USER JDOE USING 'Winter25'", "CONNECT TO PRODRDB /* *** */ USER JDOE USING '***'"],
+    ["SELECT \"PASSWORD = \" FROM LVORD.T WHERE \"IDENTIFIED BY\" = 1", "SELECT \"PASSWORD = \" FROM LVORD.T WHERE \"IDENTIFIED BY\" = 1"],
+    ["MERGE INTO A.T USING (SELECT 1 FROM B.X) S ON 1 = 1", "MERGE INTO A.T USING (SELECT 1 FROM B.X) S ON 1 = 1"],
+    ["UPDATE APPLIB.USERS /* Bob's row */ SET PASSWORD = 'Winter25' WHERE ID = 7", "UPDATE APPLIB.USERS /* *** */ SET PASSWORD = '***' WHERE ID = 7"],
+    ["SET PASSWORD = HASH_SHA256('Winter25')", "SET PASSWORD = HASH_SHA256('***')"],
+    ["UPDATE A.T SET PASSWORD = DVORD.HASHPW(C, :PW, 'salt') WHERE ID = 1", "UPDATE A.T SET PASSWORD = DVORD.HASHPW(C, :PW, '***') WHERE ID = 1"],
+    ["UPDATE A.T SET PASSWORD = DVORD.HASHPW(C)", "UPDATE A.T SET PASSWORD = DVORD.HASHPW(C)"],
+    ["SET PASSWORD = HASH(UPPER('x'))", "SET PASSWORD = HASH(UPPER('***'))"],
+    ["SET ENCRYPTION PASSWORD = 'Sum' || 'mer24'", "SET ENCRYPTION PASSWORD = '***' || '***'"],
+    ["UPDATE APPLIB.USERS SET PASSWORD = N'Correct Horse' WHERE ID = 7", "UPDATE APPLIB.USERS SET PASSWORD = N'***' WHERE ID = 7"],
+    ["UPDATE A.T SET PASSWORD = GX'C1C2', C = 'kept' WHERE ID = 7", "UPDATE A.T SET PASSWORD = GX'***', C = 'kept' WHERE ID = 7"],
+    ["SET ENCRYPTION PASSWORD = :PW WITH HINT 'h'", "SET ENCRYPTION PASSWORD = *** WITH HINT 'h'"],
+    ["SET ENCRYPTION PASSWORD = CONCAT(TRIM(:P1), 'k' || 'w') WITH HINT 'h'", "SET ENCRYPTION PASSWORD = CONCAT(TRIM(:P1), '***' || '***') WITH HINT 'h'"],
+    ["CREATE USER X IDENTIFIED BY LOWER(/* Bob's */ 'Pw9')", "CREATE USER X IDENTIFIED BY LOWER(/* *** */ '***')"],
+    ["CONNECT USER JDOE USING :PW", "CONNECT USER JDOE USING ***"],
+    ["SELECT C FROM A.T WHERE U = USER X USING 'not a password'", "SELECT C FROM A.T WHERE U = USER X USING 'not a password'"],
+    ["SELECT 'PASSWORD = ' || C FROM PAYLIB.T WHERE X = 'y'", "SELECT 'PASSWORD = ' || C FROM PAYLIB.T WHERE X = 'y'"],
+  ];
+  for (const [text, want] of rows) assert.equal(redact(text), want, text);
+});
+
+test("redact: the redacted text classifies as the original does (replay reads it)", async () => {
+  for (const script of ["CL: CHGUSRPRF USRPRF(X) PASSWORD(SECRET1)", "SET ENCRYPTION PASSWORD = 'pw2'", "CALL QSYS2.QCMDEXC('CHGUSRPRF X PASSWORD(''S3'')')", "UPDATE LVORD.T SET PASSWORD = 'x' WHERE ID = 1",
+    "MERGE INTO LVORD.T USING DVORD.SRC S ON S.ID = LVORD.T.ID WHEN MATCHED THEN DELETE",
+    "SELECT * FROM LVORD.T WHERE CMD LIKE '%PASSWORD(%'",
+    "SELECT 'PASSWORD = ' || C FROM PAYLIB.T WHERE X = 'y'",
+    "CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE ''NEWPW1''')",
+    "SELECT DECRYPT_CHAR(C, 'pw') FROM LVORD.T",
+    "CL: RUNSQL SQL('SET ENCRYPTION PASSWORD = ''x''')",
+    "CL: RUNSQL SQL('CONNECT TO R USER U USING ''pw''')",
+    "CL: RUNSQL SQL('DELETE FROM LVORD.T WHERE P = ENCRYPT_RC2(''a'', ''k'')') COMMIT(*NONE)",
+    "CALL QSYS2.QCMDEXC('RUNSQL SQL(''SET ENCRYPTION PASSWORD = ''''z'''''')')",
+    "UPDATE APPLIB.USERS /* Bob's row */ SET PASSWORD = 'Winter25' WHERE ID = 7",
+    "CL: CHGUSRPRF USRPRF(BOB) /* Bob's reset */ PASSWORD('Winter25')",
+    "SELECT /* Bob's key */ DECRYPT_CHAR(C, 'k1') FROM A.T",
+    "CL: RUNSQL /* Bob's */ SQL('SET ENCRYPTION PASSWORD = ''x''')",
+    "UPDATE LVORD.T SET PASSWORD = HASH_SHA256('Winter25')",
+    "UPDATE LVORD.T SET PASSWORD = DVORD.HASHPW(C)",
+    "UPDATE LVORD.T SET PASSWORD = HASH(UPPER('x'))",
+    "UPDATE LVORD.T SET PASSWORD = DVORD.HASHPW(UPPER('x'), (SELECT K FROM DVORD.KEYS))",
+    "SELECT DECRYPT_CHAR(C, UPPER(TRIM('k3')) || :K4) FROM LVORD.T",
+    "SET ENCRYPTION PASSWORD = 'Sum' || 'mer24'",
+    "UPDATE APPLIB.USERS SET PASSWORD = N'Correct Horse' WHERE ID = 7",
+    "EXECUTE IMMEDIATE 'SET ENCRYPTION PASSWORD = ''Winter25'''",
+    "PREPARE S FROM 'SET ENCRYPTION PASSWORD = ''Winter25'''",
+    "CL: RUNSQL DATSEP('/') SQL('SET ENCRYPTION PASSWORD = ''Winter25''')",
+    "DELETE FROM DVORD.T /* PASSWORD( see ticket */ WHERE ID = 7",
+    'SELECT "PWD(" FROM LVORD.T',
+    "UPDATE APPLIB.USERS SET STATUS = 'X' /* PASSWORD = Winter25 */ WHERE ID = 7",
+    "-- new PASSWORD = Winter25 for BOB",
+    "CL: CHGUSRPRF JDOE /* new */ SECRET1",
+    "CL: CHGUSRPRF /* x */ JDOE SECRET1",
+    "CALL QSYS2.QCMDEXC('CHGUSRPRF JDOE /* x */ S3')",
+    "SET ENCRYPTION /* k */ PASSWORD 'Winter25'",
+    "CONNECT TO PRODRDB /* p */ USER JDOE USING 'Winter25'",
+    "CL: CHGUSRPRF 'JDOE' SECRET1"]) {
+    const a = await classify(script, d4ctx());
+    const b = await classify(redact(script), d4ctx());
+    assert.deepEqual(sorted(b.operations), sorted(a.operations), script);
+  }
+  const fn = await classify(redact("UPDATE LVORD.T SET PASSWORD = DVORD.HASHPW(C)"), d4ctx());
+  assert.ok(sorted(fn.operations).includes("call DVORD.HASHPW"), sorted(fn.operations).join());
+});
+
+test("lookups: recorded answers, failures included, replay as stated answers", async () => {
+  const { lookups: rec, answers } = recordLookups(lookups({ schemas: { ORDER_HISTORY: "ORDHIST" }, bases: { "QTEMP.A": [{ lib: "LVORD", name: "ORDERS" }] }, curlib: "DVORD" }));
+  const script = "DELETE FROM QTEMP.A; DELETE FROM ORDER_HISTORY.T; DELETE FROM NOSUCH_SCHEMA.T;\nCL: CLRPFM FILE(*CURLIB/X)";
+  const live = await classify(script, { ...d4ctx(), lookups: rec });
+  assert.deepEqual(answers, { bases: { "QTEMP.A": ["LVORD.ORDERS"], "LVORD.ORDERS": [], "ORDHIST.T": [], "NOSUCH_SCHEMA.T": [], "DVORD.X": [] }, schemas: { ORDER_HISTORY: "ORDHIST", NOSUCH_SCHEMA: null }, curlib: "DVORD" });
+  const again = await classify(script, { ...d4ctx(), lookups: statedLookups(JSON.parse(JSON.stringify(answers))) });
+  assert.deepEqual(again.statements.map((s) => sorted(s.operations)), live.statements.map((s) => sorted(s.operations)));
+  const failed = recordLookups(lookups({ basesThrow: true, curlib: null }));
+  await classify("DELETE FROM QTEMP.A;\nCL: CLRPFM FILE(*CURLIB/X)", { ...d4ctx(), lookups: failed.lookups });
+  assert.deepEqual(failed.answers, { bases: { "QTEMP.A": [] }, curlib: null });
+  assert.equal(await statedLookups({ schemas: {} }).systemSchema("constructor"), undefined, "own keys only");
+});
+
+async function call(script: string, who: Identity, extra: { secret?: string; outcome?: string } = {}) {
+  const { lookups: rec, answers } = recordLookups(lookups());
+  const c = await classify(script, { ...d4ctx(), lookups: rec });
+  return {
+    server: "dev1",
+    tool: "run_script",
+    identity: who,
+    lookups: answers,
+    notes: c.notes,
+    statements: c.statements.map((s) => ({ statement: s, decision: decide(s.operations, who, D4), outcome: extra.outcome ?? "ok" })),
+    ...(extra.secret ? { secret: extra.secret } : {}),
+  };
+}
+
+test("Observed deny: the line records decision deny, enforced false and the outcome", async () => {
+  const [line] = runLogLines(await call("DELETE FROM LVORD.ORDERS", as("analyst", "dev"), { outcome: "3 rows" }), D4);
+  assert.deepEqual([line.decision, line.effective, line.enforced, line.outcome, line.mode], ["deny", "allow", false, "3 rows", "observe"]);
+  const op = line.operations[0];
+  assert.deepEqual([op.decision, op.enforced, op.reason, op.env], ["deny", false, "no_rule", "live"]);
+  assert.deepEqual([line.roles, line.roleSource, line.partition, line.policy, line.kind], [["analyst"], "matched", "dev", D4.hash, "sql"]);
+  assert.match(line.policy, /^[0-9a-f]{64}$/);
+});
+
+test("Confirmed statement: the line records confirmed true and the outcome", async () => {
+  const c = await call("DELETE FROM DVORD.T", as("dev", "dev"), { outcome: "1 row" });
+  const [line] = runLogLines({ ...c, statements: [{ ...c.statements[0], confirmed: true }] }, D4);
+  assert.deepEqual([line.confirmed, line.outcome, line.rule, line.operations[0].rule], [true, "1 row", 6, 6]);
+});
+
+test("Password in a command: the logged text reads PASSWORD(***); the profile password is never present", async () => {
+  const c = await call("CL: CHGUSRPRF USRPRF(X) PASSWORD(SECRET1)\nSELECT 'Hunter2' FROM QTEMP.T WHERE C = 'HUNTER2'", as("dev", "dev"), { secret: "hunter2" });
+  const lines = runLogLines(c, D4);
+  assert.equal(lines[0].text, "CHGUSRPRF USRPRF(X) PASSWORD(***)");
+  assert.equal(lines[1].text, "SELECT '***' FROM QTEMP.T WHERE C = '***'");
+  const all = JSON.stringify(lines);
+  assert.ok(!/SECRET1/i.test(all) && !/hunter2/i.test(all), all);
+  assert.deepEqual([lines[0].call === lines[1].call, lines[0].index, lines[1].index], [true, 0, 1]);
+});
+
+test("RunLog: appends JSON lines to the day's file", async () => {
+  const dir = join(tmp(), "runs");
+  const log = new RunLog(dir, D4);
+  log.record(await call("SELECT * FROM LVORD.T; DELETE FROM LVORD.T", as("dev", "prod")));
+  log.record(await call("CL: PWRDWNSYS", as("dev", "prod")));
+  const files = readdirSync(dir);
+  assert.deepEqual(files, [`${new Date().toISOString().slice(0, 10)}.jsonl`]);
+  const lines = readFileSync(join(dir, files[0]), "utf8").trimEnd().split("\n").map((l) => JSON.parse(l) as RunLogLine);
+  assert.deepEqual(lines.map((l) => [l.text, l.decision, l.enforced]), [["SELECT * FROM LVORD.T", "allow", false], ["DELETE FROM LVORD.T", "deny", true], ["PWRDWNSYS", "deny", true]]);
+});
+
+test("Read-only folder: one warning, no throw", async () => {
+  const root = tmp();
+  writeFileSync(join(root, "runs"), "a file where the folder should be");
+  const warnings: string[] = [];
+  const log = new RunLog(join(root, "runs", "deeper"), D4, (m) => warnings.push(m));
+  const c = await call("DELETE FROM LVORD.T", as("dev", "prod"));
+  assert.doesNotThrow(() => log.record(c));
+  assert.doesNotThrow(() => log.record(c));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /run log: cannot write/);
+  const other: string[] = [];
+  assert.doesNotThrow(() => new RunLog(join(root, "ok"), D4, (m) => other.push(m)).record({ ...c, time: new Date(NaN) }));
+  assert.equal(other.length, 1, "a line that cannot be built warns too");
+});
+
+test("RunLog: a line the profile password is taken out of is marked scrubbed; its fixed fields stay intact", async () => {
+  const [line] = runLogLines(await call("SELECT * FROM LVORD.T", as("dev", "dev"), { secret: "a" }).then((c) => ({ ...c, statements: c.statements.map((s) => ({ ...s, statement: { ...s.statement, text: "SELECT A FROM LVORD.T" } })) })), D4);
+  assert.deepEqual([line.scrubbed, line.decision, line.effective, line.kind, line.mode, line.roles], [true, "allow", "allow", "sql", "observe", ["dev"]]);
+  assert.match(line.time, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(!/a/i.test(line.text) && !/a/i.test(JSON.stringify(line.identity)), line.text);
+  const [clean] = runLogLines(await call("SELECT * FROM LVORD.T", as("dev", "dev"), { secret: "hunter2" }), D4);
+  assert.equal(clean.scrubbed, undefined, "a password that never appears marks nothing");
+});
+
+test("policy hash: covers the policy text and each command file's text", () => {
+  const dir = tmp();
+  const policy = join(dir, "policy.yaml");
+  writeFileSync(policy, "version: 1\ncommand_files: [cm.yaml]\nrules: []\n");
+  writeFileSync(join(dir, "cm.yaml"), "commands:\n  CMPRM: { class: promote }\n");
+  const a = loadPolicy(policy).hash;
+  writeFileSync(join(dir, "cm.yaml"), "commands:\n  CMPRM: { class: danger }\n");
+  assert.notEqual(loadPolicy(policy).hash, a);
+  // The shipped command table is part of what the policy means, so it is hashed too.
+  const shipped = readFileSync(new URL("./commands.yaml", import.meta.url), "utf8");
+  const want = createHash("sha256").update("version: 1\ncommand_files: [cm.yaml]\nrules: []\n").update("\0").update(shipped).update("\0").update("commands:\n  CMPRM: { class: danger }\n").digest("hex");
+  assert.equal(loadPolicy(policy).hash, want);
+});
+
+test("RunLog: the profile password is scrubbed also where its quotes are doubled inside a literal", async () => {
+  const c = await call("SELECT * FROM LVORD.T WHERE C = 'o''Brien9'", as("dev", "dev"), { secret: "o'Brien9" });
+  const [line] = runLogLines(c, D4);
+  assert.ok(!/brien9/i.test(JSON.stringify(line)), line.text);
+  assert.equal(line.scrubbed, true);
+});
+
+// --- policy tests (policy-testing spec; task 3.1) ---
+
+const EXAMPLE_TESTS = fileURLToPath(new URL("../../../examples/three-partitions.tests.yaml", import.meta.url));
+
+test("Passing suite: the example's tests all pass", async () => {
+  const results = await runPolicyTests(D4, loadPolicyTests(EXAMPLE_TESTS));
+  assert.deepEqual(results.filter((r) => !r.ok).map(describeFailure), []);
+});
+
+test("policy tests: the example covers every role x environment allow and deny the policy has", async () => {
+  const seen = new Set<string>();
+  for (const r of await runPolicyTests(D4, loadPolicyTests(EXAMPLE_TESTS)))
+    for (const s of r.statements)
+      for (const o of s.decision.operations) if (o.env && s.decision.roles.length === 1) seen.add(`${s.decision.roles[0]}|${o.env}|${o.decision}`);
+  // Every role|env|decision cell the policy can reach: one operation per role, partition,
+  // environment (a library standing for it) and class.
+  const reachable = new Set<string>();
+  const envLibs = ["QTEMP", "ME", "PAYLIB", "QTORD", "QSYS2", "DVORD", "INORD", "SQORD", "SPORD", "LVORD", "XYZLIB", "~"];
+  for (const role of ["analyst", "contractor", "dev", "qa"])
+    for (const part of ["dev", "qa", "prod"])
+      for (const lib of envLibs)
+        for (const cls of CLASSES) {
+          const who = as(role, part);
+          if (lib === "~" && cls !== "read" && cls !== "call") continue; // an unqualified change has no environment
+          const op: Operation = lib === "~" ? { class: cls, source: "sql", object: { name: "T" }, env: "unqualified" } : { class: cls, source: "sql", object: { lib: lib === "ME" ? who.user : lib, name: "T" } };
+          const o = decide([op], who, D4).operations[0];
+          reachable.add(`${role}|${o.env}|${o.decision}`);
+        }
+  assert.deepEqual([...reachable].filter((c) => !seen.has(c)).sort(), []);
+});
+
+test("Regression: a mutated policy fails the named case, naming the rule that now matches", async () => {
+  const p = parsePolicy(readFileSync(EXAMPLE, "utf8").replace("{ env: blocked, decision: deny }", "{ env: blocked, decision: allow }"), EXAMPLE);
+  const failed = (await runPolicyTests(p, loadPolicyTests(EXAMPLE_TESTS))).filter((r) => !r.ok);
+  assert.deepEqual(failed.map((r) => r.name), ["analyst blocked", "contractor blocked", "dev blocked", "qa blocked"]);
+  assert.match(describeFailure(failed[0]), /^FAIL analyst blocked: expected deny, got allow\n  statement 1: SELECT \* FROM PAYLIB\.T\n    allow by rule 2 .*\n    - rule 2 allows read PAYLIB\.T \(environment blocked, partition dev\)$/);
+});
+
+test("policy tests: lookup keys match in any case", async () => {
+  const [r] = await runPolicyTests(
+    D4,
+    parsePolicyTests(
+      "- name: lower\n  as: { user: JDOE, groups: [GRPDEV], partition: dev }\n  script: DELETE FROM QTEMP.A; DELETE FROM ORDER_HISTORY.T\n  lookups: { bases: { qtemp.a: [LVORD.ORDERS] }, schemas: { order_history: DVORD } }\n  expect: [deny, allow]\n",
+      "t.yaml",
+    ),
+  );
+  assert.equal(r.ok, true, describeFailure(r));
+});
+
+test("policy tests: per-statement expects, lookups, curlib; bad files are refused", async () => {
+  const cases = parsePolicyTests(
+    `- name: alias
+  as: { user: JDOE, groups: [GRPDEV], partition: dev, curlib: LVORD }
+  script: "DELETE FROM QTEMP.A;\\nCL: CLRPFM FILE(*CURLIB/X)"
+  lookups: { bases: { QTEMP.A: [DVORD.T] } }
+  expect: [allow, deny]
+- name: count
+  as: { user: JDOE, partition: dev }
+  script: SELECT * FROM A.T
+  expect: [allow, allow]
+`,
+    "t.yaml",
+  );
+  const [alias, count] = await runPolicyTests(D4, cases);
+  assert.equal(alias.ok, true, describeFailure(alias));
+  assert.equal(count.ok, false, "one statement, two expects");
+  assert.throws(() => parsePolicyTests("- { name: v, as: { user: X }, verb: deploy, args: {}, expect: allow }\n", "t.yaml"), /t\.yaml: 0: verb cases need verbs/);
+  assert.throws(() => parsePolicyTests("- { name: x, as: { user: X }, script: S, expect: alow }\n", "t.yaml"), /t\.yaml: 0\.expect/);
+  assert.throws(() => parsePolicyTests("- { name: x, as: { user: X, group: [G] }, script: S, expect: allow }\n", "t.yaml"), /Unrecognized key/);
+  assert.throws(() => parsePolicyTests("[]\n", "t.yaml"), /t\.yaml/);
+  await assert.rejects(runPolicyTests(D4, parsePolicyTests("- { name: typo, as: { user: X, partition: prd }, script: SELECT 1 FROM A.T, expect: allow }\n", "t.yaml")), /case "typo": IBMI_PARTITION prd is not a partition/);
+});
+
+// --- replay (policy-testing spec; task 3.2) ---
+
+// A fixture run log written the way the server writes it: under the D4 example (observe on dev and
+// qa, enforce on prod), with recorded lookups.
+async function fixtureLog(): Promise<RunLogLine[]> {
+  const calls: [string, Identity, Stub?][] = [
+    ["DELETE FROM INORD.T", as("dev", "dev")], // allow by rule 6
+    ["DELETE FROM DVORD.T", as("dev", "dev")], // allow by rule 6
+    ["DELETE FROM LVORD.T", as("analyst", "dev")], // deny, observed
+    ["DELETE FROM LVORD.T", as("analyst", "prod")], // deny, enforced
+    ["CREATE ALIAS QTEMP.A FOR LVORD.ORDERS; DELETE FROM QTEMP.A", as("dev", "dev")], // the delete writes LVORD.ORDERS: deny, observed
+    ["SELECT * FROM QTORD.T", as("qa", "qa")], // allow by rule 8
+    ["CL: CHGUSRPRF USRPRF(X) PASSWORD(SECRET1)", as("dev", "dev")], // danger
+    ["CL: CRTBNDRPG PGM(INORD/P)", as("dev", "dev")], // allow by rule 6
+    ["DELETE FROM QTEMP.B", as("dev", "dev"), { bases: { "QTEMP.B": [{ lib: "INORD", name: "T" }] } }], // allow: QTEMP and INORD
+  ];
+  const lines: RunLogLine[] = [];
+  for (const [script, who, stub] of calls) {
+    const { lookups: rec, answers } = recordLookups(lookups(stub));
+    const c = await classify(script, { ...d4ctx(), lookups: rec });
+    const statements = c.statements.map((s) => ({ statement: s, decision: decide(s.operations, who, D4), outcome: "ok" }));
+    lines.push(...runLogLines({ server: "dev1", tool: "run_script", identity: who, lookups: answers, statements }, D4));
+  }
+  // Through JSON, as replay reads it.
+  return JSON.parse(JSON.stringify(lines)) as RunLogLine[];
+}
+
+test("replay: the same policy changes nothing (lookups and script state are replayed)", async () => {
+  const log = await fixtureLog();
+  const r = await replayRunLog(D4, log);
+  assert.deepEqual([r.statements, r.changes, r.skipped], [log.length, [], []]);
+});
+
+test("Before enforcing: a stricter candidate lists exactly the statements whose decision changes", async () => {
+  // Enforce everywhere and take integ away from dev and qa.
+  const strict = parsePolicy(
+    readFileSync(EXAMPLE, "utf8")
+      .replace("mode: { default: observe, prod: enforce }", "mode: enforce")
+      .replace("{ roles: [dev, qa], partition: dev, env: [personal, devlibs, integ], decision: allow }", "{ roles: [dev, qa], partition: dev, env: [personal, devlibs], decision: allow }"),
+    EXAMPLE,
+  );
+  const r = await replayRunLog(strict, await fixtureLog());
+  assert.deepEqual(
+    r.changes.map((c) => [c.line.text, c.line.identity.partition, `${c.before.decision}/${c.before.effective}/${c.before.rule ?? "-"}`, `${c.after.decision}/${c.after.effective}/${c.after.rule ?? "-"}`]),
+    [
+      ["DELETE FROM INORD.T", "dev", "allow/allow/6", "deny/deny/-"],
+      ["DELETE FROM LVORD.T", "dev", "deny/allow/-", "deny/deny/-"],
+      ["DELETE FROM QTEMP.A", "dev", "deny/allow/-", "deny/deny/-"],
+      ["CRTBNDRPG PGM(INORD/P)", "dev", "allow/allow/6", "deny/deny/-"],
+      ["DELETE FROM QTEMP.B", "dev", "allow/allow/3", "deny/deny/-"],
+    ],
+  );
+});
+
+test("replay: a log line whose text no longer splits the same is skipped and named", async () => {
+  const [line] = await fixtureLog();
+  const r = await replayRunLog(D4, [{ ...line, text: "SELECT 1 FROM A.T; SELECT 2 FROM A.T" }]);
+  assert.deepEqual([r.statements, r.changes.length], [0, 0]);
+  assert.match(r.skipped[0], /splits into 2 statements, not 1/);
+});
+
+test("replay: lookups and notes are written once per call, on its first line, and read from there", async () => {
+  const c = await call("DELETE FROM QTEMP.B; SELECT * FROM QTEMP.B", as("dev", "dev"));
+  c.lookups = { bases: { "QTEMP.B": ["INORD.T"], "INORD.T": [] } };
+  c.notes = ["a note"];
+  const lines = runLogLines(c, D4);
+  assert.deepEqual([lines[0].lookups, lines[0].notes, lines[1].lookups, lines[1].notes], [{ bases: { "QTEMP.B": ["INORD.T"], "INORD.T": [] } }, ["a note"], undefined, undefined]);
+  const strict = parsePolicy(readFileSync(EXAMPLE, "utf8").replace("partition: dev, env: [personal, devlibs, integ]", "partition: dev, env: [personal, devlibs]"), EXAMPLE);
+  const r = await replayRunLog(strict, [lines[1], lines[0]]);
+  assert.deepEqual(r.changes.map((x) => [x.line.index, x.after.decision]), [[0, "deny"]], "the base table from line 0's answers decides");
+  const partial = await replayRunLog(D4, [lines[1]]);
+  assert.match(partial.skipped[0] ?? "", /its statements in the log are 1, not 0 to 0: a line is missing/);
+});
+
+test("replay: a call whose lookups are malformed is skipped with the reason", async () => {
+  const [line] = await fixtureLog();
+  const r = await replayRunLog(D4, [{ ...line, lookups: { bases: { "QTEMP.A": "LVORD.ORDERS" } } as unknown as RunLogLine["lookups"] }]);
+  assert.deepEqual([r.statements, r.changes.length], [0, 0]);
+  assert.match(r.skipped[0] ?? "", /^call .*: lookups: bases\.QTEMP\.A: Expected array/);
+});
+
+test("replay: a candidate that looks up what the live run never asked is skipped, not decided on guesses", async () => {
+  // Live, CMCHK was an unknown command: no object, no lookup. The candidate's command file makes
+  // FILE(QTEMP/A) an object, whose base tables nobody recorded.
+  const [line] = await (async () => {
+    const { lookups: rec, answers } = recordLookups(lookups());
+    const c = await classify("CL: CMCHK FILE(QTEMP/A)", { ...d4ctx(), lookups: rec });
+    const who = as("dev", "dev");
+    return runLogLines({ server: "dev1", tool: "run_script", identity: who, lookups: answers, statements: c.statements.map((s) => ({ statement: s, decision: decide(s.operations, who, D4), outcome: "ok" })) }, D4);
+  })();
+  assert.deepEqual([line.decision, line.operations[0].reason], ["deny", "unknown_command"]);
+  const dir = tmp();
+  writeFileSync(join(dir, "cm-product.yaml"), readFileSync(join(dirname(EXAMPLE), "cm-product.yaml"), "utf8"));
+  writeFileSync(join(dir, "cmchk.yaml"), "commands:\n  CMCHK: { class: write, params: { FILE: object } }\n");
+  writeFileSync(join(dir, "policy.yaml"), readFileSync(EXAMPLE, "utf8").replace("command_files: [cm-product.yaml]", "command_files: [cm-product.yaml, cmchk.yaml]"));
+  const r = await replayRunLog(loadPolicy(join(dir, "policy.yaml")), [line]);
+  assert.deepEqual([r.statements, r.changes.length], [0, 0], "not reported as allow");
+  assert.match(r.skipped[0] ?? "", /the candidate looks up the base tables of QTEMP\.A, which the logged run never did/);
+});
+
+test("replay: a malformed identity or names line, and a call missing a line, are skipped with the reason", async () => {
+  const bad = { ...(await builtinLine({ system: "DEVBOX" })), names: { system: 5 } } as unknown as RunLogLine;
+  const r = await replayRunLog(D4, [bad]);
+  assert.deepEqual([r.statements, r.changes.length, r.skipped.length], [0, 0, 1]);
+  const c = await call("SELECT * FROM LVORD.T; SELECT * FROM DVORD.T; SELECT * FROM INORD.T", as("dev", "dev"));
+  const three = runLogLines(c, D4);
+  const gap = await replayRunLog(D4, [three[0], three[2]]);
+  assert.deepEqual([gap.statements, gap.changes.length], [0, 0]);
+  assert.match(gap.skipped[0] ?? "", /its statements in the log are 0, 2, not 0 to 1: a line is missing/);
+});
+
+async function builtinLine(names?: { system?: string; rdb?: string; declared?: string }, partition?: string): Promise<RunLogLine> {
+  const p = builtinPolicy();
+  const who: Identity = { user: "JDOE", groups: ["GRPDEV"], authlists: [], ...(partition ? { partition } : {}) };
+  const { lookups: rec, answers } = recordLookups(statedLookups());
+  const c = await classify("DELETE FROM DVORD.T", { lookups: rec, commands: p.commands, rdbs: p.rdbs });
+  const statements = c.statements.map((s) => ({ statement: s, decision: decide(s.operations, who, p), outcome: "ok" }));
+  const [line] = runLogLines({ server: "dev1", tool: "run_script", identity: who, lookups: answers, statements, ...(names ? { names } : {}) }, p);
+  return JSON.parse(JSON.stringify(line)) as RunLogLine;
+}
+
+test("replay: the candidate detects the partition again from the logged System and RDB names", async () => {
+  const line = await builtinLine({ system: "DEVBOX" });
+  assert.deepEqual([line.names, line.decision, line.effective], [{ system: "DEVBOX" }, "allow", "allow"]);
+  const r = await replayRunLog(D4, [line]);
+  assert.deepEqual([r.statements, r.changes, r.skipped], [1, [], []], "DEVBOX is dev under the example: rule 6 allows");
+  const noNames = await replayRunLog(D4, [await builtinLine()]);
+  assert.equal(noNames.changes[0]?.after.decision, "deny", "without names the example's unknown_partition (prod) decides");
+  const conflict = await replayRunLog(D4, [await builtinLine({ system: "DEVBOX", rdb: "PRODRDB" })]);
+  assert.deepEqual([conflict.changes[0]?.after.decision, conflict.changes[0]?.after.effective], ["deny", "deny"], "names the candidate maps apart conflict");
+});
+
+test("replay: a logged partition the candidate does not define is skipped with a reason", async () => {
+  const r = await replayRunLog(D4, [await builtinLine(undefined, "test")]);
+  assert.deepEqual([r.statements, r.changes.length], [0, 0]);
+  assert.match(r.skipped[0], /logged partition test is not a partition of the candidate/);
+});
+
+test("replay: a call the profile password was scrubbed from is skipped with that reason", async () => {
+  const c = await call("SELECT * FROM LVORD.T WHERE C = 'hunter2'", as("dev", "dev"), { secret: "hunter2" });
+  const r = await replayRunLog(D4, runLogLines(c, D4));
+  assert.deepEqual([r.statements, r.changes.length], [0, 0]);
+  assert.match(r.skipped[0], /profile password was taken out of it/);
 });
