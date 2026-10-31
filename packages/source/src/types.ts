@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): Profile carries the SQL transport and the Mapepire daemon port.
+// Modified by ibmi-agent-kit (2026): Profile carries the SQL transport, the Mapepire daemon port and CA, and the local copy folder.
 // --- config ---
 export interface Profile {
   host: string;
@@ -9,6 +9,8 @@ export interface Profile {
   mapepirePort: number;          // daemon transport only, default 8076
   sourceFileCcsid: number;       // fallback ccsid for 65535 columns, default 37
   mapepireJar?: string;          // override jar path on the box (else the uploaded copy)
+  mapepireCa?: string;           // daemon transport: path to a PEM file trusted as the CA
+  localDir: string;              // where local copies are written, default ibmi-src
   readOnly: boolean;             // when true, upload and compile are refused (default false)
   blockedCl: string[];           // extra destructive CL verbs to block on compile, on top of the defaults
   blockedTables: string[];

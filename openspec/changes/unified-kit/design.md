@@ -34,7 +34,7 @@ exact-match check against `listServers()`, read that one file with `dotenv.parse
 `dotenv.config`), then overlay process-env values only for keys outside the protected set
 (`IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_*_PORT`, `IBMI_SQL_TRANSPORT`,
 `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`,
-`IBMI_5250_TLS_INSECURE`). Each engine's `loadProfileFor(server)` becomes
+`IBMI_5250_TLS_INSECURE`, `IBMI_MAPEPIRE_CA`, `IBMI_MAPEPIRE_JAR`). Each engine's `loadProfileFor(server)` becomes
 `loadProfile(resolveProfileEnv(server))`, and its module-level `loadEnv` calls are deleted.
 - *Why:* the engines' `Profile` shapes differ; keeping their parsers means no behaviour change and
   the fix lands in one place.

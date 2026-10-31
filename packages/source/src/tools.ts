@@ -13,7 +13,6 @@ import { findLocalCopy, sqlJson, textTable, typeFromPath, writeLocalCopy, writeS
 // handlers and writes nothing; the standalone bootstrap is index.ts, the kit server is another.
 
 // --- constants ---
-const LOCAL_DIR = process.env.IBMI_LOCAL_DIR || "ibmi-src";
 const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
 
 const done = (text: string) => ({ content: [{ type: "text" as const, text: text.trimEnd() }] });
@@ -69,7 +68,7 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       const be = getBackend(server);
       const { content, meta } = await be.readMember({ library, sourceFile, member }, r);
       r.step("saving the local copy");
-      const { path, backup } = writeLocalCopy(LOCAL_DIR, { library, sourceFile, member }, meta.type, content);
+      const { path, backup } = writeLocalCopy(be.profile.localDir, { library, sourceFile, member }, meta.type, content);
       r.log("info", `read ${library}/${sourceFile}(${member}): ${meta.lineCount} lines saved to ${path}`);
       return (
         `Saved: ${path}\n` +
@@ -201,7 +200,7 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       const be = getBackend(server);
       const { rows, columns, truncated, cap } = await be.runSql(statement, maxRows ?? (file ? Infinity : undefined), r);
       const count = `${rows.length} row(s)${truncated ? ` (truncated at ${cap}, raise maxRows or narrow the select)` : ""}`;
-      if (file) return `${count} written to ${writeSqlFile(LOCAL_DIR, sqlJson(columns, rows))}\n\n${textTable(columns, [])}`;
+      if (file) return `${count} written to ${writeSqlFile(be.profile.localDir, sqlJson(columns, rows))}\n\n${textTable(columns, [])}`;
       return `${count}:\n\n${json ? sqlJson(columns, rows) : textTable(columns, rows)}`;
     },
   );
@@ -228,7 +227,7 @@ export function register(mcp: McpServer, opts: { listServers?: boolean } = {}): 
       let body = content;
       let sourcePath: string | undefined;
       if (body === undefined) {
-        sourcePath = localPath ?? findLocalCopy(LOCAL_DIR, ref);
+        sourcePath = localPath ?? findLocalCopy(be.profile.localDir, ref);
         r.step(`reading the local file ${sourcePath}`);
         body = readFileSync(sourcePath, "utf8");
       }

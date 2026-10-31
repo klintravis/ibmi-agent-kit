@@ -62,7 +62,7 @@ export class MapepireBackend {
   private readonly splfTag = ("MCP" + Math.random().toString(36).slice(2).toUpperCase() + "0000000").slice(0, 10);
   private spoolReady = false;
 
-  constructor(private profile: Profile, private transport: Transport = transportFor(profile)) {
+  constructor(readonly profile: Profile, private transport: Transport = transportFor(profile)) {
     transport.onReconnect = () => { this.spoolReady = false; }; // ovrprtf was job scoped, the new job needs it again
   }
 

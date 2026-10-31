@@ -3,18 +3,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "ssh2";
 import mapepire from "@ibm/mapepire-js";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { assertSelectOnly, extFor, likeLiteral, parseFndstrpdm, sqlJson, textTable, typeFromPath, withTimeLimit } from "./util.js";
 import { loadProfile } from "./config.js";
 import { MapepireBackend, aliasStmt, memberMetaStmt, qcmdexc, validLibOrStar, validName } from "./mapepire.js";
 import { ToolReporter } from "./report.js";
-import { MapepireTransport } from "./transport.js";
+import { MapepireTransport, connectDaemonMapepire } from "./transport.js";
 import { register } from "./tools.js";
 import { COMMAND_TEMPLATES, assertCompileCommandAllowed, buildCompileCommand, buildLibraryListCommands, parseEvfevent } from "./compile.js";
 
@@ -663,17 +665,119 @@ test("register mounts every tool with a title and its annotations, and listServe
   assert.deepEqual(["SIGINT", "SIGTERM"].map((e) => process.listenerCount(e)), before, "register installs no signal handlers");
 });
 
-test("backend(server) resolves names exactly, so a cached profile cannot answer to another case", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ikit-source-"));
-  const saved = process.env.IBMI_KIT_CONFIG_DIR;
-  process.env.IBMI_KIT_CONFIG_DIR = dir;
+// every profile folder at an empty temp dir and no IBMI_* in the environment, so a real profile on
+// this machine can never answer a test; both are put back afterwards
+async function withEmptyConfig<T>(run: (dir: string, root: string) => T | Promise<T>): Promise<T> {
+  const saved = { ...process.env };
+  const root = mkdtempSync(join(tmpdir(), "ikit-source-"));
+  const dir = join(root, "config");
+  mkdirSync(dir);
+  for (const k of Object.keys(process.env)) if (k.startsWith("IBMI_")) delete process.env[k];
+  Object.assign(process.env, { IBMI_KIT_CONFIG_DIR: dir, HOME: root, USERPROFILE: root });
   try {
+    return await run(dir, root);
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("backend(server) resolves names exactly, so a cached profile cannot answer to another case", () =>
+  withEmptyConfig((dir) => {
     writeFileSync(join(dir, ".env.ukcase"), "IBMI_HOST=h\nIBMI_USER=u\nIBMI_PASSWORD=pw\n");
     const handle = register(new McpServer({ name: "t", version: "0" }));
     assert.ok(handle.backend("ukcase"));
     assert.throws(() => handle.backend("UKCASE"), /unknown server "UKCASE"/);
+  }));
+
+test("IBMI_LOCAL_DIR is read per call from the profile, falling back to the environment", { timeout: 5000 }, () =>
+  withEmptyConfig(async (dir, root) => {
+    const restore = patch(mapepire.SQLJob.prototype, {
+      async connect() { (this as any).status = "ready"; return { success: true }; },
+      query() { return { execute: async () => oneRow, close: async () => {} }; },
+    });
+    const fromFile = join(root, "from-file");
+    const fromEnv = join(root, "from-env");
+    const creds = "IBMI_HOST=h\nIBMI_USER=u\nIBMI_PASSWORD=pw\nIBMI_SQL_TRANSPORT=daemon\n";
+    writeFileSync(join(dir, ".env.a"), `${creds}IBMI_LOCAL_DIR=${fromFile}\n`);
+    writeFileSync(join(dir, ".env.b"), creds);
+    process.env.IBMI_LOCAL_DIR = fromEnv; // set after tools.js was imported: a value read at import would miss it
+    const mcp = new McpServer({ name: "t", version: "0" });
+    const handle = register(mcp);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    const client = new McpClient({ name: "t", version: "0" });
+    await Promise.all([mcp.connect(serverSide), client.connect(clientSide)]);
+    try {
+      const where = async (server: string) => {
+        const res: any = await client.callTool({ name: "run_sql", arguments: { statement: "select 1 as n from sysibm.sysdummy1", file: true, server } });
+        return / written to (.*\.json)/.exec(res.content[0].text)?.[1] ?? res.content[0].text;
+      };
+      assert.ok((await where("a")).startsWith(join(fromFile, "sql")), "the profile's value wins");
+      assert.ok((await where("b")).startsWith(join(fromEnv, "sql")), "the environment fills in when the file omits it");
+      assert.equal(loadProfile(baseEnv).localDir, "ibmi-src");
+    } finally {
+      await client.close();
+      await handle.shutdown();
+      restore();
+    }
+  }));
+
+// --- daemon tls ---
+test("IBMI_MAPEPIRE_CA is read from the profile and passed to the daemon connection as the trusted CA", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ikit-ca-"));
+  const pem = join(dir, "ca.pem");
+  writeFileSync(pem, "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n");
+  const seen: any[] = [];
+  const restore = patch(mapepire.SQLJob.prototype, {
+    async connect(server: any) { seen.push(server); (this as any).status = "ready"; return { success: true }; },
+    query() { return { execute: async () => oneRow, close: async () => {} }; },
+  });
+  try {
+    const p = loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon", IBMI_MAPEPIRE_CA: pem });
+    assert.equal(p.mapepireCa, pem);
+    await connectDaemonMapepire(p);
+    assert.equal(String(seen[0].ca), readFileSync(pem, "utf8"));
+    const missing = loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon", IBMI_MAPEPIRE_CA: join(dir, "nope.pem") });
+    await assert.rejects(connectDaemonMapepire(missing), (e: Error) => /IBMI_MAPEPIRE_CA/.test(e.message) && /nope\.pem/.test(e.message));
   } finally {
-    if (saved === undefined) delete process.env.IBMI_KIT_CONFIG_DIR; else process.env.IBMI_KIT_CONFIG_DIR = saved;
+    restore();
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a daemon TLS handshake failure names certificate trust and IBMI_MAPEPIRE_CA, other failures do not", async () => {
+  let fail: any;
+  const restore = patch(mapepire.SQLJob.prototype, { async connect() { throw fail; } });
+  try {
+    const p = loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon" });
+    fail = Object.assign(new Error("self-signed certificate in certificate chain"), { code: "SELF_SIGNED_CERT_IN_CHAIN" });
+    await assert.rejects(connectDaemonMapepire(p), (e: Error) => /certificate trust/.test(e.message) && /IBMI_MAPEPIRE_CA/.test(e.message));
+    fail = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    await assert.rejects(connectDaemonMapepire(p), (e: Error) => /Is it running/.test(e.message) && !/IBMI_MAPEPIRE_CA/.test(e.message));
+  } finally { restore(); }
+});
+
+test("a reconnect closes the dead job's ssh client", async () => {
+  const profile = loadProfile(baseEnv);
+  const ended: number[] = [];
+  const jobs: any[] = [];
+  const open = async () => {
+    const n = jobs.length;
+    const job: any = { status: "ready", _sshConn: { end: () => ended.push(n) }, close: async () => {}, query: () => ({ execute: async () => oneRow, close: async () => {} }) };
+    jobs.push(job);
+    return job;
+  };
+  const t = new MapepireTransport(profile, open);
+  await t.query("select 1 from sysibm.sysdummy1");
+  jobs[0].status = "ended";
+  await t.query("select 1 from sysibm.sysdummy1");
+  await new Promise((res) => setImmediate(res));
+  assert.deepEqual(ended, [0], "the first job's ssh client ended, the live one kept");
+});
+
+test("execute returns the SQL warning the server reports with the result", async () => {
+  const { be } = stubBackend(() => ({ success: true, has_results: false, update_count: 0, sql_rc: 100, sql_state: "02000" }));
+  assert.deepEqual(await be.execute("UPDATE A.T SET C = 1 WHERE K = 0"), { rowsAffected: 0, messages: [{ id: "02000", text: "SQL warning: SQLCODE 100, SQLSTATE 02000" }] });
+});
+

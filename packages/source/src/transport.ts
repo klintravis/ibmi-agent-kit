@@ -1,3 +1,7 @@
+// Modified by ibmi-agent-kit (2026): new file holding the SQL connection code moved out of upstream mapepire.ts, behind an SqlTransport; adds the daemon transport.
+import { readFileSync } from "node:fs";
+// @ibm/mapepire-js is pinned to exactly 0.6.3: the ssh shim and the closed-socket marking here and in
+// sshMapepire.ts set its private fields (status, socket, transport, responseEmitter), which a minor bump can rename.
 import mapepire from "@ibm/mapepire-js";
 import type { Msg, SqlTransport } from "@ibmi-agent-kit/core";
 import { NOOP_REPORTER, type Profile, type Reporter, type SqlColumn } from "./types.js";
@@ -23,14 +27,29 @@ export interface Transport extends SqlTransport {
 export type Connector = (profile: Profile, reporter: Reporter) => Promise<Job>;
 
 // --- daemon ---
+// node's tls verification codes, then the message as a fallback should a code be missing
+const CERT_CODES = /^(SELF_SIGNED_CERT_IN_CHAIN|DEPTH_ZERO_SELF_SIGNED_CERT|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT(_LOCALLY)?|CERT_HAS_EXPIRED|CERT_NOT_YET_VALID|CERT_UNTRUSTED|ERR_TLS_CERT_ALTNAME_INVALID)$/;
+const isCertError = (e: any) => CERT_CODES.test(String(e?.code ?? "")) || /certificate/i.test(String(e?.message ?? ""));
+
 // an admin-installed Mapepire server: a websocket to IBMI_HOST:IBMI_MAPEPIRE_PORT, no ssh, no upload
 export async function connectDaemonMapepire(profile: Profile, reporter: Reporter = NOOP_REPORTER): Promise<Job> {
   const hostKey = `${profile.host}:${profile.mapepirePort}`;
   reporter.step(`connecting to the mapepire server at ${hostKey} as ${profile.user}`);
+  let ca: Buffer | undefined;
+  if (profile.mapepireCa) {
+    try {
+      ca = readFileSync(profile.mapepireCa);
+    } catch (e: any) {
+      throw new Error(`cannot read IBMI_MAPEPIRE_CA "${profile.mapepireCa}": ${e?.message || e}. It must be the path to a PEM file.`);
+    }
+  }
   const job = new SQLJob({ naming: "system" }); // the jdbc driver would otherwise default to sql naming
   try {
-    await job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password: profile.password });
+    await job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password: profile.password, ...(ca ? { ca } : {}) });
   } catch (e: any) {
+    if (isCertError(e)) {
+      throw new Error(`cannot connect to the mapepire server at ${hostKey}: ${e?.message || e}. The TLS handshake failed, so certificate trust may be the cause: set IBMI_MAPEPIRE_CA in the profile to the path of a PEM file holding the CA that signed the server's certificate.`);
+    }
     throw new Error(`cannot connect to the mapepire server at ${hostKey}: ${e?.message || e}. Is it running (IBMI_SQL_TRANSPORT=daemon needs one on the box) and is IBMI_MAPEPIRE_PORT right?`);
   }
   // a clean websocket close leaves the job "ready" in mapepire-js, so mark it ended and the next call reconnects
@@ -61,6 +80,8 @@ export class MapepireTransport implements Transport {
     if (!this.connecting) {
       if (this.job) {
         reporter.log("notice", `connection to ${this.profile.host} was lost, reconnecting`);
+        // not awaited: closing a job whose server is gone can hang, and the ssh client must still end
+        closeSshMapepire(this.job).catch(() => {});
         this.job = undefined;
         this.onReconnect?.();
       }
@@ -87,7 +108,11 @@ export class MapepireTransport implements Transport {
     const q = (job as any).query(sql, params ? { parameters: params } : undefined);
     const rs: any = await raceJobClosed(job, q.execute());
     await q.close?.();
-    return { rowsAffected: Number(rs.update_count ?? 0), messages: [] };
+    // a sql result carries no job log in mapepire-js 0.6.3, only sqlcode and sqlstate; a positive
+    // sqlcode is a warning (100: no row was found), so that is the message passed on
+    const rc = Number(rs?.sql_rc ?? 0);
+    const messages: Msg[] = rc > 0 ? [{ id: rs.sql_state || undefined, text: `SQL warning: SQLCODE ${rc}, SQLSTATE ${rs.sql_state ?? "unknown"}` }] : [];
+    return { rowsAffected: Number(rs.update_count ?? 0), messages };
   }
 
   // a mapepire cl request runs the command through QSYS2.QCMDEXC on the server and returns the

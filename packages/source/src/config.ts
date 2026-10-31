@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): profiles resolve through @ibmi-agent-kit/core, no .env is loaded into process.env; adds IBMI_SQL_TRANSPORT and IBMI_MAPEPIRE_PORT.
+// Modified by ibmi-agent-kit (2026): profiles resolve through @ibmi-agent-kit/core, no .env is loaded into process.env; adds IBMI_SQL_TRANSPORT, IBMI_MAPEPIRE_PORT and IBMI_MAPEPIRE_CA; IBMI_LOCAL_DIR is read per profile.
 import { listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
 import type { Profile } from "./types.js";
 
@@ -36,6 +36,8 @@ export function loadProfile(env: Record<string, string | undefined>): Profile {
     mapepirePort: Number(env.IBMI_MAPEPIRE_PORT || 8076),
     sourceFileCcsid: Number(env.IBMI_SOURCE_FILE_CCSID || 37),
     mapepireJar: env.IBMI_MAPEPIRE_JAR || undefined,
+    mapepireCa: env.IBMI_MAPEPIRE_CA || undefined,
+    localDir: env.IBMI_LOCAL_DIR || "ibmi-src",
     readOnly: bool(env.IBMI_READ_ONLY, false),
     blockedCl: list(env.IBMI_BLOCKED_CL),
     blockedTables: list(env.IBMI_BLOCKED_TABLES),
