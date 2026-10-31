@@ -31,7 +31,9 @@ A profile is one `.env` file naming one IBM i. Folders, first match wins:
 3. `~/.ibm-i-servers`
 
 `.env` is the server called `default`; `.env.<name>` is the server called `<name>`;
-`.env.example` is never a server. A `server` argument must match a listed name exactly. One
+`.env.example` is never a server, and neither is `.env.default` (the default is `.env`), a
+`.env.` with no name, a leftover ending `.bak`, `.orig` or `~`, or anything that is not a regular
+file. A `server` argument must match a listed name exactly. One
 file supplies the whole profile; files are never merged, and nothing from them is loaded into
 the process environment. Copy `packages/source/.env.example` or `packages/screen/.env.example`
 as a starting point. `list_servers` shows the folders searched and the open sessions.
@@ -39,7 +41,8 @@ as a starting point. `list_servers` shows the folders searched and the open sess
 Protected settings are read from the profile file only, never from the environment, so an MCP
 registration cannot lift a safety setting: `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`,
 `IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`,
-`IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, and every `IBMI_*_PORT`
+`IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_MAPEPIRE_CA`,
+`IBMI_MAPEPIRE_JAR`, and every `IBMI_*_PORT`
 (`IBMI_SSH_PORT`, `IBMI_MAPEPIRE_PORT`, `IBMI_5250_PORT`, `IBMI_5250_VIEWER_PORT`). Other
 `IBMI_*` settings may still come from the environment when the file omits them.
 
@@ -50,7 +53,7 @@ registration cannot lift a safety setting: `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSW
 | Transport | Needs on the IBM i | Notes |
 |---|---|---|
 | `ssh` | SSH access for the user, a Java runtime, and write access to their home folder | Uploads the bundled Mapepire jar into the user's home and runs it in the user's job over that SSH session. No port to open, but uploading a jar may need your security team's approval. |
-| `daemon` | A Mapepire server run by an administrator, listening on `IBMI_MAPEPIRE_PORT` (default 8076) | No SSH and no upload. The server must already be installed and started; the kit does not install it. |
+| `daemon` | A Mapepire server run by an administrator, listening on `IBMI_MAPEPIRE_PORT` (default 8076) | No SSH and no upload. The server must already be installed and started; the kit does not install it. If its certificate is not signed by a public CA, set `IBMI_MAPEPIRE_CA` to a PEM file holding the CA. |
 
 Some source tools (for example `search_source`) need more on the box; see
 `packages/source/README.md`.
@@ -73,6 +76,9 @@ The kit replaces `ibm-i-5250-mcp` and `ibm-i-source-mcp`.
   read. Move the files into `~/.ibmi-agent-kit` (`~/.ibm-i-servers` is still read).
 - `IBMI_*` connection and safety values set in the MCP registration's `env` are ignored for
   the protected settings above. Put them in the profile file.
+- For the other `IBMI_*` settings the profile file now wins over the environment: the old servers
+  let a value in the registration's `env` override the file, the kit uses it only when the file
+  omits the setting.
 
 ## Words
 

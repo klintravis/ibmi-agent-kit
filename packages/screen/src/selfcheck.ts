@@ -665,6 +665,12 @@ test("a custom sign on screen met again after recovery is still recognised, sign
   assert.throws(() => s.typeInto(screen.fields[0], "C"), /QMAXSIGN/);
 });
 
+test("upstream files changed by the kit carry a modification notice", () => {
+  for (const f of ["README.md", ".env.example", "tsconfig.json"]) {
+    assert.match(readFileSync(join(ROOT, f), "utf8"), /Modified by ibmi-agent-kit [(]2026[)]/, f);
+  }
+});
+
 test("the standard sign on layout is still recognised after a key was pressed", () => {
   const s = new ScreenBuffer(24, 80, 37);
   s.apply(fixture("signon.bin"));

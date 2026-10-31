@@ -6,7 +6,11 @@ Licensed under the Apache License, Version 2.0.
 packages/screen and packages/source are a hard fork of SH4RKKK's Apache-2.0 servers
 ibm-i-5250-mcp and ibm-i-source-mcp (Copyright 2026 Saman), from
 https://github.com/SH4RKKK/ibm-i-5250-mcp and https://github.com/SH4RKKK/ibm-i-source-mcp,
-modified by ibmi-agent-kit. Files changed from upstream carry a modification line. Each
-package's own NOTICE, which carries further third-party attributions (green-screen-react,
+modified by ibmi-agent-kit. Files changed from upstream carry a modification line, except
+packages/screen/package.json and packages/source/package.json, which are JSON and cannot hold
+one: ibmi-agent-kit changed their name, version, author, contributors, repository, homepage,
+bugs, scripts, exports and dependencies. The upstream package-lock.json files were removed in
+favour of the root one.
+Each package's own NOTICE, which carries further third-party attributions (green-screen-react,
 MIT; mapepire-server, Apache-2.0), is kept at packages/screen/NOTICE and
 packages/source/NOTICE and applies to that package.

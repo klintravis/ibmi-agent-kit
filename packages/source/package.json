@@ -51,20 +51,24 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SH4RKKK/ibm-i-source-mcp.git"
+    "url": "git+https://github.com/klintravis/ibmi-agent-kit.git",
+    "directory": "packages/source"
   },
-  "homepage": "https://github.com/SH4RKKK/ibm-i-source-mcp#readme",
+  "homepage": "https://github.com/klintravis/ibmi-agent-kit/tree/main/packages/source#readme",
   "bugs": {
-    "url": "https://github.com/SH4RKKK/ibm-i-source-mcp/issues"
+    "url": "https://github.com/klintravis/ibmi-agent-kit/issues"
   },
   "author": "Klint Travis",
   "contributors": [
-    "Saman"
+    {
+      "name": "Saman",
+      "url": "https://github.com/SH4RKKK/ibm-i-source-mcp"
+    }
   ],
   "license": "Apache-2.0",
   "dependencies": {
     "@ibmi-agent-kit/core": "^0.1.0",
-    "@ibm/mapepire-js": "^0.6.1",
+    "@ibm/mapepire-js": "0.6.3",
     "@modelcontextprotocol/sdk": "^1.19.0",
     "ssh2": "^1.17.0",
     "zod": "^3.23.8"

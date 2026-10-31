@@ -1,5 +1,7 @@
 # @ibmi-agent-kit/screen
 
+<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, mounting). -->
+
 The 5250 screen engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-5250-mcp.
 
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -106,6 +108,10 @@ claude mcp add ibmi-agent-kit-screen -- node <abs path>/packages/screen/dist/ind
 ```
 
 Put the profile in a `.env` in `~/.ibmi-agent-kit/` (create the folder). Restart Claude Code or run `/mcp`.
+
+To mount this engine in another MCP server, import `@ibmi-agent-kit/screen/tools` and call
+`register(mcp)`. The package root (`.`, `main`) is the standalone bootstrap above: importing it
+starts a stdio server and installs process handlers.
 
 ## Configuration
 

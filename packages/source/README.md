@@ -1,5 +1,7 @@
 # @ibmi-agent-kit/source
 
+<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, SQL transports, mounting). -->
+
 The source and SQL engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-source-mcp.
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-3c873a?logo=node.js&logoColor=white)](package.json)
@@ -19,8 +21,11 @@ help with code it can actually read. This server gives it that access.
 
 It reaches Db2 for i through [mapepire](https://mapepire-ibmi.github.io/), the same SQL engine Code for
 IBM i uses. It connects the same way Code for IBM i does too: it opens an SSH session, uploads the
-bundled mapepire server, and runs it in single mode over that session. There is no daemon to install on
-the IBM i and no extra port to open. If you can SSH to the box, this works. The client is pure Node, so
+bundled mapepire server, and runs it in single mode over that session. That is the default `ssh`
+transport: nothing to install on the IBM i and no extra port to open, so if you can SSH to the box,
+this works. Where uploading a jar is not allowed, the `daemon` transport (`IBMI_SQL_TRANSPORT=daemon`)
+connects to a Mapepire server an administrator already runs on the box (port `IBMI_MAPEPIRE_PORT`,
+default 8076) and uploads nothing. The client is pure Node, so
 there is nothing to build on Windows either.
 
 ## Example workflow
@@ -53,6 +58,10 @@ claude mcp add ibmi-agent-kit-source -- node <abs path>/packages/source/dist/ind
 
 Put the profile in a `.env` in `~/.ibmi-agent-kit/` (create the folder). Restart Claude Code or run `/mcp`.
 
+To mount this engine in another MCP server, import `@ibmi-agent-kit/source/tools` and call
+`register(mcp)`. The package root (`.`, `main`) is the standalone bootstrap above: importing it
+starts a stdio server and installs process handlers.
+
 ## Configuration
 
 All configuration lives in a profile file: `.env` for the default server, `.env.<name>` for a named one. The server looks in these folders, first match wins, and the first file found supplies the whole profile:
@@ -61,7 +70,7 @@ All configuration lives in a profile file: `.env` for the default server, `.env.
 2. `~/.ibmi-agent-kit/`
 3. `~/.ibm-i-servers/`
 
-The old `~/.ibm-i-source-mcp/` folder and the install folder are no longer read. Connection and safety settings (host, user, password, ports, `IBMI_SQL_TRANSPORT`, `IBMI_READ_ONLY`, `IBMI_BLOCKED_CL`, `IBMI_BLOCKED_TABLES`) come from the profile file only, never from the environment. See the root `README.md`.
+The old `~/.ibm-i-source-mcp/` folder and the install folder are no longer read. Connection and safety settings (host, user, password, ports, `IBMI_SQL_TRANSPORT`, `IBMI_MAPEPIRE_CA`, `IBMI_MAPEPIRE_JAR`, `IBMI_READ_ONLY`, `IBMI_BLOCKED_CL`, `IBMI_BLOCKED_TABLES`) come from the profile file only, never from the environment. See the root `README.md`.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -71,8 +80,9 @@ The old `~/.ibm-i-source-mcp/` folder and the install folder are no longer read.
 | `IBMI_SSH_PORT` | no | `22` | SSH port on the IBM i (`ssh` transport) |
 | `IBMI_SQL_TRANSPORT` | no | `ssh` | `ssh` uploads and runs the bundled mapepire jar over SSH; `daemon` connects to an admin-run Mapepire server and uploads nothing |
 | `IBMI_MAPEPIRE_PORT` | no | `8076` | port of the Mapepire server (`daemon` transport) |
+| `IBMI_MAPEPIRE_CA` | no | | path to a PEM file trusted as the CA for the Mapepire server's certificate (`daemon` transport), when it is not signed by a public CA |
 | `IBMI_SOURCE_FILE_CCSID` | no | `37` | EBCDIC page used for CCSID 65535 source columns |
-| `IBMI_LOCAL_DIR` | no | `ibmi-src` | where local copies are written |
+| `IBMI_LOCAL_DIR` | no | `ibmi-src` | where local copies are written; may also come from the environment when the profile omits it |
 | `IBMI_MAPEPIRE_JAR` | no | | path to a mapepire jar already on the box, instead of the bundled one |
 | `IBMI_READ_ONLY` | no | `false` | `true` disables upload and compile (read, search, and list only) |
 | `IBMI_BLOCKED_CL` | no | | extra CL verbs to refuse as a compile command, comma separated |

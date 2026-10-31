@@ -1,4 +1,5 @@
 {
+  // Modified by ibmi-agent-kit (2026): declaration output on, for the kit server's imports.
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",

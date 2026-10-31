@@ -8,7 +8,7 @@ console.log = (...a: unknown[]) => console.error(...a); // stdout is the JSON-RP
 process.on("unhandledRejection", (r) => console.error("[ibm-i-5250] unhandledRejection:", r));
 process.on("uncaughtException", (e) => console.error("[ibm-i-5250] uncaughtException:", e));
 
-const mcp = new McpServer({ name: "ibm-i-5250", version: "0.3.0" }, { capabilities: { logging: {} } });
+const mcp = new McpServer({ name: "ibm-i-5250", version: "0.2.0" }, { capabilities: { logging: {} } });
 const engine = register(mcp);
 
 async function main() {

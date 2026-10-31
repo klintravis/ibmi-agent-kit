@@ -781,3 +781,17 @@ test("execute returns the SQL warning the server reports with the result", async
   assert.deepEqual(await be.execute("UPDATE A.T SET C = 1 WHERE K = 0"), { rowsAffected: 0, messages: [{ id: "02000", text: "SQL warning: SQLCODE 100, SQLSTATE 02000" }] });
 });
 
+test("mapepire-js is pinned to exactly 0.6.3, the version whose private fields the ssh shim sets", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.equal(pkg.dependencies["@ibm/mapepire-js"], "0.6.3");
+  const installed = JSON.parse(readFileSync(fileURLToPath(import.meta.resolve("@ibm/mapepire-js/package.json")), "utf8"));
+  assert.equal(installed.version, "0.6.3");
+});
+
+test("upstream files changed by the kit carry a modification notice", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  for (const f of ["README.md", ".env.example", "tsconfig.json", "src/transport.ts"]) {
+    assert.match(readFileSync(join(root, f), "utf8"), /Modified by ibmi-agent-kit [(]2026[)]/, f);
+  }
+});

@@ -51,11 +51,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SH4RKKK/ibm-i-5250-mcp.git"
+    "url": "git+https://github.com/klintravis/ibmi-agent-kit.git",
+    "directory": "packages/screen"
   },
-  "homepage": "https://github.com/SH4RKKK/ibm-i-5250-mcp#readme",
+  "homepage": "https://github.com/klintravis/ibmi-agent-kit/tree/main/packages/screen#readme",
   "bugs": {
-    "url": "https://github.com/SH4RKKK/ibm-i-5250-mcp/issues"
+    "url": "https://github.com/klintravis/ibmi-agent-kit/issues"
   },
   "author": "Klint Travis",
   "contributors": [

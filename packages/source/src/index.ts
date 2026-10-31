@@ -9,7 +9,7 @@ console.log = (...a: unknown[]) => console.error(...a); // stdout is the JSON-RP
 process.on("unhandledRejection", (r) => console.error("[ibm-i-source] unhandledRejection:", r));
 process.on("uncaughtException", (e) => console.error("[ibm-i-source] uncaughtException:", e));
 
-const mcp = new McpServer({ name: "ibm-i-source", version: "0.6.0" }, { capabilities: { logging: {} } });
+const mcp = new McpServer({ name: "ibm-i-source", version: "0.7.0" }, { capabilities: { logging: {} } });
 const tools = register(mcp);
 
 // --- bootstrap ---
