@@ -8,7 +8,7 @@ lifecycle so sessions on the IBM i are always closed cleanly.
 
 ### Requirement: One stdio server mounts every engine
 The kit SHALL provide one MCP server over stdio, started by the `ibmi-agent-kit` command, that
-exposes every screen-engine and source-engine tool. It SHALL run on Node 18 or later on Windows,
+exposes every screen-engine and source-engine tool. It SHALL run on Node 20 or later on Windows,
 macOS and Linux without Docker.
 
 #### Scenario: Combined tool list
@@ -66,7 +66,7 @@ While serving, nothing other than MCP protocol messages SHALL be written to stan
 - **THEN** the text appears on standard error and the client's protocol stream stays valid
 
 ### Requirement: The checks run on every supported platform
-The repository SHALL run the root check on Windows, macOS and Linux with Node 18 and Node 22 for
+The repository SHALL run the root check on Windows, macOS and Linux with Node 20 and Node 22 for
 every push and pull request.
 
 #### Scenario: Matrix run
