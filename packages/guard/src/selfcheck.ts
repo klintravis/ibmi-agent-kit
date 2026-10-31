@@ -8,6 +8,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdirSync } from "node:fs";
+import { delimiter, dirname } from "node:path";
+import { bindArgs, loadVerbs, resolveVerb, substitute, type VerbParam, type VerbSources } from "./index.js";
 import {
   builtinCommands,
   classify,
@@ -1030,4 +1033,232 @@ test("review 2: program-running commands, carrier keywords and outage commands a
   const t = builtinCommands();
   for (const cmd of ["SBMNWSCMD", "ADDPFTRG", "CHGPFTRG", "ADDRTGE", "CHGRTGE", "ADDPJE", "CHGPJE", "JAVA", "RUNJVA", "VRYCFG", "ENDTCPSVR", "ENDHOSTSVR", "ENDPJ", "ENDTCPIFC", "ENDWTR", "CLRJOBQ", "CLROUTQ", "DLTSPLF", "DLTJRN", "CHGJRN", "RSTUSRPRF", "RSTAUT", "CHGIPLA", "ADDRPYLE"])
     assert.equal(t[cmd]?.class, "danger", cmd);
+});
+
+// --- verbs: openspec/changes/project-verbs/specs/verbs/spec.md ---
+
+// A temp root with home/, repo/ and policy/, and `files` (paths from the root) written in.
+function verbRoot(files: Record<string, string>, extra?: string[]): { root: string; src: VerbSources } {
+  const root = mkdtempSync(join(tmpdir(), "guard-verbs-"));
+  for (const [f, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, f)), { recursive: true });
+    writeFileSync(join(root, f), text);
+  }
+  const src: VerbSources = { home: join(root, "home"), cwd: join(root, "repo"), policyFile: join(root, "policy", "policy.yaml") };
+  if (extra) src.extra = extra.map((d) => join(root, d)).join(delimiter);
+  return { root, src };
+}
+const U = "home/.ibmi-agent-kit/verbs/";
+const P = "repo/.ibmi-kit/verbs/";
+const O = "policy/verbs/";
+const verbYaml = (name: string, steps = "  - sql: VALUES 1") => `name: ${name}\ndescription: test verb\nsteps:\n${steps}\n`;
+const calls = (name: string, callee: string) => verbYaml(name, `  - verb: ${callee}`);
+const addresses = (set: { verbs: { address: string }[] }) => set.verbs.map((v) => v.address);
+
+test("verbs: unknown key is refused naming the file and key; other verbs still load", () => {
+  const { root, src } = verbRoot({ [P + "BAD.yaml"]: "name: BAD\ndescription: d\nstep:\n  - sql: VALUES 1\n", [P + "GOOD.yaml"]: verbYaml("GOOD") });
+  const set = loadVerbs(src);
+  assert.deepEqual(addresses(set), ["proj:GOOD"]);
+  assert.equal(set.errors.length, 1);
+  assert.ok(set.errors[0].split("\n").includes(`${join(root, P, "BAD.yaml")}: (top): Unrecognized key(s) in object: 'step'`), set.errors[0]);
+});
+
+test("verbs: project folder found automatically; user, IBMI_KIT_VERBS and org layers load", () => {
+  const files = { [P + "SMOKE-ORDERS.yaml"]: verbYaml("SMOKE-ORDERS"), [U + "MINE.yml"]: verbYaml("mine"), "x1/A.yaml": verbYaml("X1"), "x2/B.yaml": verbYaml("X2"), [O + "TEAM.yaml"]: verbYaml("TEAM"), [P + "notes.txt"]: "not a verb" };
+  const set = loadVerbs(verbRoot(files, ["x1", "x2"]).src);
+  assert.deepEqual(set.errors, []);
+  assert.deepEqual(addresses(set), ["org:TEAM", "proj:SMOKE-ORDERS", "proj:X1", "proj:X2", "user:MINE"]);
+});
+
+test("verbs: missing folders load nothing; a missing IBMI_KIT_VERBS folder is an error", () => {
+  const { root, src } = verbRoot({ [O + "TEAM.yaml"]: verbYaml("TEAM") });
+  assert.deepEqual(loadVerbs({ home: src.home, cwd: src.cwd }), { verbs: [], refused: [], errors: [] });
+  assert.deepEqual(loadVerbs({ ...src, extra: join(root, "nope") }).errors, [`IBMI_KIT_VERBS: ${join(root, "nope")} not found`]);
+});
+
+test("verbs: personal override: the closest layer wins a bare name and the hidden verb is marked", () => {
+  const set = loadVerbs(verbRoot({ [U + "r.yaml"]: verbYaml("RESET-DATA"), [O + "r.yaml"]: verbYaml("reset-data"), [O + "only.yaml"]: verbYaml("ONLY") }).src);
+  assert.equal(resolveVerb(set, "RESET-DATA").address, "user:RESET-DATA");
+  assert.equal(resolveVerb(set, "reset-data").address, "user:RESET-DATA");
+  assert.equal(resolveVerb(set, "org:RESET-DATA").address, "org:RESET-DATA");
+  assert.equal(resolveVerb(set, "ONLY").address, "org:ONLY");
+  assert.deepEqual(set.verbs.map((v) => [v.address, v.overridden]), [["org:ONLY", false], ["org:RESET-DATA", true], ["user:RESET-DATA", false]]);
+  assert.throws(() => resolveVerb(set, "NONE"), /no verb NONE/);
+  assert.throws(() => resolveVerb(set, "qa:RESET-DATA"), /not a verb address/);
+});
+
+test("verbs: a refused closer verb stops a bare name instead of falling through", () => {
+  const set = loadVerbs(verbRoot({ [U + "r.yaml"]: verbYaml("RESET-DATA", "  - sql: VALUES :nope"), [O + "r.yaml"]: verbYaml("RESET-DATA") }).src);
+  assert.match(set.errors.join("\n"), /steps\.0\.sql: :nope is not a parameter/);
+  assert.deepEqual(set.refused, ["user:RESET-DATA"]);
+  assert.throws(() => resolveVerb(set, "RESET-DATA"), /user:RESET-DATA was refused at load/);
+  assert.equal(resolveVerb(set, "org:RESET-DATA").overridden, true);
+});
+
+test("verbs: duplicate in one layer: neither loads, and the error names both files", () => {
+  const { root, src } = verbRoot({ [P + "a.yaml"]: verbYaml("SMOKE-ORDERS"), "x1/b.yaml": verbYaml("smoke-orders"), [O + "s.yaml"]: verbYaml("SMOKE-ORDERS") }, ["x1"]);
+  const set = loadVerbs(src);
+  assert.deepEqual(addresses(set), ["org:SMOKE-ORDERS"]);
+  assert.deepEqual(set.errors, [`proj:SMOKE-ORDERS is declared by ${join(root, P, "a.yaml")} and ${join(root, "x1", "b.yaml")}; none of them loads`]);
+  // IBMI_KIT_VERBS naming the project folder again is not a duplicate
+  assert.deepEqual(loadVerbs({ ...src, extra: join(root, P) }).errors, []);
+});
+
+test("verbs: cycle: both verbs are refused at load naming the cycle, and so are their callers", () => {
+  const set = loadVerbs(verbRoot({ [P + "a.yaml"]: calls("A", "B"), [P + "b.yaml"]: calls("B", "proj:A"), [P + "c.yaml"]: calls("C", "A"), [P + "s.yaml"]: calls("SELF", "SELF"), [P + "ok.yaml"]: verbYaml("OK") }).src);
+  assert.deepEqual(addresses(set), ["proj:OK"]);
+  const all = set.errors.join("\n");
+  assert.match(all, /a\.yaml: proj:A is in a cycle: proj:A → proj:B → proj:A/);
+  assert.match(all, /b\.yaml: proj:B is in a cycle: proj:A → proj:B → proj:A/);
+  assert.match(all, /c\.yaml: steps\.0\.verb: proj:A was refused at load/);
+  assert.match(all, /s\.yaml: proj:SELF is in a cycle: proj:SELF → proj:SELF/);
+});
+
+test("verbs: nesting is limited to 5 verbs in a chain, the top one counted", () => {
+  const files: Record<string, string> = {};
+  for (let i = 1; i <= 6; i++) files[`${P}v${i}.yaml`] = i < 6 ? calls(`V${i}`, `V${i + 1}`) : verbYaml("V6");
+  const set = loadVerbs(verbRoot(files).src);
+  assert.deepEqual(addresses(set), ["proj:V2", "proj:V3", "proj:V4", "proj:V5", "proj:V6"]);
+  assert.match(set.errors.join("\n"), /v1\.yaml: proj:V1 nests more than 5 verbs deep: proj:V1 → proj:V2 → proj:V3 → proj:V4 → proj:V5 → proj:V6/);
+});
+
+test("verbs: a call must reach a verb and give only its parameters, and every one without a default", () => {
+  const callee = "name: CALLEE\ndescription: d\nparams:\n  a: { type: integer }\n  b: { type: integer, default: 1 }\nsteps:\n  - sql: VALUES :a + :b\n";
+  const set = loadVerbs(
+    verbRoot({
+      [P + "callee.yaml"]: callee,
+      [P + "ok.yaml"]: verbYaml("OK", "  - verb: CALLEE\n    args: { a: 5 }"),
+      [P + "missing.yaml"]: calls("MISSING", "NOPE"),
+      [P + "extra.yaml"]: verbYaml("EXTRA", "  - verb: CALLEE\n    args: { a: 5, c: 1 }"),
+      [P + "short.yaml"]: verbYaml("SHORT", "  - verb: CALLEE\n    args: { b: 2 }"),
+    }).src,
+  );
+  assert.deepEqual(addresses(set), ["proj:CALLEE", "proj:OK"]);
+  const all = set.errors.join("\n");
+  assert.match(all, /missing\.yaml: steps\.0\.verb: no verb NOPE/);
+  assert.match(all, /extra\.yaml: steps\.0\.args\.c: proj:CALLEE has no parameter c/);
+  assert.match(all, /short\.yaml: steps\.0: proj:CALLEE needs a/);
+});
+
+test("verbs: step shapes: one statement per step, cleanup undoes a setup id, ids are unique", () => {
+  const cases: [string, RegExp][] = [
+    ["steps: []\n", /steps: Array must contain at least 1/],
+    ["steps:\n  - { sql: VALUES 1, cl: DSPLIB }\n", /steps\.0: give exactly one of sql, cl, expect, verb/],
+    ["steps:\n  - { sql: VALUES 1, args: { a: 1 } }\n", /steps\.0: args go with verb/],
+    ["steps:\n  - { sql: VALUES 1, requires_absent: VALUES 1 }\n", /steps\.0: Unrecognized key\(s\) in object: 'requires_absent'/],
+    ["steps:\n  - expect: { sql: VALUES 1, rows: 1, empty: true }\n", /steps\.0\.expect: give exactly one of equals, rows, empty/],
+    ["setup:\n  - { id: s, sql: VALUES 1 }\n  - { id: s, sql: VALUES 2 }\nsteps:\n  - sql: VALUES 1\n", /setup\.1\.id: s is used twice/],
+    ["steps:\n  - sql: VALUES 1\ncleanup:\n  - { undoes: seed, sql: VALUES 1 }\n", /cleanup\.0\.undoes: no setup step has id seed/],
+    ["steps:\n  - sql: VALUES 1\ncleanup:\n  - { sql: VALUES 1 }\n", /cleanup\.0\.undoes: Required/],
+  ];
+  for (const [body, re] of cases) {
+    const set = loadVerbs(verbRoot({ [P + "x.yaml"]: `name: X\ndescription: d\n${body}` }).src);
+    assert.deepEqual(set.verbs, [], body);
+    assert.match(set.errors.join("\n"), re, body);
+  }
+});
+
+// The verb in design D1, as written there.
+const D1_VERB = `name: SMOKE-ORDERS
+description: Order validation still accepts a new order
+tags: [smoke]
+params:
+  env:   { type: string, default: IN1, allowed: [IN1, IN2] }
+  order: { type: integer, default: 999001 }
+setup:
+  - id: seed
+    requires_absent: "SELECT 1 FROM ORD\${env}.ORDHDR WHERE OHORD = :order"
+    sql: "INSERT INTO ORD\${env}.ORDHDR (OHORD, OHCUS) VALUES (:order, 'TEST01')"
+steps:
+  - cl: "CALL PGM(ORD\${env}/ORDVAL) PARM('\${order}')"
+  - expect:
+      sql: "SELECT OHSTS FROM ORD\${env}.ORDHDR WHERE OHORD = :order"
+      equals: { OHSTS: V }
+cleanup:
+  - undoes: seed
+    sql: "DELETE FROM ORD\${env}.ORDHDR WHERE OHORD = :order"
+`;
+
+test("verbs: the D1 example loads; :p becomes bound markers and ${p} checked text", () => {
+  const set = loadVerbs(verbRoot({ [P + "SMOKE-ORDERS.yaml"]: D1_VERB }).src);
+  assert.deepEqual(set.errors, []);
+  const v = resolveVerb(set, "SMOKE-ORDERS");
+  const values = bindArgs(v);
+  assert.deepEqual(values, { env: "IN1", order: 999001 });
+  assert.deepEqual(substitute(v.setup[0].requires_absent!, "sql", v.params, values), { text: "SELECT 1 FROM ORDIN1.ORDHDR WHERE OHORD = ?", params: [999001] });
+  assert.deepEqual(substitute(v.setup[0].sql!, "sql", v.params, values), { text: "INSERT INTO ORDIN1.ORDHDR (OHORD, OHCUS) VALUES (?, 'TEST01')", params: [999001] });
+  assert.deepEqual(substitute(v.steps[0].cl!, "cl", v.params, bindArgs(v, { env: "IN2", order: "42" })), { text: "CALL PGM(ORDIN2/ORDVAL) PARM('42')", params: [] });
+  assert.deepEqual(substitute("VALUES (:order, :env, :order)", "sql", v.params, values), { text: "VALUES (?, ?, ?)", params: [999001, "IN1", 999001] });
+});
+
+test("verbs: string parameter in text: ${env} with no allowed list is refused at load, naming the parameter", () => {
+  const set = loadVerbs(verbRoot({ [P + "x.yaml"]: "name: X\ndescription: d\nparams:\n  env: { type: string }\nsteps:\n  - sql: SELECT * FROM ORD${env}.ORDHDR\n" }).src);
+  assert.deepEqual(set.verbs, []);
+  assert.match(set.errors[0], /steps\.0\.sql: \$\{env\}: parameter env is a string with no allowed list, so it would be free text; use :env/);
+  assert.throws(() => substitute("SELECT * FROM ORD${env}.ORDHDR", "sql", { env: { type: "string" } }, { env: "X.T; DROP TABLE Y" }), /no allowed list/);
+});
+
+test("verbs: value outside allowed: the call fails before any statement is built", () => {
+  const v = { address: "proj:X", params: { env: { type: "string", default: "IN1", allowed: ["IN1", "IN2"] } } as Record<string, VerbParam> };
+  assert.throws(() => bindArgs(v, { env: "PRD" }), /proj:X: env: "PRD" is not one of IN1, IN2/);
+  assert.throws(() => bindArgs(v, { env: "in2" }), /is not one of/);
+  assert.deepEqual(bindArgs(v, { env: "IN2" }), { env: "IN2" });
+});
+
+test("verbs: injection: x' or '1'='1 arrives as a bound value with the statement text unchanged", () => {
+  const params: Record<string, VerbParam> = { name: { type: "string" } };
+  const values = bindArgs({ address: "proj:X", params }, { name: "x' or '1'='1" });
+  const sql = `SELECT * FROM T WHERE A = :name AND B = ':name' AND "C:name" = 1 -- :name\nAND D = 1 /* :name */`;
+  assert.deepEqual(substitute(sql, "sql", params, values), {
+    text: `SELECT * FROM T WHERE A = ? AND B = ':name' AND "C:name" = 1 -- :name\nAND D = 1 /* :name */`,
+    params: ["x' or '1'='1"],
+  });
+});
+
+test("verbs: typed values are validated, and what is not one is refused", () => {
+  const p = (type: VerbParam["type"]) => ({ address: "proj:X", params: { v: { type } as VerbParam } });
+  const bad = [["integer", "1 OR 1=1"], ["integer", 1.5], ["integer", "9007199254740993"], ["integer", Infinity], ["decimal", "1;DROP"], ["decimal", NaN], ["decimal", Infinity], ["decimal", 1e21], ["decimal", "1e5"], ["date", "2026-01-01' OR"], ["date", "2026-02-30"], ["date", 20260101], ["boolean", "true"], ["boolean", 1], ["string", 42]] as const;
+  for (const [type, v] of bad) assert.throws(() => bindArgs(p(type), { v }), /^Error: proj:X: v: .+ is not /, `${type} ${String(v)}`);
+  const good = [["integer", "007", 7], ["integer", -3, -3], ["decimal", "12.50", "12.50"], ["decimal", -0.5, "-0.5"], ["date", "2024-02-29", "2024-02-29"], ["boolean", false, false], ["string", "", ""]] as const;
+  for (const [type, v, want] of good) assert.deepEqual(bindArgs(p(type), { v }), { v: want }, `${type} ${String(v)}`);
+  assert.throws(() => bindArgs(p("integer")), /v has no value and no default/);
+  assert.throws(() => bindArgs(p("integer"), { v: 1, w: 2 }), /w is not a parameter/);
+  assert.throws(() => bindArgs(p("integer"), { constructor: 1, v: 1 }), /constructor is not a parameter/);
+  assert.equal(substitute("VALUES ${b}", "sql", { b: { type: "boolean" } }, { b: true }).text, "VALUES TRUE");
+});
+
+test("verbs: templates are refused at load where substitution would be unsafe or wrong", () => {
+  const cases: [string, string, RegExp][] = [
+    ["n: { type: integer }", 'sql: "VALUES 1 -- ${n}"', /steps\.0\.sql: \$\{n\} is inside a comment/],
+    ["n: { type: integer }", 'sql: "VALUES 1 /* ${n} */"', /\$\{n\} is inside a comment/],
+    ["n: { type: integer }", 'sql: "VALUES ?"', /a \? marker: write :name/],
+    ["n: { type: integer }", 'sql: "VALUES ${m}"', /\$\{m\} is not a parameter/],
+    ["n: { type: integer }", 'sql: "VALUES ${n"', /\$\{ must be \$\{name\}/],
+    ["n: { type: integer }", 'cl: "CALL PGM(P) PARM(:n)"', /steps\.0\.cl: :n: CL has no bound values/],
+    ["d: { type: date }", 'sql: "VALUES ${d}"', /a date outside quotes/],
+    ["x: { type: string, allowed: [\"O'BRIEN\"] }", 'cl: "CALL PGM(P) PARM(${x})"', /outside quotes and an allowed value holds a quote/],
+    ["n: { type: decimal, default: .inf }", 'sql: "VALUES :n"', /params\.n\.default: Infinity is not a decimal number/],
+    ["n: { type: integer, allowed: [1, two] }", 'sql: "VALUES :n"', /params\.n\.allowed\.1: "two" is not an integer/],
+    ["s: { type: string, allowed: [01] }", 'sql: "VALUES :s"', /params\.s\.allowed\.0: 1 is not a string/],
+    ["s: { type: string }", 'verb: OTHER\n    args: { t: "${s}" }', /steps\.0\.args\.t: \$\{s\}: parameter s is a string with no allowed list/],
+  ];
+  for (const [param, step, re] of cases) {
+    const set = loadVerbs(verbRoot({ [P + "x.yaml"]: `name: X\ndescription: d\nparams:\n  ${param}\nsteps:\n  - ${step}\n` }).src);
+    assert.deepEqual(set.verbs, [], step);
+    assert.match(set.errors.join("\n"), re, step);
+  }
+});
+
+test("verbs: ${p} doubles quotes inside literals and refuses a value that would start a comment", () => {
+  const x: Record<string, VerbParam> = { x: { type: "string", allowed: ["O'BRIEN", "IN1"] } };
+  assert.deepEqual(substitute("CALL PGM(P) PARM('${x}')", "cl", x, { x: "O'BRIEN" }), { text: "CALL PGM(P) PARM('O''BRIEN')", params: [] });
+  assert.equal(substitute("SELECT * FROM T WHERE N = '${x}'", "sql", x, { x: "O'BRIEN" }).text, "SELECT * FROM T WHERE N = 'O''BRIEN'");
+  assert.throws(() => substitute("CALL PGM(P) PARM(${x})", "cl", x, { x: "IN1" }), /outside quotes and an allowed value holds a quote/);
+  const lib: Record<string, VerbParam> = { lib: { type: "string", allowed: ["IN1"] } };
+  assert.equal(substitute("DSPOBJD OBJ(ORD${lib}/*ALL) OBJTYPE(*ALL) OUTFILE(ORD${lib}/OBJS)", "cl", lib, { lib: "IN1" }).text, "DSPOBJD OBJ(ORDIN1/*ALL) OBJTYPE(*ALL) OUTFILE(ORDIN1/OBJS)");
+  const n: Record<string, VerbParam> = { n: { type: "integer" } };
+  assert.throws(() => substitute("DELETE FROM T WHERE A > 1 -${n}\nAND B = 2", "sql", n, { n: -1 }), /would start a comment/);
+  assert.equal(substitute("DELETE FROM T WHERE A > 1 - ${n}", "sql", n, { n: -1 }).text, "DELETE FROM T WHERE A > 1 - -1");
+  assert.throws(() => substitute("VALUES :n", "sql", n, {}), /parameter n has no value/);
+  assert.equal(substitute("${lib}", "arg", lib, { lib: "IN1" }).text, "IN1");
 });
