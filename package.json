@@ -1,0 +1,12 @@
+{
+  "name": "ibmi-agent-kit",
+  "private": true,
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "check": "npm run check --workspaces"
+  }
+}

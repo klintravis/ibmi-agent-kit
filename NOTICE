@@ -1,0 +1,12 @@
+ibmi-agent-kit
+Copyright 2026 Klint Travis
+
+Licensed under the Apache License, Version 2.0.
+
+This product includes ibm-i-5250-mcp (packages/screen) and ibm-i-source-mcp
+(packages/source), Copyright 2026 Saman, licensed under the Apache License,
+Version 2.0, from https://github.com/SH4RKKK/ibm-i-5250-mcp and
+https://github.com/SH4RKKK/ibm-i-source-mcp. Their own NOTICE files, which
+carry further third-party attributions (green-screen-react, MIT; mapepire-server,
+Apache-2.0), are kept unmodified at packages/screen/NOTICE and
+packages/source/NOTICE and apply to those packages.
