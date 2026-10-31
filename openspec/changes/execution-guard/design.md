@@ -127,6 +127,20 @@ All `confirm` operations of one tool call are gathered into one `elicitInput` wi
 `<first config dir>/runs/YYYY-MM-DD.jsonl`, appended synchronously; `redact()` applied to statement
 text; policy hash = SHA-256 of the policy text, the shipped commands.yaml and each command file's
 text; each line also stores the identity and the lookup answers used, so it can be replayed.
+- *Tools without statement text* (`read_source_member`, `search_source`, `upload_source_member`,
+  `manage_library_list`, `session_open` program/library): their line holds a readable `text`
+  (`read_source_member MYLIB/QRPGLESRC(ORDVAL)`), a third `kind`, `operations`, and the raw
+  operations as built (class, object, command, via, and the operation's own `partition` and `env`,
+  not the decided ones `LoggedOperation` holds). Replay passes those raw operations straight to
+  `decide` under the candidate, skipping `classify`. Tools with text (`run_sql`, `compile_member`'s
+  final command, 5250 command lines) log their text as `sql` or `cl` and replay like `run_script`.
+- *Server context (D5):* the System name comes from the screen engine once a session read it;
+  identity and RDB are read once per server over SQL and not cached when that fails; the profile's
+  password is passed as the run log's `secret`, and `names` (System, RDB, `IBMI_PARTITION`) are
+  logged so replay re-detects the partition. `IBMI_PARTITION` is profile-only (core `PROTECTED`);
+  `IBMI_KIT_POLICY` is read from the server's environment at startup, as one policy serves every
+  profile. The profile's own guards (`IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES`, `IBMI_BLOCKED_CL`)
+  refuse in every mode, observe included.
 
 ### D9. Policy tests and replay as a CLI on the server package
 `ibmi-agent-kit policy test <policy> <tests>` and `ibmi-agent-kit policy replay <candidate>

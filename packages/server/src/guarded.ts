@@ -1,0 +1,422 @@
+// The server's half of the execution guard (design D5, D7): who and where a connection is, the
+// catalog lookups, `run_script`, `policy_check` and the confirmation. The guard package decides;
+// this file does the I/O. Engines never write to stdout, and neither does this.
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import type { Msg } from "@ibmi-agent-kit/core";
+import {
+  decideStatements,
+  detectPartition,
+  loadPolicy,
+  recordLookups,
+  runPolicyTests,
+  type Answers,
+  type ClassifiedStatement,
+  type Decision,
+  type Identity,
+  type Lookups,
+  type PartitionNames,
+  type Policy,
+  type RunLog,
+} from "@ibmi-agent-kit/guard";
+
+// What the guard needs of a connection: the source engine's MapepireBackend fits, a stub does too.
+export interface Conn {
+  profile: { user: string; password: string; readOnly: boolean; blockedTables: string[]; blockedCl: string[] };
+  query(sql: string, params?: unknown[], maxRows?: number): Promise<{ rows: Record<string, unknown>[]; columns: { name: string }[]; truncated: boolean }>;
+  execute(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; messages: Msg[] }>;
+  cl(command: string): Promise<{ ok: boolean; messages: Msg[] }>;
+}
+
+export interface GuardDeps {
+  policy: Policy;
+  runLog: RunLog;
+  conn(server: string): Conn;
+  profileEnv(server: string): Record<string, string>; // the profile file, for IBMI_PARTITION
+  systemName(server: string): string | undefined; // the 5250 sign-on System name, once a session read it
+  confirmTimeoutMs: number;
+  notice(message: string): void; // stderr
+}
+
+export const CONFIRM_TIMEOUT_MS = 120_000;
+
+export const LIMITS =
+  "The guard classifies only the text it is given: it does not see what called programs, triggers, application menu options or prompted fields do, and IBM i authority remains the real boundary.";
+const ASK = "Ask the user how to proceed; do not try another route (another tool, a rewritten statement, QCMDEXC).";
+
+const str = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
+
+// --- lookups (design D1) ---
+
+// Catalog answers for the classifier, values always bound. Column names are unverified on a live
+// box (group 8 checks them on PUB400).
+export function sqlLookups(conn: Conn): Lookups {
+  const rows = async (sql: string, params: unknown[]) => (await conn.query(sql, params, 1000)).rows;
+  return {
+    async systemSchema(schema) {
+      const [r] = await rows("SELECT SYSTEM_SCHEMA_NAME AS S FROM QSYS2.SYSSCHEMAS WHERE SCHEMA_NAME = ?", [schema]);
+      return str(r?.S) || undefined;
+    },
+    async baseTables({ lib, name }) {
+      const found = await rows(
+        "SELECT BASE_TABLE_SCHEMA AS L, BASE_TABLE_NAME AS N FROM QSYS2.SYSTABLES WHERE TABLE_TYPE = 'A' AND SYSTEM_TABLE_SCHEMA = ? AND (TABLE_NAME = ? OR SYSTEM_TABLE_NAME = ?)" +
+          " UNION SELECT OBJECT_SCHEMA, OBJECT_NAME FROM QSYS2.SYSVIEWDEP WHERE SYSTEM_VIEW_SCHEMA = ? AND (VIEW_NAME = ? OR SYSTEM_VIEW_NAME = ?) AND OBJECT_TYPE NOT IN ('FUNCTION', 'TYPE')",
+        [lib, name, name, lib, name, name],
+      );
+      return found.map((r) => ({ lib: str(r.L), name: str(r.N) })).filter((b) => b.lib && b.name);
+    },
+    async currentLibrary() {
+      const [r] = await rows("SELECT SYSTEM_SCHEMA_NAME AS S FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT'", []);
+      return str(r?.S) || undefined;
+    },
+  };
+}
+
+// --- identity and partition, once per connection (design D5) ---
+
+interface Box {
+  user: string;
+  rdb?: string;
+  groups?: string[]; // absent: USER_INFO had no row or failed, so roles fall back to default_role
+  authlists?: string[];
+  notes: string[];
+}
+
+// These lookups are the kit's own and are not decided. Only the first failing is fatal: without
+// the user nothing can be decided.
+async function readBox(conn: Conn): Promise<Box> {
+  const [me] = (await conn.query("SELECT CURRENT SERVER AS RDB, CURRENT USER AS USR FROM SYSIBM.SYSDUMMY1")).rows;
+  const box: Box = { user: (str(me?.USR) || conn.profile.user).toUpperCase(), notes: [] };
+  if (str(me?.RDB)) box.rdb = str(me?.RDB).toUpperCase();
+  try {
+    const [u] = (await conn.query("SELECT GROUP_PROFILE_NAME AS G, SUPPLEMENTAL_GROUP_LIST AS S FROM QSYS2.USER_INFO WHERE AUTHORIZATION_NAME = ?", [box.user])).rows;
+    if (u) box.groups = [str(u.G), ...str(u.S).split(/\s+/)].map((g) => g.toUpperCase()).filter((g) => g && g !== "*NONE");
+    else box.notes.push(`QSYS2.USER_INFO has no row for ${box.user}: groups unknown`);
+  } catch (e) {
+    box.notes.push(`group lookup for ${box.user} failed: ${(e as Error).message}`);
+  }
+  try {
+    const rows = (await conn.query("SELECT AUTHORIZATION_LIST AS A FROM QSYS2.AUTHORIZATION_LIST_USER_INFO WHERE AUTHORIZATION_NAME = ?", [box.user])).rows;
+    box.authlists = rows.map((r) => str(r.A).toUpperCase()).filter(Boolean);
+  } catch (e) {
+    box.notes.push(`authorization list lookup for ${box.user} failed: ${(e as Error).message}`);
+  }
+  return box;
+}
+
+// --- profile guards: the engine's own checks, applied in every mode ---
+
+const EDGE = "[^A-Z0-9#$@_]";
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export function profileRefusal(s: ClassifiedStatement, profile: Conn["profile"]): string | undefined {
+  if (profile.readOnly && (s.kind === "cl" || s.operations.some((o) => o.class !== "read")))
+    return "refused: the profile is read-only (IBMI_READ_ONLY), so only SQL reads run";
+  const objects = s.operations.flatMap((o) => (o.object ? [o.object.name, o.object.lib && `${o.object.lib}.${o.object.name}`, o.object.schema && `${o.object.schema}.${o.object.name}`] : []));
+  const upper = s.display.toUpperCase();
+  const table = profile.blockedTables.find(
+    (t) => objects.some((n) => n?.toLowerCase() === t) || new RegExp(`(^|${EDGE})${esc(t.toUpperCase())}($|${EDGE})`).test(upper),
+  );
+  if (table) return `refused: ${table.toUpperCase()} is blocked by IBMI_BLOCKED_TABLES`;
+  const command = s.operations.find((o) => o.command && profile.blockedCl.includes(o.command.toLowerCase()))?.command;
+  if (command) return `refused: ${command} is blocked by IBMI_BLOCKED_CL`;
+  return undefined;
+}
+
+// --- the shared decision ---
+
+interface Planned {
+  statement: ClassifiedStatement;
+  decision: Decision;
+  refused?: string;
+}
+
+interface Plan {
+  server: string;
+  identity: Identity;
+  names?: PartitionNames;
+  statements: Planned[];
+  lookups: Answers;
+  notes: string[];
+}
+
+const objectText = (o: NonNullable<ClassifiedStatement["operations"][number]["object"]>) =>
+  o.type === "*LIB" ? `library ${o.lib ?? o.name}` : [o.rdb, o.lib, o.name].filter(Boolean).join(".");
+
+// Per statement: the operations with object, partition, environment and class, the rule, the
+// decision, and why it does or does not run.
+function report(p: { statement: { kind?: string; display: string }; decision: Decision; refused?: string }, i: number) {
+  const d = p.decision;
+  const r: Record<string, unknown> = {
+    index: i + 1,
+    kind: p.statement.kind,
+    text: p.statement.display,
+    decision: d.decision,
+    effective: p.refused ? "deny" : d.effective,
+    operations: d.operations.map((o) => {
+      const op: Record<string, unknown> = { class: o.operation.class, decision: o.decision, enforced: o.enforced, reason: o.reason, message: o.message };
+      if (o.operation.object) op.object = objectText(o.operation.object);
+      if (o.operation.command) op.command = o.operation.command;
+      if (o.partition) op.partition = o.partition;
+      if (o.env) op.env = o.env;
+      if (o.rule) op.rule = o.rule;
+      return op;
+    }),
+  };
+  if (d.reason) r.reason = d.reason;
+  if (p.refused) r.refused = p.refused;
+  return r;
+}
+
+const stopping = (p: Planned) => p.refused !== undefined || p.decision.effective === "deny";
+const why = (p: Planned) => p.refused ?? p.decision.operations.filter((o) => o.enforced && o.decision === "deny").map((o) => o.message).join("; ");
+
+export function registerGuarded(mcp: McpServer, deps: GuardDeps): void {
+  const { policy } = deps;
+  const boxes = new Map<string, Promise<Box>>();
+
+  async function identityOf(server: string, conn: Conn): Promise<{ identity: Identity; names: PartitionNames; notes: string[] }> {
+    let p = boxes.get(server);
+    if (!p) {
+      p = readBox(conn);
+      boxes.set(server, p);
+      p.catch(() => boxes.get(server) === p && boxes.delete(server)); // a failed connection is asked again next call
+    }
+    const box = await p;
+    const names: PartitionNames = {};
+    const system = deps.systemName(server);
+    if (system) names.system = system.toUpperCase();
+    if (box.rdb) names.rdb = box.rdb;
+    const declared = deps.profileEnv(server).IBMI_PARTITION?.trim();
+    if (declared) names.declared = declared;
+    const found = detectPartition(policy, names);
+    const identity: Identity = { user: box.user };
+    if (box.groups) identity.groups = box.groups;
+    if (box.authlists) identity.authlists = box.authlists;
+    if (found.partition !== undefined) identity.partition = found.partition;
+    if (found.conflict !== undefined) identity.conflict = found.conflict;
+    return { identity, names, notes: box.notes };
+  }
+
+  // Every statement of the script decided, and the profile's own guards applied, before anything
+  // is sent. Only the identity and catalog lookups reach the box.
+  async function plan(server: string, script: string): Promise<{ plan: Plan; conn: Conn }> {
+    const conn = deps.conn(server);
+    const who = await identityOf(server, conn);
+    const { lookups, answers } = recordLookups(sqlLookups(conn));
+    const { classification, decisions } = await decideStatements(script, who.identity, policy, lookups);
+    const statements = classification.statements.map((statement, i): Planned => {
+      const p: Planned = { statement, decision: decisions[i] };
+      const refused = profileRefusal(statement, conn.profile);
+      if (refused) p.refused = refused;
+      return p;
+    });
+    return { conn, plan: { server, identity: who.identity, names: who.names, statements, lookups: answers, notes: [...who.notes, ...classification.notes] } };
+  }
+
+  function log(p: Plan, conn: Conn, outcomes: string[], confirmed?: boolean): void {
+    deps.runLog.record({
+      server: p.server,
+      tool: "run_script",
+      identity: p.identity,
+      ...(p.names ? { names: p.names } : {}),
+      lookups: p.lookups,
+      notes: p.notes,
+      secret: conn.profile.password,
+      statements: p.statements.map((s, i) => ({
+        statement: s.statement,
+        decision: s.decision,
+        outcome: outcomes[i],
+        ...(confirmed !== undefined && s.decision.effective === "confirm" ? { confirmed } : {}),
+      })),
+    });
+  }
+
+  // One elicitation for every statement a rule asks to confirm (design D7). Anything but accept
+  // with confirm: true is a no.
+  async function confirm(p: Plan, needs: Planned[]): Promise<string | undefined> {
+    if (!mcp.server.getClientCapabilities()?.elicitation?.form)
+      return "confirmation is unavailable in this client (it does not support MCP elicitation), so the statements a rule asks to confirm are denied";
+    const lines = [`Run on server ${p.server}${p.identity.partition ? ` (partition ${p.identity.partition})` : ""}? Nothing runs unless you confirm.`];
+    for (const s of needs) {
+      const i = p.statements.indexOf(s);
+      lines.push("", `Statement ${i + 1}:`);
+      for (const o of s.decision.operations) lines.push(`  - ${o.operation.class} ${o.operation.object ? objectText(o.operation.object) : (o.operation.command ?? "")}${o.env ? ` (environment ${o.env})` : ""}`);
+      lines.push(s.statement.display);
+    }
+    try {
+      const r = await mcp.server.elicitInput(
+        {
+          mode: "form",
+          message: lines.join("\n"),
+          requestedSchema: { type: "object", properties: { confirm: { type: "boolean", title: "Run these statements" } }, required: ["confirm"] },
+        },
+        { timeout: deps.confirmTimeoutMs },
+      );
+      if (r.action === "accept" && r.content?.confirm === true) return undefined;
+      return r.action === "accept" ? "the user did not confirm" : `the user chose ${r.action}`;
+    } catch (e) {
+      return `no confirmation: ${(e as Error).message}`;
+    }
+  }
+
+  const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
+  const key = (server?: string) => server || "default";
+  const result = (structured: Record<string, unknown>, text: string, isError = false) => ({
+    content: [{ type: "text" as const, text }],
+    structuredContent: structured,
+    ...(isError ? { isError: true } : {}),
+  });
+  const fail = (e: unknown) => result({ error: (e as Error).message ?? String(e) }, `failed: ${(e as Error).message ?? String(e)}`, true);
+
+  mcp.registerTool(
+    "run_script",
+    {
+      title: "Run script",
+      description:
+        "Run SQL statements (separated by ;) and CL commands (lines starting CL:) on IBM i, in order. Every statement is classified and decided by the execution policy, and every confirmation asked, before the first is sent: one denied statement or a declined confirmation sends nothing. Stops at the first failure. Returns per statement its decision, outcome, rows affected, rows (up to maxRows) and messages. Use policy_check first to see what the policy would decide. " +
+        LIMITS,
+      inputSchema: {
+        script: z.string().min(1).describe("SQL statements separated by ; and CL commands on lines starting CL: (+ continues a CL line)"),
+        maxRows: z.number().int().min(1).max(1000).optional().describe("rows returned per query, default 100, at most 1000"),
+        server: serverArg,
+      },
+      annotations: { title: "Run script", destructiveHint: true },
+    },
+    async ({ script, maxRows, server }) => {
+      const s = key(server);
+      let planned: { plan: Plan; conn: Conn };
+      try {
+        planned = await plan(s, script);
+      } catch (e) {
+        return fail(e);
+      }
+      const { plan: p, conn } = planned;
+      const summary = { server: s, partition: p.identity.partition, roles: p.statements[0]?.decision.roles ?? [] };
+
+      const stopped = p.statements.filter(stopping);
+      if (stopped.length) {
+        log(p, conn, p.statements.map((x) => (stopping(x) ? `denied: ${why(x)}` : "not sent: another statement was denied")));
+        const text = [
+          "Denied, nothing was sent:",
+          ...stopped.map((x) => `  statement ${p.statements.indexOf(x) + 1} (${x.statement.display.split("\n")[0]}): ${why(x)}`),
+          ASK,
+          LIMITS,
+        ].join("\n");
+        return result({ ...summary, ran: false, statements: p.statements.map((x, i) => ({ ...report(x, i), outcome: stopping(x) ? "denied" : "not sent" })), limits: LIMITS }, text, true);
+      }
+
+      const needs = p.statements.filter((x) => x.decision.effective === "confirm");
+      if (needs.length) {
+        const no = await confirm(p, needs);
+        if (no) {
+          log(p, conn, p.statements.map(() => `not sent: ${no}`), false);
+          const text = `Denied, nothing was sent: ${no}.\n${ASK}\n${LIMITS}`;
+          return result({ ...summary, ran: false, statements: p.statements.map((x, i) => ({ ...report(x, i), outcome: "not sent" })), limits: LIMITS }, text, true);
+        }
+      }
+
+      const cap = maxRows ?? 100;
+      const outcomes: string[] = [];
+      const done: Record<string, unknown>[] = [];
+      let failed = false;
+      for (const [i, x] of p.statements.entries()) {
+        const r = report(x, i);
+        if (failed) {
+          outcomes.push("not sent: an earlier statement failed");
+          done.push({ ...r, outcome: "not sent" });
+          continue;
+        }
+        try {
+          if (x.statement.kind === "cl") {
+            // The comment-stripped command: blanks outside quotes collapse, quoted values are kept.
+            const c = await conn.cl(x.statement.display);
+            r.messages = c.messages;
+            if (!c.ok) throw new Error(c.messages.map((m) => (m.id ? `[${m.id}] ${m.text}` : m.text)).join(" ") || "the command failed");
+            outcomes.push("ok");
+          } else if (/^\s*(\(|SELECT\b|VALUES\b|WITH\b)/i.test(x.statement.display)) {
+            // As written: the display drops blank lines, which may sit inside a literal.
+            const q = await conn.query(x.statement.text, undefined, cap);
+            Object.assign(r, { columns: q.columns.map((c) => c.name), rows: q.rows, truncated: q.truncated });
+            outcomes.push(`${q.rows.length} row(s)${q.truncated ? `, truncated at ${cap}` : ""}`);
+          } else {
+            const e = await conn.execute(x.statement.text);
+            Object.assign(r, { rowsAffected: e.rowsAffected, messages: e.messages });
+            outcomes.push(`${e.rowsAffected} row(s) affected`);
+          }
+          done.push({ ...r, outcome: "ok" });
+        } catch (e) {
+          failed = true;
+          outcomes.push(`failed: ${(e as Error).message}`);
+          done.push({ ...r, outcome: "failed", error: (e as Error).message });
+        }
+      }
+      log(p, conn, outcomes, needs.length ? true : undefined);
+      const text = done.map((_, i) => `statement ${i + 1}: ${outcomes[i]}`).join("\n") + (failed ? "\nStopped at the first failure; later statements were not sent." : "");
+      return result({ ...summary, ran: true, statements: done }, `${text}\n\n${JSON.stringify(done, null, 2)}`, failed);
+    },
+  );
+
+  const asSchema = z
+    .object({
+      user: z.string().min(1),
+      groups: z.array(z.string()).optional(),
+      authlists: z.array(z.string()).optional(),
+      partition: z.string().optional(),
+      curlib: z.string().optional(),
+    })
+    .strict();
+
+  mcp.registerTool(
+    "policy_check",
+    {
+      title: "Policy check",
+      description:
+        "Decide a script (SQL statements separated by ;, CL commands on lines starting CL:) without running it: per statement the operations with library, partition, environment and class, the matching rule and the decision. Sends only the catalog lookups needed to decide. With `as` (and optionally `policy`, a candidate policy file) it decides offline for that identity and sends nothing. " +
+        LIMITS,
+      inputSchema: {
+        script: z.string().min(1).describe("SQL statements separated by ; and CL commands on lines starting CL:"),
+        server: serverArg,
+        policy: z.string().optional().describe("a candidate policy file to decide with instead of the loaded one; needs `as`"),
+        as: asSchema.optional().describe("decide offline for this identity instead of the signed-on user; nothing is sent"),
+      },
+      annotations: { title: "Policy check", readOnlyHint: true },
+    },
+    async ({ script, server, policy: candidate, as }) => {
+      try {
+        let statements: Record<string, unknown>[];
+        let head: Record<string, unknown>;
+        if (as) {
+          const used = candidate ? loadPolicy(candidate) : policy;
+          const [t] = await runPolicyTests(used, [{ name: "policy_check", as, script, expect: "allow" }]);
+          head = { policy: used.source, as, offline: true };
+          statements = t.statements.map((x, i) => report({ statement: { display: x.text }, decision: x.decision }, i));
+        } else {
+          if (candidate) throw new Error("a candidate `policy` is decided offline: state the identity in `as` too");
+          const { plan: p } = await plan(key(server), script);
+          head = { server: key(server), partition: p.identity.partition, roles: p.statements[0]?.decision.roles ?? [], user: p.identity.user };
+          if (p.identity.conflict) head.conflict = p.identity.conflict;
+          statements = p.statements.map(report);
+        }
+        const lines = statements.map((r) => {
+          const ops = (r.operations as { message: string }[]).map((o) => `    - ${o.message}`);
+          return [`statement ${r.index}: ${r.effective}${r.effective !== r.decision ? ` (policy: ${r.decision}, not enforced)` : ""}${r.refused ? ` (${r.refused})` : ""}`, `    ${String(r.text).split("\n")[0]}`, ...ops].join("\n");
+        });
+        return result({ ...head, statements, limits: LIMITS }, `${lines.join("\n")}\n\n${LIMITS}`);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  // Design D7: whether confirmation is possible is worth one line on stderr per client.
+  const before = mcp.server.oninitialized;
+  mcp.server.oninitialized = () => {
+    before?.();
+    deps.notice(
+      mcp.server.getClientCapabilities()?.elicitation?.form
+        ? "[ibmi-agent-kit] confirmation is available in this client"
+        : "[ibmi-agent-kit] confirmation is unavailable in this client: statements a rule asks to confirm are denied",
+    );
+  };
+}

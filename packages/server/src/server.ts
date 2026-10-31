@@ -1,6 +1,9 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { CONFIG_DIRS, listServers } from "@ibmi-agent-kit/core";
+import { CONFIG_DIRS, listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
+import { loadPolicy, RunLog } from "@ibmi-agent-kit/guard";
+import { CONFIRM_TIMEOUT_MS, registerGuarded, type GuardDeps } from "./guarded.js";
 import { KEYS, register as registerScreen } from "@ibmi-agent-kit/screen/tools";
 import { register as registerSource } from "@ibmi-agent-kit/source/tools";
 
@@ -13,13 +16,33 @@ export interface KitServer {
   engines: Engine[];
 }
 
+export interface ServerDeps extends Partial<Omit<GuardDeps, "runLog">> {
+  extra?: (mcp: McpServer) => void;
+  runLogDir?: string;
+}
+
 // No process state is touched here: no listeners, no exit, no stdout. index.ts owns the process.
 // A tool name two engines both register throws the SDK's "Tool <name> is already registered".
-export function createServer(deps: { extra?: (mcp: McpServer) => void } = {}): KitServer {
+// The policy is loaded once, here: a missing or invalid IBMI_KIT_POLICY file throws, and index.ts
+// refuses to start naming it. Unset, the built-in observe policy applies.
+export function createServer(deps: ServerDeps = {}): KitServer {
   const mcp = new McpServer({ name: "ibmi-agent-kit", version: "0.1.0" }, { capabilities: { logging: {} } });
   const screen = registerScreen(mcp, { listServers: false });
   const source = registerSource(mcp, { listServers: false });
   deps.extra?.(mcp);
+
+  const policy = deps.policy ?? loadPolicy(process.env.IBMI_KIT_POLICY || undefined);
+  const notice = deps.notice ?? ((m: string) => console.error(m));
+  for (const w of policy.warnings) notice(`[ibmi-agent-kit] policy warning: ${w}`);
+  registerGuarded(mcp, {
+    policy,
+    runLog: new RunLog(deps.runLogDir ?? join(CONFIG_DIRS()[0], "runs"), policy, notice),
+    conn: deps.conn ?? ((server) => source.backend(server)),
+    profileEnv: deps.profileEnv ?? ((server) => resolveProfileEnv(server)),
+    systemName: deps.systemName ?? (() => undefined), // group 6: the screen engine's sign-on System field
+    confirmTimeoutMs: deps.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS,
+    notice,
+  });
 
   mcp.registerTool(
     "list_servers",
