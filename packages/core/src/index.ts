@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse } from "dotenv";
@@ -16,9 +16,21 @@ export function CONFIG_DIRS(): string[] {
     .map((d) => resolve(d));
 }
 
-// `.env` is "default", `.env.<name>` is "<name>", `.env.example` is never a server.
-export function listServers(): string[] {
-  const names = new Set<string>();
+// `.env` is "default", `.env.<name>` is "<name>". Never a server: `.env.example`; `.env.default`
+// (the default is `.env`, and one name must mean one file); `.env.` with no name; editor and
+// backup leftovers ending `.bak`, `.orig` or `~`; anything that is not a regular file.
+function serverName(file: string): string | undefined {
+  if (file === ".env") return "default";
+  if (!file.startsWith(".env.")) return undefined;
+  const name = file.slice(5);
+  if (!name || name === "example" || name === "default" || /(\.bak|\.orig|~)$/.test(name)) return undefined;
+  return name;
+}
+
+// Each name with the directory entry it came from, first folder wins. The path is that entry,
+// never rebuilt from the name, so on a case-insensitive file system `prod` cannot open `.env.Prod`.
+function profiles(): Map<string, string> {
+  const found = new Map<string, string>();
   for (const d of CONFIG_DIRS()) {
     let files: string[] = [];
     try {
@@ -27,29 +39,38 @@ export function listServers(): string[] {
       continue;
     }
     for (const f of files) {
-      if (f === ".env") names.add("default");
-      else if (f.startsWith(".env.") && f !== ".env.example") names.add(f.slice(5));
+      const name = serverName(f);
+      if (name === undefined || found.has(name)) continue;
+      try {
+        if (statSync(join(d, f)).isFile()) found.set(name, join(d, f));
+      } catch {
+        // a dangling link, or removed while listing: not a server
+      }
     }
   }
-  return [...names].sort();
+  return found;
 }
 
-// Settings that pick the box, the credentials, the transport or a guard. These come from the
-// profile file only, so a registration's environment can never lift a guard.
+export function listServers(): string[] {
+  return [...profiles().keys()].sort();
+}
+
+// Settings that pick the box, the credentials, the transport (and the jar and certificate it
+// trusts) or a guard. These come from the profile file only, so a registration's environment can
+// never lift a guard.
 const PROTECTED =
-  /^IBMI_(HOST|USER|PASSWORD|SQL_TRANSPORT|RESTRICTED|ALLOWED_CL|BLOCKED_CL|BLOCKED_TABLES|READ_ONLY|5250_TLS_INSECURE|[A-Z0-9_]*_PORT)$/;
+  /^IBMI_(HOST|USER|PASSWORD|SQL_TRANSPORT|RESTRICTED|ALLOWED_CL|BLOCKED_CL|BLOCKED_TABLES|READ_ONLY|5250_TLS_INSECURE|MAPEPIRE_CA|MAPEPIRE_JAR|[A-Z0-9_]*_PORT)$/;
 
 // Resolve a server name to the env map the engines' loadProfile() parses. The name is matched
-// exactly against listServers() before any file is read, so it never becomes part of a path
-// unchecked. One file supplies the whole profile; process.env is read, never written.
+// exactly against the listed names before any file is read, so it never becomes part of a path.
+// One file supplies the whole profile; process.env is read, never written.
 export function resolveProfileEnv(name?: string): Record<string, string> {
   const server = name || "default";
-  const available = listServers();
-  if (!available.includes(server)) {
-    throw new Error(`unknown server "${server}". Available: ${available.join(", ") || "none"}`);
+  const found = profiles();
+  const path = found.get(server);
+  if (path === undefined) {
+    throw new Error(`unknown server "${server}". Available: ${[...found.keys()].sort().join(", ") || "none"}`);
   }
-  const file = server === "default" ? ".env" : `.env.${server}`;
-  const path = CONFIG_DIRS().map((d) => join(d, file)).find((p) => existsSync(p))!;
   // Only IBMI_* settings fall back to the environment; everything else in it is not ours.
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {

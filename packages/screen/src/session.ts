@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact.
+// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery.
 // One 5250 session: transport, screen, and settle logic. The host says it is done twice, by
 // unlocking the keyboard and then definitively by sending a read command, so nothing here polls.
 
@@ -41,6 +41,7 @@ export class Session extends EventEmitter {
   private lastReadWasAllFields = false;
   private closed = false;
   private firstContact = true; // until a caller sends the first AID key
+  private customSignOn?: string; // structural signature of the custom sign on screen signOn() met
   private seen: Omit<Exchange, "key" | "selected"> = { saved: false, restored: false, cleared: false };
   private typed = new Map<string, string>();
   readonly stack = new ScreenStack();
@@ -259,13 +260,24 @@ export class Session extends EventEmitter {
 
     // A custom screen has no program/menu/library fields to fill, whatever else it paints.
     const custom = !this.looksLikeStandardSignOn();
-    if (!custom) {
+    if (custom) {
+      // Remembered, so the same screen is known again once a key was sent (after recovery, say).
+      this.customSignOn = structuralSignature(this.screen);
+      const ignored = [
+        ["IBMI_5250_PROGRAM", this.profile.initialProgram],
+        ["IBMI_5250_MENU", this.profile.initialMenu],
+        ["IBMI_5250_CURLIB", this.profile.initialLibrary],
+      ].filter(([, v]) => v).map(([k]) => k);
+      if (ignored.length) {
+        reporter.log("notice", `a custom sign on screen has no program, menu or library field, so ${ignored.join(", ")} from the profile is not used`);
+      }
+    } else {
       const landing = [this.profile.initialProgram, this.profile.initialMenu, this.profile.initialLibrary];
       landing.forEach((val, i) => {
         if (val && input[i + 2]) this.screen.typeInto(input[i + 2], val, this.encoder);
       });
     }
-    const before = custom ? structuralSignature(this.screen) : undefined;
+    const before = custom ? this.customSignOn : undefined;
 
     await this.pressKey("Enter", reporter);
 
@@ -328,9 +340,12 @@ export class Session extends EventEmitter {
   }
 
   // A customised sign on (PUB400): user field then one nondisplay password field, and nothing else.
-  // Only on first contact, so a later nondisplay field (an application PIN prompt) is never taken for it.
+  // Only on first contact, so a later nondisplay field (an application PIN prompt) is never taken for
+  // it, or when it is the very screen signOn() met before, as after recovery option 90.
   private looksLikeCustomSignOn(): boolean {
-    if (!this.firstContact) return false;
+    if (!this.firstContact) {
+      return this.customSignOn !== undefined && structuralSignature(this.screen) === this.customSignOn;
+    }
     const input = this.screen.inputFields();
     if (input.length < 2) return false;
     const [first, ...later] = input;

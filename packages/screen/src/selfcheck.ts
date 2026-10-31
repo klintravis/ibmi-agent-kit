@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ScreenBuffer, type Field } from "./screen.js";
@@ -626,6 +627,44 @@ test("a two field custom sign on screen is recognised on first contact only", as
   assert.equal(odd.stub.looksLikeSignOn(), false, "nondisplay first field");
 });
 
+test("a custom sign on screen met again after recovery is still recognised, signed on and guarded", async () => {
+  // Option 90 on "Attempt to Recover" drops back to the custom sign on after a key was sent, where
+  // the first-contact rule no longer holds. The screen signOn() saw is remembered instead.
+  const signon = () => [
+    field({ id: "f1", row: 5, col: 25, length: 10, attr: 0x20, monocase: true }),
+    field({ id: "f2", row: 6, col: 25, length: 128, attr: 0x27 }),
+  ];
+  const screen = new ScreenBuffer(24, 80, 37);
+  screen.fields = signon();
+  let state: "signon" | "recovery" | "app" = "signon";
+  let recovered = false;
+  const presses: string[] = [];
+  const logs: string[] = [];
+  const s: Session = Object.assign(Object.create(Session.prototype), {
+    screen, firstContact: true, encoder: enc, typed: new Map(),
+    profile: { user: "MYUSER", password: "S3CRET", restricted: true, allowedCl: [], blockedCl: [], initialProgram: "PGM" },
+    stack: { reset() {} }, emit: () => true,
+    looksLikeRecovery: () => state === "recovery",
+    pressKey: async function (this: { firstContact: boolean }, k: string) {
+      presses.push(`${state}:${k}`);
+      this.firstContact = false;
+      if (state === "signon" && !recovered) { state = "recovery"; screen.fields = [field({ id: "sel", row: 20, col: 10, length: 2 })]; }
+      else if (state === "recovery") { state = "signon"; recovered = true; screen.fields = signon(); }
+      else { state = "app"; screen.fields = [field({ id: "cmd", row: 20, col: 7, length: 153 })]; }
+    },
+  });
+  await s.establish({ step: () => {}, log: (level, m) => logs.push(`${level}: ${m}`) });
+  assert.deepEqual(presses, ["signon:Enter", "recovery:Enter", "signon:Enter"], "signed on again after option 90");
+  assert.equal(state, "app");
+  assert.equal(s.looksLikeSignOn(), false, "an application screen is not the sign on");
+  assert.ok(logs.some((l) => /^notice: .*IBMI_5250_PROGRAM/.test(l)), logs.join("\n"));
+
+  // Back on that screen after keys were sent, typing onto it is still refused.
+  screen.fields = signon();
+  assert.equal(s.looksLikeSignOn(), true);
+  assert.throws(() => s.typeInto(screen.fields[0], "C"), /QMAXSIGN/);
+});
+
 test("the standard sign on layout is still recognised after a key was pressed", () => {
   const s = new ScreenBuffer(24, 80, 37);
   s.apply(fixture("signon.bin"));
@@ -663,21 +702,43 @@ test("the key table cannot be walked through the prototype", () => {
   assert.equal(Object.keys(KEY_TO_AID).length > 20, true);
 });
 
-test("a server name cannot walk out of the config folders", () => {
-  // The name becomes a filename, so a traversing one reads another box's password.
-  for (const bad of [
-    "../../../../etc/hosts",
-    "../sibling",
-    "a/b",
-    "a\b",
-    ".hidden",
-    "",
-    "-flag",
-  ]) {
-    assert.throws(() => loadProfileFor(bad), /invalid server name|missing IBMI_HOST/, JSON.stringify(bad));
+// Every profile folder at an empty temp dir and no IBMI_* in the environment, so a real profile on
+// this machine can never answer a test. Restores both afterwards.
+function withEmptyConfig<T>(run: (dir: string, root: string) => T): T {
+  const saved = { ...process.env };
+  const root = mkdtempSync(join(tmpdir(), "kit-screen-"));
+  const dir = join(root, "config");
+  mkdirSync(dir);
+  for (const k of Object.keys(process.env)) if (k.startsWith("IBMI_")) delete process.env[k];
+  Object.assign(process.env, { IBMI_KIT_CONFIG_DIR: dir, HOME: root, USERPROFILE: root });
+  try {
+    return run(dir, root);
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    rmSync(root, { recursive: true, force: true });
   }
-  // A normal name still reaches the "no config for" path, not the guard.
-  assert.throws(() => loadProfileFor("NOSUCHBOX"), /no config for server/);
+}
+
+test("a server name cannot walk out of the config folders", () => {
+  // The name becomes a filename, so a traversing one reads another box's password. Refused against
+  // the listed names, with the same error the source engine gives.
+  withEmptyConfig((dir, root) => {
+    const creds = "IBMI_HOST=h\nIBMI_USER=u\nIBMI_PASSWORD=p\n";
+    writeFileSync(join(dir, ".env.prod"), creds);
+    writeFileSync(join(root, ".env.prod"), "IBMI_HOST=outside\nIBMI_USER=u\nIBMI_PASSWORD=p\n");
+    for (const bad of ["../../../../etc/hosts", "../sibling", "x/../.env.prod", "../.env.prod", "a/b", "a\b", ".hidden", "-flag", "PROD"]) {
+      assert.throws(() => loadProfileFor(bad), (e: Error) => /^unknown server .*Available: prod$/.test(e.message), JSON.stringify(bad));
+    }
+    assert.equal(loadProfileFor("prod").host, "h");
+    // No default profile: omitted, empty and any spelling of "default" fail naming what exists.
+    for (const d of [undefined, "", "default", "DEFAULT", "Default"]) {
+      assert.throws(() => loadProfileFor(d), (e: Error) => /^unknown server "(default|DEFAULT|Default)"\. Available: prod$/.test(e.message), String(d));
+    }
+    writeFileSync(join(dir, ".env"), creds);
+    assert.equal(loadProfileFor().host, "h");
+    assert.throws(() => loadProfileFor("DEFAULT"), /unknown server "DEFAULT"/, "only `default` names .env");
+  });
 });
 
 test("the live view answers only to localhost, so DNS rebinding cannot read it", () => {

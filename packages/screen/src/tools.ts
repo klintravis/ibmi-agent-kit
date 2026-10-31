@@ -327,7 +327,7 @@ export function register(
             `Servers: ${servers.join(", ") || "none configured"}\n` +
               `Open sessions: ${open.join(", ") || "none"}\n\n` +
               `Profiles are read from these folders, first match wins:\n${dirs}\n` +
-              (servers.length ? "" : `\nNo profiles found. Copy .env.example into one of the folders above.\n`) +
+              (servers.length ? "" : `\nNo profiles found. Copy .env.example as .env or .env.<name> into one of the folders above.\n`) +
               `\nKeys: ${KEYS.join(", ")}`,
           );
         } catch (e) {

@@ -1,31 +1,13 @@
-// Modified by ibmi-agent-kit (2026): profiles now resolve through @ibmi-agent-kit/core; the module-level dotenv loading is removed.
+// Modified by ibmi-agent-kit (2026): profiles now resolve through @ibmi-agent-kit/core, which also checks the name; the module-level dotenv loading is removed.
 import { CONFIG_DIRS, listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
 import { DEFAULT_CCSID } from "./ebcdic.js";
 import type { Profile } from "./types.js";
 
 export { CONFIG_DIRS, listServers };
 
-// The name arrives as a tool argument, so a traversing one is refused here with the message this
-// engine has always given, before core is asked.
-const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
+// core owns the folders and the exact-name check, so both engines refuse a name the same way.
 export function loadProfileFor(server?: string): Profile {
-  const isDefault = !server || server.toLowerCase() === "default";
-  if (!isDefault && !SERVER_NAME.test(server)) {
-    throw new Error(
-      `invalid server name "${server}". A server is named by its config file, so the ` +
-        `name may only contain letters, digits, dot, dash and underscore.`,
-    );
-  }
-  const name = isDefault ? undefined : server;
-  if (!listServers().includes(name ?? "default")) {
-    // No profile file: the default falls through to the missing-settings error, a named one is unknown.
-    if (isDefault) return loadProfile({});
-    throw new Error(
-      `no config for server "${server}" (expected a .env.${server} file). Available: ${listServers().join(", ") || "none"}`,
-    );
-  }
-  return loadProfile(resolveProfileEnv(name));
+  return loadProfile(resolveProfileEnv(server));
 }
 
 // Unrecognised throws rather than reading as false, so a typo cannot quietly turn a setting off.

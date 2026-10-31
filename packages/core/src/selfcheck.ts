@@ -141,3 +141,30 @@ test("process.env is unchanged after loading", () => {
   listServers();
   assert.deepEqual({ ...process.env }, before);
 });
+
+test("A name resolves to the exact file listed, so two cases never share a file", () => {
+  // On a case-insensitive file system .env.prod would otherwise open .env.Prod in an earlier folder.
+  put(kit(), ".env.Prod", "IBMI_HOST=upper\n");
+  put(shared(), ".env.prod", "IBMI_HOST=lower\n");
+  assert.deepEqual(listServers(), ["Prod", "prod"]);
+  assert.equal(resolveProfileEnv("Prod").IBMI_HOST, "upper");
+  assert.equal(resolveProfileEnv("prod").IBMI_HOST, "lower");
+});
+
+test("Only regular files with a usable name are servers", () => {
+  put(kit(), ".env.default", "IBMI_HOST=d\n"); // `default` is `.env`, so this is ignored
+  mkdirSync(join(kit(), ".env.dir"));
+  for (const f of [".env.", ".env.pub400.bak", ".env.pub400.orig", ".env.pub400~", ".env.example"]) put(kit(), f, "IBMI_HOST=x\n");
+  put(kit(), ".env.ok", "IBMI_HOST=ok\n");
+  assert.deepEqual(listServers(), ["ok"]);
+  for (const name of [undefined, "default", "dir", "", "pub400.bak", "pub400~"]) {
+    assert.throws(() => resolveProfileEnv(name), (e: Error) => e.constructor === Error && /Available: ok$/.test(e.message), String(name));
+  }
+});
+
+test("Mapepire CA and jar paths never come from the environment", () => {
+  put(kit(), ".env.dev", "IBMI_HOST=h\n");
+  process.env.IBMI_MAPEPIRE_CA = "/tmp/evil.pem";
+  process.env.IBMI_MAPEPIRE_JAR = "/tmp/evil.jar";
+  assert.deepEqual(Object.keys(resolveProfileEnv("dev")), ["IBMI_HOST"]);
+});

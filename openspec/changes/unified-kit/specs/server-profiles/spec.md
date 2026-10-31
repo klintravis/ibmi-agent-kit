@@ -10,7 +10,8 @@ server name always means one file and one box, and no file's settings leak into 
 ### Requirement: Profiles are searched in a fixed order of folders
 Profiles SHALL be searched in `IBMI_KIT_CONFIG_DIR` (or, when unset, `IBMI_MCP_CONFIG_DIR`), then
 `~/.ibmi-agent-kit`, then `~/.ibm-i-servers`. A file named `.env` is the `default` server and
-`.env.<name>` is server `<name>`; `.env.example` is never a server. No other folder is read.
+`.env.<name>` is server `<name>`; `.env.example`, `.env.default`, `.env.` and names ending `.bak`,
+`.orig` or `~` are never servers, and only regular files are. No other folder is read.
 
 #### Scenario: Shared folder fallback
 - **WHEN** only `~/.ibm-i-servers/.env.pub400` exists

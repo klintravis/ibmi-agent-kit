@@ -64,7 +64,7 @@ test("list_servers names the profile folders and no sessions when none are open"
     assert.match(text, /^Servers: none configured/);
     assert.match(text, /first match wins/);
     assert.ok(text.includes(join(root, "config")), text);
-    assert.match(text, /No profiles found/);
+    assert.match(text, /No profiles found. Copy .env.example as .env or .env.<name> into/);
     assert.doesNotMatch(text, /Open 5250 sessions/);
     // An open session is listed under its server, even once that profile file is gone.
     const withSessions = listServersText([
