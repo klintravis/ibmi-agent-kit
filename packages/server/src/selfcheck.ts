@@ -215,6 +215,19 @@ test("policy test: the example suite passes and exits 0, without starting MCP", 
   assert.doesNotMatch(r.stderr, /MCP server ready/);
 });
 
+// config-bootstrap: every shipped template loads and passes its own tests, so none drifts from the format.
+test("policy templates: each loads, is in observe mode and passes its tests", async () => {
+  const dir = join(EXAMPLES, "../templates/policies/");
+  const names = readdirSync(dir).filter((f) => f.endsWith(".yaml") && !f.endsWith(".tests.yaml"));
+  assert.equal(names.length, 4, names.join(", "));
+  for (const f of names) {
+    const policy = join(dir, f);
+    assert.equal(loadPolicy(policy).mode.default, "observe", f);
+    const r = await runBin(["policy", "test", policy, policy.replace(/\.yaml$/, ".tests.yaml")]);
+    assert.equal(r.code, 0, `${f}\n${r.stdout}${r.stderr}`);
+  }
+});
+
 test("policy test: a mutated policy names the failing case and the rule, and exits 1", async () => {
   const dir = mkdtempSync(join(tmpdir(), "kit-policy-"));
   try {

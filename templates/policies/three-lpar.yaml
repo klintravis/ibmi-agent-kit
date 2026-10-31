@@ -1,0 +1,33 @@
+# Template: three partitions (development, QA, production), one environment family per partition.
+# Copy to your company repo as policy.yaml and replace every invented name.
+# Observe mode everywhere: a deny is logged and the statement still runs.
+version: 1
+mode: observe
+
+partitions:
+  - { name: dev,  systems: [DEVBOX],  rdbs: [DEVRDB] }
+  - { name: qa,   systems: [QABOX],   rdbs: [QARDB] }
+  - { name: prod, systems: [PRODBOX], rdbs: [PRODRDB] }
+unknown_partition: prod
+
+environments:
+  - { name: scratch,  libraries: [QTEMP] }
+  - { name: personal, match: ["${USER}", "${USER}_*"], partitions: [dev] }
+  - { name: system,   match: ["Q*", "SYS*"] }
+  - { name: dev,      match: ["DV*"], partitions: [dev] }
+  - { name: integ,    match: ["IN*"], partitions: [dev] }
+  - { name: test,     match: ["TS*"], partitions: [qa] }
+  - { name: live,     match: ["LV*"], partitions: [prod] }
+
+roles:
+  - { name: qa,  groups: [GRPQA] }
+  - { name: dev, groups: [GRPDEV] }
+  - { name: analyst, groups: [GRPANL] }
+default_role: analyst
+
+rules:
+  - { classes: [danger], decision: deny }
+  - { env: scratch, classes: [read, write, ddl], decision: allow }
+  - { roles: [dev, qa], partition: dev, env: [personal, dev, integ], decision: allow }
+  - { roles: [qa], partition: qa, env: test, decision: allow }
+  - { classes: [read], decision: allow }

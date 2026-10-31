@@ -2,9 +2,9 @@
 
 ## 1. Templates (config-bootstrap spec)
 
-- [ ] 1.1 Write `templates/policies/{single-partition-ladder,two-partition,three-lpar,per-developer-libs}.yaml` (observe mode, commented, invented names) and a matching `.tests.yaml` for each with one allow and one deny per role × environment; verify `ibmi-agent-kit policy test` passes all four and `scripts/check-names.mjs` reports no hits
-- [ ] 1.2 Add a guard selfcheck that loads every template and runs its tests, so CI fails if a template drifts from the policy format; verify it passes
-- [ ] 1.3 Write `templates/company-repo/README.md` (layout of a company config repo: profiles, `policy.yaml`, command files, `policy.tests.yaml`, `verbs/`, CI running `policy test`, client permission rules); verify every path it names matches the skill's generation step
+- [x] 1.1 Write `templates/policies/{single-partition-ladder,two-partition,three-lpar,per-developer-libs}.yaml` (observe mode, commented, invented names) and a matching `.tests.yaml` for each with one allow and one deny per role × environment; verify `ibmi-agent-kit policy test` passes all four and `scripts/check-names.mjs` reports no hits
+- [x] 1.2 Add a guard selfcheck that loads every template and runs its tests, so CI fails if a template drifts from the policy format; verify it passes
+- [x] 1.3 Write `templates/company-repo/README.md` (layout of a company config repo: profiles, `policy.yaml`, command files, `policy.tests.yaml`, `verbs/`, CI running `policy test`, client permission rules); verify every path it names matches the skill's generation step
 
 ## 2. The skill (config-bootstrap spec; D1–D5)
 

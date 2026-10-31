@@ -157,7 +157,7 @@ commands:
 
 ## Example
 
-[examples/three-partitions.yaml](../examples/three-partitions.yaml) is a complete policy with three partitions, environments, four roles and a command file ([cm-product.yaml](../examples/cm-product.yaml)), and [examples/three-partitions.tests.yaml](../examples/three-partitions.tests.yaml) tests it. Every name in it is invented.
+[examples/three-partitions.yaml](../examples/three-partitions.yaml) is a complete policy with three partitions, environments, four roles and a command file ([cm-product.yaml](../examples/cm-product.yaml)), and [examples/three-partitions.tests.yaml](../examples/three-partitions.tests.yaml) tests it. Every name in it is invented. Starting points for a new company repo (observe mode, with tests) are in [templates/policies](../templates/policies): `single-partition-ladder`, `two-partition`, `three-lpar` and `per-developer-libs`; the repo layout is in [templates/company-repo](../templates/company-repo/README.md). They are not published with the packages.
 
 ## Test a policy
 

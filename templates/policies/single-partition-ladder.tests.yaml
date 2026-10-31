@@ -1,0 +1,121 @@
+# Policy tests for single-partition-ladder.yaml: every role in every environment, a read and a write, plus an
+# unclassified command (denied as danger) wherever the write is allowed.
+# Run: ibmi-agent-kit policy test single-partition-ladder.yaml single-partition-ladder.tests.yaml
+# `expect` is the policy's decision per statement; in observe mode a deny is logged and still run.
+# Users: JDOE (dev), MROE (qa), ANL01 (analyst). A personal library is the user's own name.
+- name: dev scratch
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: ZZZUNKNOWN LIB(QTEMP)
+  expect: [allow, allow, deny]
+- name: dev personal
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM JDOE.T;
+    DELETE FROM JDOE.T;
+    CL: ZZZUNKNOWN LIB(JDOE)
+  expect: [allow, allow, deny]
+- name: dev system
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM QSYS2.T;
+    DELETE FROM QSYS2.T
+  expect: [allow, deny]
+- name: dev dev
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM DVORD.T;
+    DELETE FROM DVORD.T;
+    CL: ZZZUNKNOWN LIB(DVORD)
+  expect: [allow, allow, deny]
+- name: dev test
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM TSORD.T;
+    DELETE FROM TSORD.T
+  expect: [allow, deny]
+- name: dev live
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM LVORD.T;
+    DELETE FROM LVORD.T
+  expect: [allow, deny]
+- name: qa scratch
+  as: { user: MROE, groups: [GRPQA] }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: ZZZUNKNOWN LIB(QTEMP)
+  expect: [allow, allow, deny]
+- name: qa personal
+  as: { user: MROE, groups: [GRPQA] }
+  script: |
+    SELECT * FROM MROE.T;
+    DELETE FROM MROE.T;
+    CL: ZZZUNKNOWN LIB(MROE)
+  expect: [allow, allow, deny]
+- name: qa system
+  as: { user: MROE, groups: [GRPQA] }
+  script: |
+    SELECT * FROM QSYS2.T;
+    DELETE FROM QSYS2.T
+  expect: [allow, deny]
+- name: qa dev
+  as: { user: MROE, groups: [GRPQA] }
+  script: |
+    SELECT * FROM DVORD.T;
+    DELETE FROM DVORD.T;
+    CL: ZZZUNKNOWN LIB(DVORD)
+  expect: [allow, allow, deny]
+- name: qa test
+  as: { user: MROE, groups: [GRPQA] }
+  script: |
+    SELECT * FROM TSORD.T;
+    DELETE FROM TSORD.T;
+    CL: ZZZUNKNOWN LIB(TSORD)
+  expect: [allow, allow, deny]
+- name: qa live
+  as: { user: MROE, groups: [GRPQA] }
+  script: |
+    SELECT * FROM LVORD.T;
+    DELETE FROM LVORD.T
+  expect: [allow, deny]
+- name: analyst scratch
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: ZZZUNKNOWN LIB(QTEMP)
+  expect: [allow, allow, deny]
+- name: analyst personal
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM ANL01.T;
+    DELETE FROM ANL01.T
+  expect: [allow, deny]
+- name: analyst system
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM QSYS2.T;
+    DELETE FROM QSYS2.T
+  expect: [allow, deny]
+- name: analyst dev
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM DVORD.T;
+    DELETE FROM DVORD.T
+  expect: [allow, deny]
+- name: analyst test
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM TSORD.T;
+    DELETE FROM TSORD.T
+  expect: [allow, deny]
+- name: analyst live
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM LVORD.T;
+    DELETE FROM LVORD.T
+  expect: [allow, deny]

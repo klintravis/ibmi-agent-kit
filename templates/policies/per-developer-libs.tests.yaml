@@ -1,0 +1,101 @@
+# Policy tests for per-developer-libs.yaml: every role in every environment, a read and a write, plus an
+# unclassified command (denied as danger) wherever the write is allowed.
+# Run: ibmi-agent-kit policy test per-developer-libs.yaml per-developer-libs.tests.yaml
+# `expect` is the policy's decision per statement; in observe mode a deny is logged and still run.
+# Users: JDOE (dev), KLEE (lead), ANL01 (analyst). A personal library is the user's own name.
+- name: dev scratch
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: ZZZUNKNOWN LIB(QTEMP)
+  expect: [allow, allow, deny]
+- name: dev personal
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM JDOE.T;
+    DELETE FROM JDOE.T;
+    CL: ZZZUNKNOWN LIB(JDOE)
+  expect: [allow, allow, deny]
+- name: dev system
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM QSYS2.T;
+    DELETE FROM QSYS2.T
+  expect: [allow, deny]
+- name: dev shared
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM SHORD.T;
+    DELETE FROM SHORD.T
+  expect: [allow, deny]
+- name: dev release
+  as: { user: JDOE, groups: [GRPDEV] }
+  script: |
+    SELECT * FROM RLORD.T;
+    DELETE FROM RLORD.T
+  expect: [allow, deny]
+- name: lead scratch
+  as: { user: KLEE, groups: [GRPLEAD] }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: ZZZUNKNOWN LIB(QTEMP)
+  expect: [allow, allow, deny]
+- name: lead personal
+  as: { user: KLEE, groups: [GRPLEAD] }
+  script: |
+    SELECT * FROM KLEE.T;
+    DELETE FROM KLEE.T;
+    CL: ZZZUNKNOWN LIB(KLEE)
+  expect: [allow, allow, deny]
+- name: lead system
+  as: { user: KLEE, groups: [GRPLEAD] }
+  script: |
+    SELECT * FROM QSYS2.T;
+    DELETE FROM QSYS2.T
+  expect: [allow, deny]
+- name: lead shared
+  as: { user: KLEE, groups: [GRPLEAD] }
+  script: |
+    SELECT * FROM SHORD.T;
+    DELETE FROM SHORD.T;
+    CL: ZZZUNKNOWN LIB(SHORD)
+  expect: [allow, allow, deny]
+- name: lead release
+  as: { user: KLEE, groups: [GRPLEAD] }
+  script: |
+    SELECT * FROM RLORD.T;
+    DELETE FROM RLORD.T
+  expect: [allow, deny]
+- name: analyst scratch
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM QTEMP.T;
+    DELETE FROM QTEMP.T;
+    CL: ZZZUNKNOWN LIB(QTEMP)
+  expect: [allow, allow, deny]
+- name: analyst personal
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM ANL01.T;
+    DELETE FROM ANL01.T
+  expect: [allow, deny]
+- name: analyst system
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM QSYS2.T;
+    DELETE FROM QSYS2.T
+  expect: [allow, deny]
+- name: analyst shared
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM SHORD.T;
+    DELETE FROM SHORD.T
+  expect: [allow, deny]
+- name: analyst release
+  as: { user: ANL01, groups: [GRPANL] }
+  script: |
+    SELECT * FROM RLORD.T;
+    DELETE FROM RLORD.T
+  expect: [allow, deny]

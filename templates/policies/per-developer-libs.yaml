@@ -1,0 +1,25 @@
+# Template: no fixed ladder; each developer works in personal libraries, a lead also in shared ones.
+# Copy to your company repo as policy.yaml and replace every invented name.
+# Observe mode: a deny is logged and the statement still runs.
+version: 1
+mode: observe
+
+environments:
+  - { name: scratch,  libraries: [QTEMP] }
+  - { name: personal, match: ["${USER}", "${USER}_*"] }   # every developer's own libraries
+  - { name: system,   match: ["Q*", "SYS*"] }
+  - { name: shared,   match: ["SH*"] }                    # team libraries
+  - { name: release,  match: ["RL*"] }                    # what is deployed
+
+roles:
+  - { name: lead, groups: [GRPLEAD] }
+  - { name: dev,  groups: [GRPDEV] }
+  - { name: analyst, groups: [GRPANL] }
+default_role: analyst
+
+rules:
+  - { classes: [danger], decision: deny }
+  - { env: scratch, classes: [read, write, ddl], decision: allow }
+  - { roles: [dev, lead], env: personal, decision: allow }
+  - { roles: [lead], env: shared, decision: allow }
+  - { classes: [read], decision: allow }
