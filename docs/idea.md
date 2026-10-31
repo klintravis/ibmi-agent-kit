@@ -51,6 +51,9 @@ Each phase lands as an OpenSpec change under `openspec/changes/`.
 
 ## Open questions
 
-- SQL access: add a Db2 engine (Mapepire or ODBC), or pair with IBM's `ibmi-mcp-server`?
+- SQL access is partly answered: `packages/source` already has `run_sql`, over a
+  `mapepire-server` jar it uploads to the IBM i and runs through SSH (`IBMI_SSH_PORT`; PUB400
+  answers on 2222, not 22). Open: whether that is enough for `pack init`, and whether
+  uploading a jar is acceptable to an enterprise's security review.
 - Where packs are loaded from at runtime: a path, a git URL, or both.
 - Whether PUB400's terms allow automated agent sessions, and at what rate.
