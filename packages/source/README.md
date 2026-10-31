@@ -4,7 +4,7 @@
 
 The source and SQL engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-source-mcp.
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![node](https://img.shields.io/badge/node-%3E%3D18-3c873a?logo=node.js&logoColor=white)](package.json)
+[![node](https://img.shields.io/badge/node-%3E%3D18.15-3c873a?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6?logo=typescript&logoColor=white)](package.json)
 [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-%5E1.19-6f42c1)](https://github.com/modelcontextprotocol/typescript-sdk)
 [![IBM i](https://img.shields.io/badge/IBM%20i-Db2%20for%20i-052fad?logo=ibm&logoColor=white)](https://mapepire-ibmi.github.io/)
@@ -41,7 +41,7 @@ Say you ask: "find the display file that shows department information, and note 
 
 ## Requirements
 
-- Node 18 or newer on the client.
+- Node 18.15 or newer on the client.
 - SSH access to the IBM i (port 22, already on by default) and a Java runtime on the box (already there
   on any system running Db2). Nothing else to install on the IBM i.
 - A user profile with authority to the source libraries. Uploading and compiling also need write authority to the target objects.
