@@ -1131,8 +1131,10 @@ test("verbs: a call must reach a verb and give only its parameters, and every on
       [P + "missing.yaml"]: calls("MISSING", "NOPE"),
       [P + "extra.yaml"]: verbYaml("EXTRA", "  - verb: CALLEE\n    args: { a: 5, c: 1 }"),
       [P + "short.yaml"]: verbYaml("SHORT", "  - verb: CALLEE\n    args: { b: 2 }"),
+      [P + "wrong.yaml"]: verbYaml("WRONG", "  - verb: CALLEE\n    args: { a: abc }"),
     }).src,
   );
+  assert.match(set.errors.join("\n"), /wrong\.yaml: steps\.0\.args\.a: "abc" is not an integer/);
   assert.deepEqual(addresses(set), ["proj:CALLEE", "proj:OK"]);
   const all = set.errors.join("\n");
   assert.match(all, /missing\.yaml: steps\.0\.verb: no verb NOPE/);
@@ -1241,6 +1243,9 @@ test("verbs: templates are refused at load where substitution would be unsafe or
     ["n: { type: integer, allowed: [1, two] }", 'sql: "VALUES :n"', /params\.n\.allowed\.1: "two" is not an integer/],
     ["s: { type: string, allowed: [01] }", 'sql: "VALUES :s"', /params\.s\.allowed\.0: 1 is not a string/],
     ["s: { type: string }", 'verb: OTHER\n    args: { t: "${s}" }', /steps\.0\.args\.t: \$\{s\}: parameter s is a string with no allowed list/],
+    ["n: { type: integer }", 'sql: "VALUES :n; VALUES :n"', /steps\.0\.sql: one SQL statement per step/],
+    ["n: { type: integer }", 'sql: "VALUES :n\\nCL: DLTLIB X"', /steps\.0\.sql: one SQL statement per step/],
+    ["n: { type: integer }", "expect: { sql: \"VALUES 'a\", empty: true }", /steps\.0\.expect\.sql: a string literal is never closed/],
   ];
   for (const [param, step, re] of cases) {
     const set = loadVerbs(verbRoot({ [P + "x.yaml"]: `name: X\ndescription: d\nparams:\n  ${param}\nsteps:\n  - ${step}\n` }).src);
@@ -1261,4 +1266,7 @@ test("verbs: ${p} doubles quotes inside literals and refuses a value that would 
   assert.equal(substitute("DELETE FROM T WHERE A > 1 - ${n}", "sql", n, { n: -1 }).text, "DELETE FROM T WHERE A > 1 - -1");
   assert.throws(() => substitute("VALUES :n", "sql", n, {}), /parameter n has no value/);
   assert.equal(substitute("${lib}", "arg", lib, { lib: "IN1" }).text, "IN1");
+  assert.equal(substitute("VALUES 1;", "sql", n, {}).text, "VALUES 1;");
+  const semi: Record<string, VerbParam> = { s: { type: "string", allowed: ["IN1; DELETE FROM T"] } };
+  assert.throws(() => substitute("SELECT * FROM ORD${s}.T", "sql", semi, { s: "IN1; DELETE FROM T" }), /substituted: one SQL statement per step/);
 });

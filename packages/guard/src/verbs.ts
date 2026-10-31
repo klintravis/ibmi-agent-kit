@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { issueLines, parseYaml } from "./commands.js";
+import { splitScript } from "./lexer.js";
 
 export type Layer = "user" | "proj" | "org";
 const LAYERS: Layer[] = ["user", "proj", "org"]; // closest first
@@ -222,9 +223,17 @@ function refs(t: string, kind: TemplateKind): Ref[] {
   return out;
 }
 
+function notOneStatement(sql: string): string[] {
+  const parts = splitScript(sql);
+  if (parts.length !== 1 || parts[0].kind !== "sql") return ["one SQL statement per step: no ; between statements and no CL: line"];
+  return parts[0].error ? [parts[0].error] : [];
+}
+
 // What makes a template unsafe or wrong, one line each, given the verb's parameters.
 function templateErrors(t: string, kind: TemplateKind, params: Record<string, VerbParam>): string[] {
   const errors: string[] = [];
+  // the bound values are one list for one statement, as execute(sql, params) takes them
+  if (kind === "sql") errors.push(...notOneStatement(t));
   for (const r of refs(t, kind)) {
     const p = r.name !== undefined && has(params, r.name) ? params[r.name] : undefined;
     const ref = `\${${r.name}}`;
@@ -276,7 +285,10 @@ export function substitute(t: string, kind: TemplateKind, params: Record<string,
     }
     out += s;
   }
-  return { text: out + t.slice(at), params: bound };
+  out += t.slice(at);
+  const split = kind === "sql" ? notOneStatement(out) : [];
+  if (split.length) throw new Error(`substituted: ${split.join("; ")}`);
+  return { text: out, params: bound };
 }
 
 // --- loading ---
@@ -427,7 +439,11 @@ export function loadVerbs(s: VerbSources): VerbSet {
       return `steps.${i}.verb: ${(e as Error).message}`;
     }
     const args = s.args ?? {};
-    for (const k of Object.keys(args)) if (!has(t.params, k)) return `steps.${i}.args.${k}: ${t.address} has no parameter ${k}`;
+    for (const [k, a] of Object.entries(args)) {
+      if (!has(t.params, k)) return `steps.${i}.args.${k}: ${t.address} has no parameter ${k}`;
+      const r = typeof a === "string" && a.includes("${") ? undefined : valueOf(t.params[k], a);
+      if (r && "error" in r) return `steps.${i}.args.${k}: ${r.error}`;
+    }
     for (const [k, p] of Object.entries(t.params)) if (p.default === undefined && !has(args, k)) return `steps.${i}: ${t.address} needs ${k}`;
     return undefined;
   }
