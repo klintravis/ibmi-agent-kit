@@ -1,0 +1,485 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { assertSelectOnly, extFor, likeLiteral, parseFndstrpdm, sqlJson, textTable, typeFromPath, withTimeLimit } from "./util.js";
+import { loadProfile } from "./config.js";
+import { MapepireBackend, aliasStmt, memberMetaStmt, qcmdexc, validLibOrStar, validName } from "./mapepire.js";
+import { ToolReporter } from "./report.js";
+import { COMMAND_TEMPLATES, assertCompileCommandAllowed, buildCompileCommand, buildLibraryListCommands, parseEvfevent } from "./compile.js";
+
+// the three variables a profile cannot do without, spread where a test adds more
+const baseEnv: NodeJS.ProcessEnv = { IBMI_HOST: "h", IBMI_USER: "u", IBMI_PASSWORD: "pw" };
+
+// --- util ---
+test("typeFromPath recovers the source type a new member needs", () => {
+  // read_source_member saves <member>.<type>, so an upload that has to addpfm can take srctype from the file it is about to send.
+  assert.equal(typeFromPath("ibmi-src/MYLIB/QDDSSRC/MYSCREEN.dspf"), "DSPF");
+  assert.equal(typeFromPath("C:\\work\\MYPGM.sqlrpgle"), "SQLRPGLE"); // a real windows path, \\w is not an escape
+  assert.equal(typeFromPath("MYPGM_reviewed.rpgle"), "RPGLE");
+  // .txt is what extFor emits when a member has no type: not a real srctype, so it must come back undefined and force the caller to pass one.
+  assert.equal(typeFromPath("notes.txt"), undefined);
+  // an editor leftover must not become a srctype: MYPGM.rpgle.bak once created a member of type BAK
+  for (const leftover of ["MYPGM.rpgle.bak", "MYPGM.sqlrpgle.orig", "MYPGM.clle.tmp", "MYPGM.dspf.old"])
+    assert.equal(typeFromPath(leftover), undefined, leftover);
+  assert.equal(typeFromPath("MY.PGM.rpgle"), "RPGLE"); // a dot is legal in a member name
+  assert.equal(typeFromPath("README"), undefined);
+  assert.equal(typeFromPath("X" + extFor("CLLE")), "CLLE"); // round trip with its inverse
+});
+
+test("extFor uses the member type as the extension", () => {
+  assert.equal(extFor("SQLRPGLE"), ".sqlrpgle");
+  assert.equal(extFor("DSPF"), ".dspf"); // display file, not .dds
+  assert.equal(extFor("clle"), ".clle");
+  assert.equal(extFor(""), ".txt");
+});
+
+test("parseFndstrpdm reads the listing structurally, not by its English headings", () => {
+  const ruler = "    SEQNBR  " + "*...+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8....+....9....+....100" + " Last Changed Date";
+  const hit = (seq: string, src: string) => seq.padStart(10) + "  " + src.padEnd(108) + "02-06-26";
+  const listing = [
+    "5770WDS V7R6M0  250418 MYSYS           Programming Development Manager      12-09-26  18:00:04     Page     1",
+    "File  . . . . . . . . :   QRPGLESRC",
+    "Member  . . . . . . . :   MYPGM                          Creation date . . . . . . :   06-02-26",
+    "Type  . . . . . . . . :   RPGLE                          Last changed date . . . . :   06-02-26",
+    "Record length . . . . :   112                            Number of records . . . . :   29",
+    ruler,
+    "            DCL",
+    hit("400", "dcl-f myscreen workstn;"),
+    hit("1100", "dcl-PI main;"),
+    "_ _ _ _ _   E N D   O F   M E M B E R   _ _ _ _ _",
+    "Member  . . . . . . . :   MYOTHER                        Creation date . . . . . . :   06-02-26",
+    ruler,
+    hit("250", "dcl-s x char(10);"),
+  ];
+  const known = new Set(["MYPGM", "MYOTHER"]);
+  assert.deepEqual(parseFndstrpdm(listing, known, "DCL"), [
+    { member: "MYPGM", seqNbr: 4, line: "dcl-f myscreen workstn;" },
+    { member: "MYPGM", seqNbr: 11, line: "dcl-PI main;" },
+    { member: "MYOTHER", seqNbr: 2.5, line: "dcl-s x char(10);" },
+  ]);
+  // the change date sits past the ruler window, so it never lands in the source line
+  assert.ok(!parseFndstrpdm(listing, known, "DCL").some((m) => m.line.includes("02-06-26")));
+});
+
+test("parseFndstrpdm does not let a mark line rename the member it is marking", () => {
+  const ruler = "    SEQNBR  " + "*...+....1....+....2" + " Last Changed Date";
+  const listing = [
+    "Member  . . . . . . . :   MYCALLER",
+    ruler,
+    "            MYCALLED",
+    "       300  " + "callp mycalled();".padEnd(20),
+  ];
+  assert.deepEqual(parseFndstrpdm(listing, new Set(["MYCALLER", "MYCALLED"]), "MYCALLED"),
+    [{ member: "MYCALLER", seqNbr: 3, line: "callp mycalled();" }]);
+});
+
+test("parseFndstrpdm keeps hits out when the member is not in the catalog list", () => {
+  const ruler = "    SEQNBR  " + "*...+....1....+....2" + " Last Changed Date";
+  const listing = ["Member  . . . . . . . :   NOTMINE", ruler, "       100  " + "dcl-s a;".padEnd(20)];
+  assert.deepEqual(parseFndstrpdm(listing, new Set(["OTHER"]), "dcl"), []);
+  assert.deepEqual(parseFndstrpdm([], new Set(["OTHER"]), "dcl"), []);
+});
+
+test("parseFndstrpdm drops hits from a member the catalog list excludes", () => {
+  // fndstrpdm scans mbr(*all) while `known` is already filtered by memberType, so a member of the
+  // wrong type appears in the listing. Its hits used to be reported under the previous member.
+  const ruler = "    SEQNBR  " + "*...+....1....+....2....+....3" + " Last Changed Date";
+  const hit = (seq: string, src: string) => seq.padStart(10) + "  " + src.padEnd(30) + "02-06-26";
+  const listing = [
+    "Member  . . . . . . . :   MYPGM",
+    "Record length . . . . :   112",
+    ruler,
+    hit("100", "this one is really in MYPGM"),
+    "Number of records found . . . . . :   1",
+    "_ _ _ _ _   E N D   O F   M E M B E R   _ _ _ _ _",
+    "Member  . . . . . . . :   MYOTHER",
+    "Record length . . . . :   112",
+    ruler,
+    hit("900", "this one is in MYOTHER"),
+  ];
+  assert.deepEqual(parseFndstrpdm(listing, new Set(["MYPGM"]), "this"),
+    [{ member: "MYPGM", seqNbr: 1, line: "this one is really in MYPGM" }]);
+});
+
+test("parseFndstrpdm takes the member from the first known name in a block, not a later heading", () => {
+  // a Type heading reading RPGLE must not win when a member happens to be named RPGLE
+  const ruler = "    SEQNBR  " + "*...+....1....+....2" + " Last Changed Date";
+  const listing = [
+    "Member  . . . . . . . :   MYPGM",
+    "Type  . . . . . . . . :   RPGLE",
+    ruler,
+    "       100  " + "belongs to MYPGM".padEnd(20),
+  ];
+  assert.deepEqual(parseFndstrpdm(listing, new Set(["MYPGM", "RPGLE"]), "belongs"),
+    [{ member: "MYPGM", seqNbr: 1, line: "belongs to MYPGM" }]);
+});
+
+test("parseFndstrpdm keeps attributing across a page break that reprints the heading", () => {
+  const ruler = "    SEQNBR  " + "*...+....1....+....2" + " Last Changed Date";
+  const listing = [
+    "Member  . . . . . . . :   MYPGM", ruler,
+    "       100  " + "before the break".padEnd(20),
+    "5770WDS V7R6M0  MYSYS   Programming Development Manager   12-09-26  18:00:04     Page     2",
+    "File  . . . . . . . . :   QRPGLESRC",
+    "Member  . . . . . . . :   MYPGM", ruler,
+    "       200  " + "after the break".padEnd(20),
+  ];
+  assert.deepEqual(parseFndstrpdm(listing, new Set(["MYPGM"]), "the"), [
+    { member: "MYPGM", seqNbr: 1, line: "before the break" },
+    { member: "MYPGM", seqNbr: 2, line: "after the break" },
+  ]);
+});
+
+test("likeLiteral escapes the wildcards so a filter is a substring, not a pattern", () => {
+  // both backslashes are load bearing in the source: drop one and _ is a live wildcard again
+  assert.equal(likeLiteral("ord_100"), "ORD\\_100");  // literal _, would otherwise match ordx100
+  assert.equal(likeLiteral("50%"), "50\\%");
+  assert.equal(likeLiteral("a\\b"), "A\\\\B");        // the escape character itself
+  assert.equal(likeLiteral("o'brien"), "O''BRIEN");
+});
+
+test("validName is the trust boundary: names are spliced into SQL and CL, never bound", () => {
+  for (const ok of ["MYLIB", "mylib", "A", "Q$SPCL", "MY#LIB", "MY@LIB", "A_B.C", "ABCDEFGHIJ"])
+    assert.equal(validName(ok, "library"), ok.toUpperCase(), `${ok} must be accepted`);
+  for (const bad of ["", "1ABC", "_ABC", "ABCDEFGHIJK", "MY LIB", "MY'LIB", "MY;LIB", "MY-LIB",
+                     "MY/LIB", "MY(LIB", "MY*LIB", "MYLIB--", "МYLIB", "*CURLIB"])
+    assert.throws(() => validName(bad, "library"), /invalid library/, `${JSON.stringify(bad)} must be rejected`);
+  // only validLibOrStar takes the special values, and it still falls back to validName
+  assert.equal(validLibOrStar("*curlib", "targetLibrary"), "*CURLIB");
+  assert.equal(validLibOrStar("MYLIB", "targetLibrary"), "MYLIB");
+  assert.throws(() => validLibOrStar("*CUR LIB", "targetLibrary"), /invalid targetLibrary/);
+  assert.throws(() => validLibOrStar("MY LIB", "targetLibrary"), /invalid targetLibrary/);
+});
+
+test("every compile template substitutes fully, asks for events, and passes the guard", () => {
+  const v = { tgtlib: "MYLIB", name: "MYPGM", srclib: "SRCLIB", srcfile: "QRPGLESRC", mbr: "MYPGM" };
+  for (const type of Object.keys(COMMAND_TEMPLATES)) {
+    const cmd = buildCompileCommand(type, v);
+    assert.ok(!cmd.includes("&"), `${type}: an unsubstituted token survived`);
+    assert.equal(cmd.split(/\s+/)[0], cmd.split(/\s+/)[0].toLowerCase(), `${type}: the CL verb must be lowercase`);
+    assert.doesNotThrow(() => assertCompileCommandAllowed(cmd), `${type}: blocked by its own guard`);
+    // *eventf is what writes EVFEVENT, without it a failed compile reports zero structured errors
+    if (type !== "sql") assert.ok(cmd.includes("option(*eventf)"), `${type}: lost option(*eventf)`);
+  }
+});
+
+// --- sql templates ---
+test("qcmdexc wraps a CL command as one SQL statement, doubling quotes for the literal", () => {
+  assert.equal(qcmdexc("clrpfm file(L/F) mbr(M)"), "call qsys2.qcmdexc('clrpfm file(L/F) mbr(M)')");
+  // A CL literal already doubles its own quotes, and this level doubles them again, so a description reaches QCMDEXC with the pair it started with.
+  assert.equal(qcmdexc("addpfm file(L/F) mbr(M) srctype(RPGLE) text('it''s here')"), "call qsys2.qcmdexc('addpfm file(L/F) mbr(M) srctype(RPGLE) text(''it''''s here'')')");
+});
+
+test("aliasStmt guards only the drop, so a missing alias is fine but a bad create still raises", () => {
+  const s = aliasStmt("MCPREAD", "MYLIB", "QRPGLESRC", "MYPGM");
+  // the handler sits in its own block around the drop, not around the create
+  assert.match(s, /begin\s+declare continue handler for sqlexception begin end;\s+execute immediate 'drop alias qtemp\.MCPREAD';\s+end;/);
+  assert.match(s, /execute immediate 'create alias qtemp\.MCPREAD for MYLIB\.QRPGLESRC\(MYPGM\)'/);
+  assert.ok(!s.includes("ovrdbf") && !s.includes("dltovr"), "no CL left in the read path");
+  assert.ok(!s.includes("qcmdexc"), "nothing rides along when nothing was asked for");
+  // an extra statement rides along on the same round trip
+  assert.ok(aliasStmt("MCPWRITE", "MYLIB", "QRPGLESRC", "MYPGM", qcmdexc("clrpfm file(MYLIB/QRPGLESRC) mbr(MYPGM)")).includes("call qsys2.qcmdexc('clrpfm file(MYLIB/QRPGLESRC) mbr(MYPGM)');"));
+});
+
+test("memberMetaStmt answers ccsid, length, type, change date and existence in one query", () => {
+  const s = memberMetaStmt("MYLIB", "QRPGLESRC", "MYPGM");
+  assert.ok(s.includes("qsys2.syscolumns"), "ccsid and length");
+  assert.ok(s.includes("qsys2.syspartitionstat"), "type and last change");
+  assert.ok(s.includes("left join"), "a missing member must still return the file's row");
+  assert.ok(s.includes("as found"), "the existence flag the upload path checks");
+  assert.ok(s.includes("'MYPGM'") && s.includes("'MYLIB'") && s.includes("'QRPGLESRC'"));
+  assert.equal((s.match(/select/gi) || []).length, 1, "one statement, not two selects stitched together");
+});
+
+// --- run_sql guard ---
+test("assertSelectOnly allows the select shapes run_sql exists for", () => {
+  for (const ok of [
+    "select * from MYLIB.MYFILE",
+    "select * from mylib/myfile",
+    "select objname from table(qsys2.object_statistics('MYLIB', '*FILE'))",
+    "select sql_name from table(systools.related_objects(library_name => 'MYLIB', file_name => 'MYFILE'))",
+    "with c as (select 1 as n from sysibm.sysdummy1) select * from c",
+    "(select 1 from sysibm.sysdummy1) union (select 2 from sysibm.sysdummy1)",
+    "SeLeCt 1 from sysibm.sysdummy1",
+    "\n\n  select 1 from sysibm.sysdummy1",
+    "select * from MYLIB.MYFILE fetch first 5 rows only",
+    "select * from MYLIB.MYFILE with ur",
+  ]) assert.equal(assertSelectOnly(ok), ok.trim(), `${JSON.stringify(ok)} must be allowed`);
+  assert.equal(assertSelectOnly("select 1 from sysibm.sysdummy1;  "), "select 1 from sysibm.sysdummy1");
+});
+
+test("assertSelectOnly refuses every statement that is not a select", () => {
+  for (const bad of [
+    "insert into mylib.myfile values (1)", "update mylib.myfile set a = 1", "delete from mylib.myfile",
+    "merge into mylib.myfile using x on 1 = 1 when matched then delete", "drop table mylib.myfile",
+    "create table mylib.x (a int)", "alter table mylib.myfile add column b int",
+    "grant select on mylib.myfile to public", "revoke select on mylib.myfile from public",
+    "comment on table mylib.myfile is 'x'", "label on table mylib.myfile is 'x'", "call mylib.myproc()",
+    "set schema mylib", "lock table mylib.myfile in exclusive mode", "rename table mylib.myfile to x",
+    "truncate table mylib.myfile", "begin end", "declare global temporary table t (a int)", "values 1",
+    "selectx from t", "without c as (select 1) select 1",
+  ]) assert.throws(() => assertSelectOnly(bad), /only runs select/, `${JSON.stringify(bad)} must be refused`);
+});
+
+test("assertSelectOnly refuses a write hidden inside a select", () => {
+  for (const bad of [
+    "select * from final table (insert into mylib.myfile values (1))",
+    "select * from new table (insert into mylib.myfile values (1))",
+    "select * from old table (delete from mylib.myfile)",
+    "select * from final  table(insert into mylib.myfile values (1))",
+    "select * from final\ntable (insert into mylib.myfile values (1))",
+    "with c as (select 1 as n from sysibm.sysdummy1) insert into mylib.myfile select n from c",
+    "with c as (select 1 as n from sysibm.sysdummy1) delete from mylib.myfile",
+    "with c as (select 1 as n from sysibm.sysdummy1) update mylib.myfile set a = 1",
+    "with c as (select 1 as n from sysibm.sysdummy1) merge into mylib.myfile using c on 1 = 1 when matched then delete",
+  ]) assert.throws(() => assertSelectOnly(bad), /write inside a select/, `${JSON.stringify(bad)} must be refused`);
+});
+
+test("assertSelectOnly refuses the functions that make a select run CL, phone home or read the IFS", () => {
+  for (const bad of [
+    "select qsys2.qcmdexc('dltlib mylib') from sysibm.sysdummy1",
+    "select qsys2.qcmdexc\n('dltlib mylib') from sysibm.sysdummy1",
+    "select systools.httpgetclob('http://example.com', '') from sysibm.sysdummy1",
+    "select * from table(qsys2.ifs_read('/home/myuser/.ssh/id_rsa'))",
+  ]) assert.throws(() => assertSelectOnly(bad), /refusing to call/, `${JSON.stringify(bad)} must be refused`);
+  assert.doesNotThrow(() => assertSelectOnly("select http_status from mylib.mylog"), "a name with no call paren is a column");
+});
+
+test("assertSelectOnly refuses the two catalog views that run for minutes and cannot be stopped", () => {
+  for (const bad of [
+    "select * from qsys2.syspartitionindexstat where index_schema = 'MYLIB' and index_name = 'MYFILE'",
+    "select * from QSYS2.SYSPARTITIONINDEXES where index_schema = 'MYLIB'",
+  ]) assert.throws(() => assertSelectOnly(bad), /qsys\.qadbkfld/, `${JSON.stringify(bad)} must be refused with the fast route named`);
+  assert.doesNotThrow(() => assertSelectOnly("select * from qsys2.syspartitionstat where table_schema = 'MYLIB'"), "the member view is fast");
+});
+
+test("withTimeLimit gives up on slow work and runs the cleanup, and leaves fast work alone", async () => {
+  let reset = 0;
+  await assert.rejects(withTimeLimit(new Promise(() => {}), 20, () => reset++, "too slow"), /too slow/);
+  assert.equal(reset, 1, "the cleanup is what frees the session");
+  assert.equal(await withTimeLimit(Promise.resolve(42), 1000, () => reset++, "too slow"), 42);
+  assert.equal(reset, 1, "fast work must not trigger the cleanup");
+});
+
+test("assertSelectOnly refuses comments and inner semicolons, even inside a string literal", () => {
+  for (const bad of [
+    "-- x\nselect 1 from sysibm.sysdummy1",
+    "/* x */ select 1 from sysibm.sysdummy1",
+    "select * from final/**/table(insert into mylib.myfile values (1))",
+    "select * from mylib.myfile where text like '%--%'",
+  ]) assert.throws(() => assertSelectOnly(bad), /remove the comments/, `${JSON.stringify(bad)} must be refused`);
+  for (const bad of ["select 1 from sysibm.sysdummy1; delete from mylib.myfile", "select * from mylib.myfile where a = 'a;b'"])
+    assert.throws(() => assertSelectOnly(bad), /one statement/, `${JSON.stringify(bad)} must be refused`);
+});
+
+test("assertSelectOnly refuses a blocked table however it is qualified, and a listed schema too", () => {
+  for (const bad of [
+    "select * from mysecrets", "select * from MYLIB.MYSECRETS", "select * from mylib/mysecrets",
+    `select * from "MYSECRETS"`, "select * from mylib.myfile a join MySecrets b on a.k = b.k",
+  ]) assert.throws(() => assertSelectOnly(bad, ["mysecrets"]), /blocked by IBMI_BLOCKED_TABLES/, `${JSON.stringify(bad)} must be refused`);
+  for (const ok of ["select * from mysecrets2", "select * from xmysecrets"])
+    assert.doesNotThrow(() => assertSelectOnly(ok, ["mysecrets"]), `${ok} is a different name`);
+  assert.doesNotThrow(() => assertSelectOnly("select * from mysecrets"), "nothing is blocked by default");
+  assert.doesNotThrow(() => assertSelectOnly("select * from my#secrets", ["secrets"]), "# is part of an IBM i name, not an edge");
+  assert.throws(() => assertSelectOnly("select * from mypayroll.anyfile", ["mypayroll"]), /blocked by IBMI_BLOCKED_TABLES/);
+});
+
+// --- sql results ---
+const char = (name: string, precision: number) => ({ name, type: "CHAR", precision, scale: 0 });
+const varchar = (name: string, precision: number) => ({ name, type: "VARCHAR", precision, scale: 0 });
+
+test("textTable sizes every column to the widest of its name, its type and its values", () => {
+  const out = textTable([char("N", 10), varchar("TABLE_TEXT", 50)],
+    [{ N: "MYFILE", TABLE_TEXT: "Order headers" }, { N: "A", TABLE_TEXT: "Order detail lines" }]).split("\n");
+  assert.equal(out[0], "N" + " ".repeat(9) + "TABLE_TEXT");
+  assert.equal(out[1], "CHAR(10)  VARCHAR(50)");
+  assert.equal(out[2], "-".repeat(8) + "  " + "-".repeat(18));
+  assert.equal(out[4], "A" + " ".repeat(9) + "Order detail lines");
+});
+
+test("textTable prints the names, types and rule for a result with no rows, so an empty select still shows its shape", () => {
+  assert.equal(textTable([char("N", 10), varchar("TABLE_TEXT", 50)], []),
+    "N" + " ".repeat(9) + "TABLE_TEXT\nCHAR(10)  VARCHAR(50)\n" + "-".repeat(8) + "  " + "-".repeat(11));
+});
+
+test("textTable formats a type with its length, and its scale only when it has one", () => {
+  const out = textTable([varchar("A", 10), { name: "B", type: "DECIMAL", precision: 9, scale: 2 }], []).split("\n");
+  assert.equal(out[1], "VARCHAR(10)  DECIMAL(9,2)");
+});
+
+test("textTable right aligns by declared type, not by value", () => {
+  const out = textTable([{ name: "AMT", type: "DECIMAL", precision: 11, scale: 2 }, char("CODE", 3)],
+    [{ AMT: "5.00", CODE: "7" }, { AMT: "12345.50", CODE: "123" }]).split("\n");
+  assert.equal(out[3], " ".repeat(9) + "5.00  7", "a decimal arriving as a string still right aligns, char digits stay left");
+  assert.equal(out[4], " ".repeat(5) + "12345.50  123");
+});
+
+test("textTable prints null and a missing value as -, and an empty string as blank", () => {
+  const cols = [char("A", 1), char("B", 1)];
+  assert.equal(textTable(cols, [{ A: null, B: "" }]).split("\n")[3], "-");
+  assert.equal(textTable(cols, [{ A: "x" }]).split("\n")[3], "x" + " ".repeat(8) + "-");
+});
+
+test("textTable strips CHAR padding and keeps one row on one line", () => {
+  const out = textTable([char("MBR", 10), varchar("TEXT", 50)], [{ MBR: "MYPGM     ", TEXT: "line one\nline two" }]).split("\n");
+  assert.equal(out.length, 4, "one row must print as one line");
+  assert.equal(out[3], "MYPGM" + " ".repeat(5) + "line one line two");
+});
+
+test("textTable cuts a very wide value with a visible mark", () => {
+  const row = textTable([varchar("T", 500)], [{ T: "x".repeat(500) }]).split("\n")[3];
+  assert.equal(row.length, 60);
+  assert.ok(row.endsWith("…"), "the cut has to show");
+});
+
+test("textTable says so when there are no columns at all", () => {
+  assert.equal(textTable([], []), "(no columns)");
+});
+
+test("sqlJson parses back to the same columns and rows, one row per line", () => {
+  const cols = [{ name: "A", type: "INTEGER", precision: 10, scale: 0 }];
+  const s = sqlJson(cols, [{ A: 1 }, { A: 2 }]);
+  assert.deepEqual(JSON.parse(s), { columns: cols, rows: [{ A: 1 }, { A: 2 }] });
+  assert.equal(s.trimEnd().split("\n").length, 4, "so an agent can read part of the file by line");
+  assert.deepEqual(JSON.parse(sqlJson(cols, [])).rows, []);
+});
+
+// --- config ---
+test("loadProfile reads env and applies defaults", () => {
+  const p = loadProfile(baseEnv);
+  assert.equal(p.password, "pw");
+  assert.equal(p.sshPort, 22);
+  assert.equal(p.sourceFileCcsid, 37);
+  assert.equal(p.readOnly, false);
+  assert.deepEqual(p.blockedCl, []);
+  assert.deepEqual(p.blockedTables, []);
+});
+
+test("loadProfile parses safety options", () => {
+  const p = loadProfile({ ...baseEnv, IBMI_READ_ONLY: "true", IBMI_BLOCKED_CL: "crtpf, dltf", IBMI_BLOCKED_TABLES: "MYSECRETS, mylib.mypasswords" });
+  assert.equal(p.readOnly, true);
+  assert.deepEqual(p.blockedCl, ["crtpf", "dltf"]);
+  assert.deepEqual(p.blockedTables, ["mysecrets", "mylib.mypasswords"]);
+});
+
+test("IBMI_READ_ONLY fails closed, so a stray space cannot unlock the box", () => {
+  for (const on of ["true", "true ", " true", "TRUE", "yes", "y", "on", "1", "enabled", "anything"])
+    assert.equal(loadProfile({ ...baseEnv, IBMI_READ_ONLY: on }).readOnly, true, `${JSON.stringify(on)} must lock`);
+  for (const off of ["false", "0", "no", "off", "FALSE", " off ", "", undefined as any])
+    assert.equal(loadProfile({ ...baseEnv, IBMI_READ_ONLY: off }).readOnly, false, `${JSON.stringify(off)} must not lock`);
+});
+
+test("loadProfile fails loudly when host/user/password missing", () => {
+  assert.throws(() => loadProfile({ IBMI_HOST: "h" }), /IBMI_HOST, IBMI_USER and\/or IBMI_PASSWORD/);
+});
+
+// --- compile ---
+test("assertCompileCommandAllowed permits crt*/runsqlstm, blocks destructive and non-create verbs", () => {
+  assert.doesNotThrow(() => assertCompileCommandAllowed("crtdspf file(L/N) srcfile(L/F) srcmbr(M)"));
+  assert.doesNotThrow(() => assertCompileCommandAllowed("crtbndrpg pgm(MYLIB/MYPGM)"));
+  assert.doesNotThrow(() => assertCompileCommandAllowed("runsqlstm srcfile(L/F) srcmbr(M)"));
+  // dlt* / clr* / rmv* families, matched by prefix
+  assert.throws(() => assertCompileCommandAllowed("dltlib mylib"), /destructive/);
+  assert.throws(() => assertCompileCommandAllowed("clrlib mylib"), /destructive/);
+  assert.throws(() => assertCompileCommandAllowed("rmvm file(l/f) mbr(m)"), /destructive/);
+  assert.throws(() => assertCompileCommandAllowed("qsys/dltf file(l/f)"), /destructive/); // lib-qualified
+  // these come off the explicit verb list, not a prefix
+  assert.throws(() => assertCompileCommandAllowed("strsql"), /destructive/);
+  assert.throws(() => assertCompileCommandAllowed("runqry qryfile(l/f)"), /destructive/);
+  assert.throws(() => assertCompileCommandAllowed("call pgm(l/p)"), /destructive/);
+  assert.throws(() => assertCompileCommandAllowed("dsplib mylib"), /not a create/); // not crt*, not destructive
+  assert.throws(() => assertCompileCommandAllowed("crtpf file(l/f)", ["crtpf"]), /destructive/); // admin extra
+});
+
+test("buildCompileCommand substitutes tokens; override wins; unknown type throws", () => {
+  const cmd = buildCompileCommand("rpgle", { tgtlib: "*CURLIB", name: "MYPGM", srclib: "MYLIB", srcfile: "QRPGLESRC", mbr: "MYPGM" });
+  assert.match(cmd, /^crtbndrpg pgm\(\*CURLIB\/MYPGM\) srcfile\(MYLIB\/QRPGLESRC\) srcmbr\(MYPGM\) option\(\*eventf\)/);
+  assert.ok(!cmd.includes("&"), "all tokens replaced");
+  assert.equal(buildCompileCommand("rpgle", { tgtlib: "L", name: "N", srclib: "SL", srcfile: "SF", mbr: "M" }, "crtbndrpg pgm(L2/&name)"), "crtbndrpg pgm(L2/N)"); // override still gets token substitution
+  assert.throws(() => buildCompileCommand("weird", { tgtlib: "L", name: "N", srclib: "SL", srcfile: "SF", mbr: "M" }), /no compile template/);
+});
+
+test("parseEvfevent parses a real DDS ERROR record (severity, line, clean text), skips others", () => {
+  // The ERROR record is the real layout from a crtdspf failure. The FILEID line (which the parser skips) has its paths anonymized.
+  const errs = parseEvfevent([
+    "FILEID     0 001 000000 021 MYLIB/QDDSSRC(MYDSPF) 20260101120000 0",
+    "ERROR      0 001 1 001700 000017 045 000017 045 CPD7484 E 20 200 Keyword not valid for this file type.",
+    "PROCESSOR  0 000 1",
+  ]);
+  assert.equal(errs.length, 1);
+  assert.equal(errs[0].msgId, "CPD7484");
+  assert.equal(errs[0].severity, 20); // the number, not the "E" class letter
+  assert.equal(errs[0].line, 17);
+  assert.equal(errs[0].text, "Keyword not valid for this file type."); // no stray length token
+});
+
+test("parseEvfevent also handles an ERROR record with no severity-class letter", () => {
+  const errs = parseEvfevent(["ERROR 0 001 1 001700 000017 045 000017 045 CPD7484 20 200 Keyword not valid for this file type."]);
+  assert.equal(errs[0].severity, 20);
+  assert.equal(errs[0].line, 17);
+  assert.equal(errs[0].text, "Keyword not valid for this file type.");
+});
+
+test("buildLibraryListCommands builds the right CL per action", () => {
+  assert.deepEqual(buildLibraryListCommands("add", { library: "MYLIB" }), ["addlible lib(MYLIB) position(*last)"]);
+  assert.deepEqual(buildLibraryListCommands("add", { library: "MYLIB", position: "first" }), ["addlible lib(MYLIB) position(*first)"]);
+  assert.deepEqual(buildLibraryListCommands("remove", { library: "MYLIB" }), ["rmvlible lib(MYLIB)"]);
+  assert.deepEqual(buildLibraryListCommands("set_current", { library: "MYLIB" }), ["chgcurlib curlib(MYLIB)"]);
+  // replace drops QTEMP (implicit) and can set the current library
+  assert.deepEqual(buildLibraryListCommands("replace", { libraries: ["A", "QTEMP", "B"], currentLibrary: "C" }), ["chglibl libl(A B) curlib(C)"]);
+  assert.deepEqual(buildLibraryListCommands("replace", { libraries: [] }), ["chglibl libl(*none)"]);
+});
+
+// --- backend guards ---
+test("changeLibraryList is refused in read-only mode (before any connect)", async () => {
+  const be = new MapepireBackend(loadProfile({ ...baseEnv, IBMI_READ_ONLY: "true" }));
+  await assert.rejects(() => be.changeLibraryList("add", { library: "MYLIB" }), /read-only/);
+});
+
+test("runSql refuses a non select before any connect, so it never reaches the box", async () => {
+  const be = new MapepireBackend(loadProfile(baseEnv));
+  await assert.rejects(() => be.runSql("delete from mylib.myfile"), /only runs select/);
+});
+
+// --- reporter ---
+test("ToolReporter: progress values only ever increase, and bar phases stay aligned after steps", () => {
+  const sent: { p: number; t?: number; m: string }[] = [];
+  const r = new ToolReporter("t", { sendProgress: (p, t, m) => sent.push({ p, t, m }), sendLog: () => {} });
+  r.step("connect");        // 1, always sent
+  r.bar("scan a", 1, 3);    // throttled away (right after the step, not final)
+  r.bar("scan b", 3, 3);    // final bar of the phase, always sent: base 1 -> 4/4
+  r.step("done");           // 5
+  assert.equal(sent.length, 3);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i].p > sent[i - 1].p, `progress must increase (${sent[i - 1].p} -> ${sent[i].p})`);
+  assert.deepEqual(sent[1], { p: 4, t: 4, m: "scan b" });
+});
+
+test("ToolReporter: without a progress token, steps fall back to info log notifications", () => {
+  const logs: string[] = [];
+  const r = new ToolReporter("t", { sendLog: (lvl, m) => logs.push(`${lvl}:${m}`) });
+  r.step("connecting");
+  r.log("warning", "w");
+  assert.deepEqual(logs, ["info:connecting", "warning:w"]);
+});
+
+test("ToolReporter: failResult names the tool and carries the message, with no footer", () => {
+  const logs: string[] = [];
+  const r = new ToolReporter("read_source_member", { sendLog: (lvl, m) => logs.push(`${lvl}:${m}`) });
+  const out = r.failResult(new Error("member not found"));
+  assert.equal(out.isError, true);
+  assert.equal(out.content[0].text, "read_source_member failed: member not found");
+  assert.deepEqual(logs, ["error:read_source_member failed: member not found"]);
+});
+
+test("ToolReporter: the stall watchdog repeats the last message during silence and stops on dispose", async () => {
+  const sent: string[] = [];
+  const r = new ToolReporter("t", { sendProgress: (_p, _t, m) => sent.push(m), sendLog: () => {} }, 80).start();
+  r.step("connecting to box");
+  await new Promise((res) => setTimeout(res, 300));
+  r.dispose();
+  const nudges = sent.filter((m) => m.includes("still working"));
+  assert.ok(nudges.length >= 1, `expected at least one nudge, got: ${sent.join(" | ")}`);
+  assert.match(nudges[0], /still working: connecting to box \(\d+s elapsed\)/);
+  const count = sent.length;
+  await new Promise((res) => setTimeout(res, 150));
+  assert.equal(sent.length, count, "nothing may be sent after dispose");
+});

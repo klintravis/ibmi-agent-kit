@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env*
+!.env.example
+ibmi-src/
+sbom.cdx.json
+CLAUDE.md
+
+# local Claude Code tooling, not part of the package
+.claude/
