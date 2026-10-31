@@ -1,0 +1,37 @@
+{
+  "name": "@ibmi-agent-kit/guard",
+  "version": "0.1.0",
+  "description": "Statement classifier, CL command table and execution policy for the IBM i agent kit",
+  "private": false,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./commands.yaml": "./dist/commands.yaml"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc && node -e \"require('fs').copyFileSync('src/commands.yaml', 'dist/commands.yaml')\"",
+    "check": "npm run build && node --test dist/selfcheck.js",
+    "prepack": "npm run build"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "yaml": "2.9.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

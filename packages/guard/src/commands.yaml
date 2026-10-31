@@ -1,0 +1,170 @@
+# CL commands the guard classifies (design D3). A command that is not here is `danger`.
+#
+# Each entry:
+#   class:          read | write | ddl | compile | call | liblist | promote | danger | a custom class
+#   class_by_param: { param, values: { VALUE: class }, default: class }   (instead of class)
+#   library:        the product library the command must be qualified to (else danger); without
+#                   it, a qualifier other than QSYS, QSYS2 or *LIBL is danger
+#   positional:     keyword order for values written without a keyword (DLTF B/X)
+#   params:         PARAM: object | library | rdb, or { kind, class, partition }
+#                   object = [LIB/]NAME, library = a library name, rdb = a database name
+#                   class defaults to the command's; partition decides that library on another
+#                   partition's environments
+#   writes:         object parameters written when given (DSPOBJD OUTFILE)
+#   nested_sql:     the parameter whose literal value is an SQL statement, classified as SQL
+#   reason:         shown with a danger class
+#
+# The list screens some of these show (WRKOBJ, WRKSPLF, ...) offer options such as 4=Delete.
+# Options typed on a list screen are not command lines, so the guard does not see them: a stated
+# limit, like what a called program does inside.
+
+commands:
+  # --- read ---
+  DSPOBJD:  { class: read, positional: [OBJ, OBJTYPE, DETAIL, OUTPUT], params: { OBJ: object }, writes: [OUTFILE] }
+  DSPFD:    { class: read, positional: [FILE, TYPE, OUTPUT, FILEATR], params: { FILE: object }, writes: [OUTFILE] }
+  DSPFFD:   { class: read, positional: [FILE, OUTPUT], params: { FILE: object }, writes: [OUTFILE] }
+  DSPDBR:   { class: read, positional: [FILE, MBR, RCDFMT, OUTPUT], params: { FILE: object }, writes: [OUTFILE] }
+  DSPPGMREF: { class: read, positional: [PGM, OUTPUT, OBJTYPE], params: { PGM: object }, writes: [OUTFILE] }
+  DSPOBJAUT: { class: read, positional: [OBJ, OBJTYPE, OUTPUT], params: { OBJ: object }, writes: [OUTFILE] }
+  DSPMBRD:  { class: read, positional: [FILE, MBR, TYPE, OUTPUT], params: { FILE: object }, writes: [OUTFILE] }
+  DSPPFM:   { class: read, positional: [FILE, MBR, FROMRCD], params: { FILE: object } }
+  DSPPGM:   { class: read, positional: [PGM, OUTPUT, DETAIL], params: { PGM: object } }
+  DSPSRVPGM: { class: read, positional: [SRVPGM, OUTPUT, DETAIL], params: { SRVPGM: object } }
+  DSPMOD:   { class: read, positional: [MODULE, OUTPUT, DETAIL], params: { MODULE: object } }
+  DSPCMD:   { class: read, positional: [CMD, OUTPUT], params: { CMD: object } }
+  DSPDTAARA: { class: read, positional: [DTAARA, OUTPUT, OUTFMT], params: { DTAARA: object } }
+  DSPJRN:   { class: read, positional: [JRN], params: { JRN: object }, writes: [OUTFILE] }
+  DSPSAVF:  { class: read, positional: [FILE, OUTPUT], params: { FILE: object } }
+  DSPLIB:   { class: read, positional: [LIB, OUTPUT], params: { LIB: library } }
+  DSPLIBL:  { class: read, positional: [OUTPUT] }
+  DSPJOB:   { class: read, positional: [JOB, OUTPUT, OPTION] }
+  DSPJOBLOG: { class: read, positional: [JOB, OUTPUT], writes: [OUTFILE] }
+  DSPMSG:   { class: read, positional: [MSGQ, OUTPUT] }
+  DSPSYSVAL: { class: read, positional: [SYSVAL, OUTPUT] }
+  DSPUSRPRF: { class: read, positional: [USRPRF, TYPE, OUTPUT], writes: [OUTFILE] }
+  DSPPTF:   { class: read, positional: [LICPGM, SELECT, RLS, OUTPUT], writes: [OUTFILE] }
+  DSPNETA:  { class: read, positional: [OUTPUT] }
+  CHKOBJ:   { class: read, positional: [OBJ, OBJTYPE, MBR, AUT], params: { OBJ: object } }
+  WRKACTJOB: { class: read, positional: [OUTPUT] }
+  WRKJOB:   { class: read, positional: [JOB, OUTPUT, OPTION] }
+  WRKUSRJOB: { class: read, positional: [USER, STATUS, OUTPUT] }
+  WRKSBMJOB: { class: read, positional: [SBMFROM, JOB, OUTPUT] }
+  WRKSPLF:  { class: read, positional: [SELECT, ASTLVL, OUTPUT] }
+  WRKOUTQ:  { class: read, positional: [OUTQ, OUTPUT], params: { OUTQ: object } }
+  WRKMSG:   { class: read, positional: [MSGQ, OUTPUT] }
+  WRKSYSSTS: { class: read, positional: [ASTLVL, OUTPUT] }
+  WRKOBJ:   { class: read, positional: [OBJ, OBJTYPE], params: { OBJ: object } }
+  WRKLIB:   { class: read, positional: [LIB], params: { LIB: library } }
+  WRKOBJPDM: { class: read, positional: [LIB, OBJ, OBJTYPE], params: { LIB: library } }
+  WRKMBRPDM: { class: read, positional: [FILE, MBR, MBRTYPE], params: { FILE: object } }
+  WRKLIBPDM: { class: read, positional: [LIB], params: { LIB: library } }
+  STRPDM:   { class: read }
+  GO:       { class: read, positional: [MENU, RTNPNT], params: { MENU: object } }
+  SIGNOFF:  { class: read, positional: [LOG, DROP] }
+
+  # --- write ---
+  CLRPFM:   { class: write, positional: [FILE, MBR], params: { FILE: object } }
+  INZPFM:   { class: write, positional: [FILE, MBR, RECORDS], params: { FILE: object } }
+  RGZPFM:   { class: write, positional: [FILE, MBR], params: { FILE: object } }
+  CLRSAVF:  { class: write, positional: [FILE], params: { FILE: object } }
+  CPYF:     { class: write, positional: [FROMFILE, TOFILE, FROMMBR, TOMBR, MBROPT, CRTFILE], params: { TOFILE: object, FROMFILE: { kind: object, class: read } } }
+  CPYSRCF:  { class: write, positional: [FROMFILE, TOFILE, FROMMBR, TOMBR, MBROPT], params: { TOFILE: object, FROMFILE: { kind: object, class: read } } }
+  CHGDTAARA: { class: write, positional: [DTAARA, VALUE], params: { DTAARA: object } }
+  SAVLIB:   { class: read, positional: [LIB, DEV], params: { LIB: library }, writes: [SAVF] }
+  SAVOBJ:   { class: read, positional: [OBJ, LIB, DEV, OBJTYPE], params: { LIB: library }, writes: [SAVF] }
+
+  # --- ddl: create, delete, change, restore, authorise ---
+  CRTLIB:   { class: ddl, positional: [LIB, TYPE, ASP, TEXT], params: { LIB: library } }
+  DLTLIB:   { class: ddl, positional: [LIB], params: { LIB: library } }
+  CLRLIB:   { class: ddl, positional: [LIB, ASPDEV], params: { LIB: library } }
+  CPYLIB:   { class: ddl, positional: [FROMLIB, TOLIB, CRTLIB], params: { TOLIB: library, FROMLIB: { kind: library, class: read } } }
+  CRTPF:    { class: ddl, positional: [FILE, SRCFILE, SRCMBR, RCDLEN], params: { FILE: object, SRCFILE: { kind: object, class: read } } }
+  CRTLF:    { class: ddl, positional: [FILE, SRCFILE, SRCMBR], params: { FILE: object, SRCFILE: { kind: object, class: read } } }
+  CRTSRCPF: { class: ddl, positional: [FILE, RCDLEN, MBR], params: { FILE: object } }
+  CRTSAVF:  { class: ddl, positional: [FILE], params: { FILE: object } }
+  CRTDTAARA: { class: ddl, positional: [DTAARA, TYPE, LEN, VALUE], params: { DTAARA: object } }
+  CRTDTAQ:  { class: ddl, positional: [DTAQ, TYPE, MAXLEN], params: { DTAQ: object } }
+  CHGPF:    { class: ddl, positional: [FILE, SRCFILE, SRCMBR], params: { FILE: object, SRCFILE: { kind: object, class: read } } }
+  CHGLF:    { class: ddl, positional: [FILE], params: { FILE: object } }
+  ADDPFM:   { class: ddl, positional: [FILE, MBR, TEXT], params: { FILE: object } }
+  CHGPFM:   { class: ddl, positional: [FILE, MBR], params: { FILE: object } }
+  RMVM:     { class: ddl, positional: [FILE, MBR], params: { FILE: object } }
+  RNMM:     { class: ddl, positional: [FILE, MBR, NEWMBR], params: { FILE: object } }
+  DLTF:     { class: ddl, positional: [FILE, SYSTEM, RMVCST], params: { FILE: object } }
+  DLTPGM:   { class: ddl, positional: [PGM], params: { PGM: object } }
+  DLTSRVPGM: { class: ddl, positional: [SRVPGM], params: { SRVPGM: object } }
+  DLTMOD:   { class: ddl, positional: [MODULE], params: { MODULE: object } }
+  DLTCMD:   { class: ddl, positional: [CMD], params: { CMD: object } }
+  DLTDTAARA: { class: ddl, positional: [DTAARA], params: { DTAARA: object } }
+  DLTDTAQ:  { class: ddl, positional: [DTAQ], params: { DTAQ: object } }
+  DLTOBJ:   { class: ddl, positional: [OBJ, OBJTYPE], params: { OBJ: object } }
+  CHGOBJD:  { class: ddl, positional: [OBJ, OBJTYPE], params: { OBJ: object } }
+  CHGOBJOWN: { class: ddl, positional: [OBJ, OBJTYPE, NEWOWN], params: { OBJ: object } }
+  GRTOBJAUT: { class: ddl, positional: [OBJ, OBJTYPE, USER, AUT], params: { OBJ: object } }
+  RVKOBJAUT: { class: ddl, positional: [OBJ, OBJTYPE, USER, AUT], params: { OBJ: object } }
+  RNMOBJ:   { class: ddl, positional: [OBJ, OBJTYPE, NEWOBJ], params: { OBJ: object } }
+  MOVOBJ:   { class: ddl, positional: [OBJ, OBJTYPE, TOLIB], params: { OBJ: object, TOLIB: library } }
+  CRTDUPOBJ: { class: ddl, positional: [OBJ, FROMLIB, OBJTYPE, TOLIB, NEWOBJ], params: { TOLIB: library, FROMLIB: { kind: library, class: read } } }
+  STRJRNPF: { class: ddl, positional: [FILE, JRN], params: { FILE: object } }
+  ENDJRNPF: { class: ddl, positional: [FILE, JRN], params: { FILE: object } }
+  RSTLIB:   { class: ddl, positional: [SAVLIB, DEV], params: { SAVLIB: library, RSTLIB: library } }
+  RSTOBJ:   { class: ddl, positional: [OBJ, SAVLIB, DEV, OBJTYPE], params: { SAVLIB: library, RSTLIB: library } }
+
+  # --- compile: the object built is the compile target; source is read ---
+  CRTBNDRPG: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
+  CRTRPGMOD: { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
+  CRTRPGPGM: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
+  CRTSQLRPGI: { class: compile, positional: [OBJ, SRCFILE, SRCMBR, COMMIT, RDB, OBJTYPE], params: { OBJ: object, SRCFILE: { kind: object, class: read }, RDB: rdb } }
+  CRTBNDCL: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
+  CRTCLMOD: { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
+  CRTCLPGM: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
+  CRTBNDCBL: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
+  CRTCBLMOD: { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
+  CRTSQLCBLI: { class: compile, positional: [OBJ, SRCFILE, SRCMBR, COMMIT, RDB, OBJTYPE], params: { OBJ: object, SRCFILE: { kind: object, class: read }, RDB: rdb } }
+  CRTBNDC:  { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
+  CRTCMOD:  { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
+  CRTPGM:   { class: compile, positional: [PGM, MODULE, ENTMOD], params: { PGM: object, MODULE: { kind: object, class: read } } }
+  CRTSRVPGM: { class: compile, positional: [SRVPGM, MODULE, EXPORT, SRCFILE, SRCMBR], params: { SRVPGM: object, MODULE: { kind: object, class: read }, SRCFILE: { kind: object, class: read } } }
+  UPDPGM:   { class: compile, positional: [PGM, MODULE], params: { PGM: object, MODULE: { kind: object, class: read } } }
+  UPDSRVPGM: { class: compile, positional: [SRVPGM, MODULE], params: { SRVPGM: object, MODULE: { kind: object, class: read } } }
+  CRTDSPF:  { class: compile, positional: [FILE, SRCFILE, SRCMBR], params: { FILE: object, SRCFILE: { kind: object, class: read } } }
+  CRTPRTF:  { class: compile, positional: [FILE, SRCFILE, SRCMBR], params: { FILE: object, SRCFILE: { kind: object, class: read } } }
+  CRTCMD:   { class: compile, positional: [CMD, PGM, SRCFILE, SRCMBR], params: { CMD: object, PGM: { kind: object, class: read }, SRCFILE: { kind: object, class: read } } }
+
+  # --- library list and overrides: they change what later unqualified names reach ---
+  ADDLIBLE: { class: liblist, positional: [LIB, POSITION], params: { LIB: library } }
+  RMVLIBLE: { class: liblist, positional: [LIB], params: { LIB: library } }
+  CHGCURLIB: { class: liblist, positional: [CURLIB], params: { CURLIB: library } }
+  CHGLIBL:  { class: liblist, positional: [LIBL, CURLIB], params: { LIBL: library, CURLIB: library } }
+  EDTLIBL:  { class: liblist }
+  OVRDBF:   { class: liblist, positional: [FILE, TOFILE, MBR], params: { TOFILE: object } }
+  DLTOVR:   { class: liblist, positional: [FILE, LVL] }
+
+  # --- call: the program run; what it does inside is not seen ---
+  CALL:     { class: call, positional: [PGM, PARM], params: { PGM: object } }
+
+  # --- nested SQL: the statement is classified, not the command ---
+  RUNSQL:   { class: read, positional: [SQL, COMMIT, NAMING], nested_sql: SQL }
+
+  # --- danger: opaque, system-wide, or run elsewhere ---
+  SBMJOB:   { class: danger, reason: "SBMJOB runs its command in another job, where the guard does not decide it" }
+  RUNSQLSTM: { class: danger, reason: "RUNSQLSTM runs statements from a member the command does not show; compile_member reads and decides them" }
+  STRSQL:   { class: danger, reason: "STRSQL is an interactive SQL session whose statements the guard does not see" }
+  QSH:      { class: danger, reason: "a Qshell command is opaque to the guard" }
+  STRQSH:   { class: danger, reason: "a Qshell command is opaque to the guard" }
+  STRREXPRC: { class: danger, reason: "a REXX procedure is opaque to the guard" }
+  QCAPCMD:  { class: danger, reason: "QCAPCMD runs a command the guard does not see" }
+  RUNRMTCMD: { class: danger, reason: "runs a command on another system" }
+  SBMRMTCMD: { class: danger, reason: "runs a command on another system" }
+  STRPCCMD: { class: danger, reason: "runs a command on a PC" }
+  PWRDWNSYS: { class: danger, reason: "ends the whole system" }
+  ENDSYS:   { class: danger, reason: "ends the whole system" }
+  ENDSBS:   { class: danger, reason: "ends a subsystem and its jobs" }
+  ENDTCP:   { class: danger, reason: "ends TCP/IP for everyone" }
+  ENDJOB:   { class: danger, reason: "ends another job" }
+  CHGUSRPRF: { class: danger, reason: "changes a user profile" }
+  CRTUSRPRF: { class: danger, reason: "creates a user profile" }
+  DLTUSRPRF: { class: danger, reason: "deletes a user profile" }
+  CHGSYSVAL: { class: danger, reason: "changes a system value" }
+  CHGSYSLIBL: { class: danger, reason: "changes the system library list" }
+  RCLSTG:   { class: danger, reason: "reclaims storage for the whole system" }
