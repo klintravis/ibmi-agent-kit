@@ -13,11 +13,12 @@ only need failures; the noise costs context and hides the one red line.
   for a failure, with no test name or message. Node 18 is EOL since April 2025 and
   `@hono/node-server` in the lockfile already needs `>=20`.
 
-Out of scope: package source and tests, no MCP tools added or changed, no custom reporter, no
+Out of scope: package source and existing tests, no MCP tools added or changed, no custom reporter, no
 printed pass/fail totals (the dot reporter prints none; the exit code and the absence of a
 "Failed tests" section are the signal).
 
 ## Impact
 
-`package.json` of core, guard, screen, server, source; `openspec/config.yaml`; root, screen and source
+`package.json` of core, guard, screen, server, source; `openspec/config.yaml`; `.github/workflows/check.yml`; `package-lock.json`;
+`packages/core/src/selfcheck.ts`; root, screen and source
 READMEs (Node version text).

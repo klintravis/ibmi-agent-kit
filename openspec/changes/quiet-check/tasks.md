@@ -18,3 +18,9 @@
 
 - [x] 4.1 Drop Node 18: engines `>=20`, CI matrix 20/22, READMEs, config.yaml, specs
 - [x] 4.2 Proposal and design record the ruling and the CI evidence
+
+## 5. Review fixes (round 2)
+
+- [x] 5.1 unified-server delta also modifies "The checks run on every supported platform" (Node 20 and 22)
+- [x] 5.2 Selfcheck: a passing run prints only dots
+- [x] 5.3 Proposal: out of scope "existing tests"; Impact lists check.yml, package-lock.json, selfcheck.ts

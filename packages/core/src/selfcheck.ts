@@ -185,3 +185,13 @@ test("dot reporter prints a failing test's name and message (quiet-check)", () =
   assert.match(out, /quiet-check-canary/);
   assert.match(out, /canary-message/);
 });
+
+test("dot reporter prints only dots for a passing run (quiet-check)", () => {
+  const f = join(root, "passing.test.mjs");
+  writeFileSync(f, 'import { test } from "node:test";\ntest("quiet-check-pass", () => {});\n');
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const r = spawnSync(process.execPath, ["--test", "--test-reporter=dot", f], { encoding: "utf8", env });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /^[.\s]*$/);
+});
