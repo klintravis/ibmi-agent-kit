@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): applyActions and runSuite pass an optional command line guard to every key they press.
 // Screen regression tests. A test is a Markdown file, so it reads as a specification: two fence
 // tags, and everything outside them is prose the parser ignores.
 //
@@ -5,7 +6,7 @@
 //   ```5250-expect    check the screen that came back
 
 import type { Reporter } from "./types.js";
-import type { Session } from "./session.js";
+import type { CommandGuard, Session } from "./session.js";
 import { messageLine, renderSnapshot, structuralSignature } from "./snapshot.js";
 
 export type Action =
@@ -185,6 +186,7 @@ export async function applyActions(
   session: Session,
   actions: Action[],
   reporter: Reporter,
+  guarded?: CommandGuard,
 ): Promise<void> {
   // Labelled by the key alone: typed text would carry a value typed into a hidden field. A timed out
   // key still gets its step, since the screen it stopped on is the one that says why.
@@ -199,7 +201,7 @@ export async function applyActions(
       } else if (a.kind === "cursor") {
         session.moveCursor(a.row, a.col);
       } else {
-        await session.pressKey(a.key, reporter);
+        await session.pressKey(a.key, reporter, { guarded });
         step(a.key, session.lastMove);
       }
     } catch (e) {
@@ -219,6 +221,7 @@ async function runTest(
   test: ScreenTest,
   reporter: Reporter,
   attachScreen: boolean,
+  guarded?: CommandGuard,
 ): Promise<TestResult> {
   const checks: CheckResult[] = [];
   let attached = false;
@@ -235,7 +238,7 @@ async function runTest(
   for (const [n, step] of test.steps.entries()) {
     reporter.step(`${test.name}: step ${n + 1} of ${test.steps.length}`);
     try {
-      await applyActions(session, step.actions, reporter);
+      await applyActions(session, step.actions, reporter, guarded);
     } catch (e) {
       // A broken test or an unexpected screen, so stop: later steps assumed this landed.
       const message = e instanceof Error ? e.message : String(e);
@@ -311,12 +314,13 @@ export async function runSuite(
   session: Session,
   tests: ScreenTest[],
   reporter: Reporter,
+  guarded?: CommandGuard,
 ): Promise<SuiteResult> {
   const results: TestResult[] = [];
   let attach = true;
   for (const [i, t] of tests.entries()) {
     reporter.step(`running test ${i + 1} of ${tests.length}: ${t.name}`);
-    const r = await runTest(session, t, reporter, attach);
+    const r = await runTest(session, t, reporter, attach, guarded);
     if (r.checks.some((c) => c.detail)) attach = false;
     results.push(r);
   }

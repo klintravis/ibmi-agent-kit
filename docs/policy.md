@@ -1,6 +1,6 @@
 # Policy file reference
 
-The execution policy is one YAML file that tells the [guard](../packages/guard/README.md) what each user may do in which library. It decides `run_script` and `policy_check`. Status: the guard does not yet decide `run_sql`, `compile_member`, the source tools or the 5250 tools, and its catalog lookups are not yet verified on a live IBM i.
+The execution policy is one YAML file that tells the [guard](../packages/guard/README.md) what each user may do in which library. It decides `run_script`, `verb_run` and `policy_check`, the source tools, the 5250 command line before each key that sends it, and `session_open`'s sign-on program and library (see [Safety in the root README](../README.md#safety)). Status: its catalog lookups are not yet verified on a live IBM i.
 
 The guard catches mistakes. It classifies the text it is given, not what called programs or triggers do. IBM i object authority stays the real boundary.
 
@@ -49,7 +49,7 @@ partitions:
 unknown_partition: prod
 ```
 
-The partition of a connection comes from the 5250 System name, the SQL RDB name (`CURRENT SERVER`) and the profile's `IBMI_PARTITION`. Every name that maps must map to the same partition, and a declared partition must exist; a disagreement is a conflict and denies everything, in every mode. If nothing maps, `unknown_partition` applies. A system or RDB may be listed by one partition only. Note: the 5250 System name is not read by the guard yet (a stub), so today the RDB name and `IBMI_PARTITION` decide.
+The partition of a connection comes from the 5250 System name, the SQL RDB name (`CURRENT SERVER`) and the profile's `IBMI_PARTITION`. Every name that maps must map to the same partition, and a declared partition must exist; a disagreement is a conflict and denies everything, in every mode. If nothing maps, `unknown_partition` applies. A system or RDB may be listed by one partition only. The 5250 System name is the `System` field of the sign-on screen, read when `session_open` connects and kept for that server; until a session has read it, the RDB name and `IBMI_PARTITION` decide. A customised sign-on screen without that field gives no System name.
 
 A three-part SQL name or a CL `RDB()` parameter that names a listed RDB is decided on that partition; one that names an unlisted RDB is `danger`.
 
@@ -153,7 +153,7 @@ commands:
 
 ## Confirmation
 
-`confirm` rules make `run_script`, `verb_run` and the source tools (`run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list`, `compile_member`) ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
+`confirm` rules make `run_script`, `verb_run`, the source tools (`run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list`, `compile_member`) and the 5250 tools (`screen_do`, `run_tests`, `session_open`) ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
 
 ## Example
 
@@ -209,5 +209,5 @@ See [Run log in the guard README](../packages/guard/README.md#run-log). It is a 
 - The guard sees the text it is given: not what a called program, trigger, menu option or prompted field does, and not options typed on a list screen.
 - A decision is made against the job as it was when the script was planned; a job lost or reset in between refuses the send.
 - Not yet verified on a live IBM i: the catalog lookups and the supplemental-group format.
-- Not yet wired in: the 5250 tools keep their own checks.
+- 5250: only the command line is decided, when a key that sends field data (not F3, F12, Clear or Attn) is pressed; F4 (prompt) with a command on the line is always denied, like `?`; `session_open`'s `menu` is not decided; the screen engine's restricted mode checks typed text only, so a command brought back with F9 meets only the guard.
 - `compile_member` with no `targetLibrary` compiles into `*CURLIB`, decided as the job's current library; with none, it is denied as unqualified.

@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): tool definitions split out of index.ts into register(); annotations and titles added; openSessions reports closed; KEYS re-exported.
+// Modified by ibmi-agent-kit (2026): tool definitions split out of index.ts into register(); annotations and titles added; openSessions reports closed; KEYS re-exported; an optional execution guard decides command lines before screen_do and run_tests keys and session_open's program and library before sign on; the sign on System name is kept per server.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -6,7 +6,7 @@ import { z } from "zod";
 import { KEYS } from "./codes.js";
 import { CONFIG_DIRS, listServers, loadProfileFor } from "./config.js";
 import { makeReporter, type ToolReporter } from "./report.js";
-import { Session } from "./session.js";
+import { Session, type CommandGuard } from "./session.js";
 import { renderSnapshot } from "./snapshot.js";
 import { applyActions, formatSuite, parseAction, parseTest, runSuite } from "./testrun.js";
 import { Viewer } from "./viewer.js";
@@ -54,12 +54,23 @@ function collectTests(where: string, filter?: string): string[] {
 
 // The key names screen_do accepts, for the kit server's list_servers.
 export { KEYS };
+// for the kit server's checks: a session over a fake host
+export { Session };
+
+// The kit server's execution guard (design D6), as the source engine's: awaited before acting, it
+// throws to refuse and may return a function told the outcome. Tools: `screen_command` with
+// { commands }, `session_open` with { program, library }.
+export type ScreenGuard = (tool: string, input: Record<string, unknown>, server: string) => Promise<((outcome: string) => void) | void>;
 
 export function register(
   mcp: McpServer,
-  opts?: { listServers?: boolean },
-): { shutdown(): Promise<void>; openSessions(): { server: string; session: string; closed: boolean }[] } {
+  opts?: { listServers?: boolean; guard?: ScreenGuard; newSession?: (server?: string) => Session },
+): { shutdown(): Promise<void>; openSessions(): { server: string; session: string; closed: boolean }[]; systemName(server: string): string | undefined } {
   const sessions = new Map<string, OpenSession>();
+  const systems = new Map<string, string>(); // server -> the last sign on screen's System name
+  const guard = opts?.guard;
+  const factory = opts?.newSession; // the kit server's checks: a session over a fake host, its own profile
+  const guardedFor = (server: string): CommandGuard | undefined => guard && ((commands) => guard("screen_command", { commands }, server));
 
   function requireSession(name?: string): OpenSession {
     const key = keyOf(name);
@@ -79,14 +90,20 @@ export function register(
   }
 
   // Shared with run_tests, which cannot depend on someone having opened a session first.
+  function newSession(server?: string, device?: string): Session {
+    if (factory) return factory(server);
+    const profile = loadProfileFor(server);
+    if (device) profile.deviceName = device; // before the connection is built, which copies it
+    return new Session(profile);
+  }
+
   async function openSession(key: string, opts: OpenOpts, r: ToolReporter): Promise<OpenSession> {
-    const profile = loadProfileFor(opts.server);
-    if (opts.device) profile.deviceName = opts.device;
+    const s = newSession(opts.server, opts.device);
+    const profile = s.profile;
     if (opts.library) profile.initialLibrary = opts.library;
     if (opts.program) profile.initialProgram = opts.program;
     if (opts.menu) profile.initialMenu = opts.menu;
 
-    const s = new Session(profile);
     const live: OpenSession = { session: s, server: opts.server || "default" };
 
     if (profile.viewerEnabled) {
@@ -105,7 +122,20 @@ export function register(
 
     sessions.set(key, live);
     await s.open(r);
-    if (opts.signOn !== false) await s.establish(r);
+    const system = s.signOnSystem();
+    if (system) systems.set(live.server, system);
+    if (opts.signOn !== false) {
+      // After connecting, so the System name just read places the box; before any sign on field is typed.
+      const landing = { program: profile.initialProgram, library: profile.initialLibrary };
+      const settle = guard && (landing.program || landing.library) ? (await guard("session_open", landing, live.server)) || undefined : undefined;
+      try {
+        await s.establish(r);
+      } catch (e) {
+        settle?.(`failed: ${(e as Error).message}`);
+        throw e;
+      }
+      settle?.("ok");
+    }
     s.emit("step", opts.signOn === false ? "opened" : "signed on");
     return live;
   }
@@ -207,7 +237,7 @@ export function register(
       try {
         const live = requireSession(session);
         const parsed = actions.map((a, i) => parseAction(a, i + 1, "action "));
-        await applyActions(live.session, parsed, r);
+        await applyActions(live.session, parsed, r, guardedFor(live.server));
         return toolResult(r, snapshotOf(live));
       } catch (e) {
         const live = sessions.get(keyOf(session));
@@ -297,7 +327,7 @@ export function register(
           ownKey = `run_tests_${Date.now().toString(36)}`;
           live = await openSession(ownKey, { server }, r);
         }
-        return toolResult(r, formatSuite(await runSuite(live.session, tests, r)));
+        return toolResult(r, formatSuite(await runSuite(live.session, tests, r, guardedFor(live.server))));
       } catch (e) {
         return r.failResult(e);
       } finally {
@@ -351,5 +381,6 @@ export function register(
     shutdown,
     openSessions: () =>
       [...sessions.entries()].map(([session, live]) => ({ server: live.server, session, closed: live.session.isClosed })),
+    systemName: (server) => systems.get(server),
   };
 }

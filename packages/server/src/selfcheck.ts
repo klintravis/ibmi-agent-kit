@@ -10,6 +10,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, LATEST_PROTOCOL_VERSION, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { builtinPolicy, classify, decide, loadPolicy, parsePolicy, recordLookups, runLogLines, statedLookups, type Policy } from "@ibmi-agent-kit/guard";
 import { MapepireBackend } from "@ibmi-agent-kit/source/tools";
+import { Session } from "@ibmi-agent-kit/screen/tools";
 import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine } from "./server.js";
@@ -361,7 +362,7 @@ function stubConn(
   return { conn, sent, queries };
 }
 
-async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; be?: MapepireBackend; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number; sqlTimeLimitMs?: number } = {}) {
+async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; be?: MapepireBackend; screen?: () => Session; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number; sqlTimeLimitMs?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "kit-runs-"));
   const notices: string[] = [];
   const stub = o.stub ?? stubConn();
@@ -370,8 +371,9 @@ async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubCon
     policy: o.policy ?? builtinPolicy(),
     conn: () => be ?? stub.conn,
     ...(be ? { sourceBackend: () => be } : {}),
+    ...(o.screen ? { screenSession: o.screen } : {}),
     profileEnv: () => ({}),
-    systemName: () => o.system,
+    ...(o.system !== undefined ? { systemName: () => o.system } : {}), // else the screen engine's sign-on System field
     runLogDir: dir,
     confirmTimeoutMs: o.timeoutMs ?? 5000,
     sqlTimeLimitMs: o.sqlTimeLimitMs ?? 5000,
@@ -893,6 +895,90 @@ test("6.1: a source tool whose write a rule asks to confirm sends nothing when d
     assert.match(r.text, /the user chose decline/);
     assert.deepEqual(k.stub.sent, []);
     assert.deepEqual([k.log()[0].confirmed, k.log()[0].outcome], [false, "not sent: the user chose decline"]);
+  } finally {
+    await k.close();
+  }
+});
+
+// --- screen engine hooks (guarded-tools spec; task 6.2) ---
+
+// The D4 example, enforced, with the screen engine's captured sign on record (System MYBOX1) listed
+// as partition `as`'s System name.
+const d4With = (as: "DEVBOX" | "QABOX") => parsePolicy(readFileSync(D4_PATH, "utf8").replace("mode: { default: observe, prod: enforce }", "mode: enforce").replace(`[${as}]`, "[MYBOX1]"), D4_PATH);
+
+// A 5250 session over a fake host: open() paints that sign on record, the sign on lands on a
+// command entry screen. `sent` holds every record that would have reached the box.
+function fakeScreen() {
+  const rec = readFileSync(fileURLToPath(new URL("../../screen/test/fixtures/signon.bin", import.meta.url)));
+  const profile: ConstructorParameters<typeof Session>[0] = {
+    host: "h", user: "JDOE", password: "Secret1x", port: 23, tls: false, tlsInsecure: false, terminalType: "IBM-3179-2", ccsid: 37, rows: 24, cols: 80,
+    restricted: false, allowedCl: [], blockedCl: [], viewerEnabled: false, viewerPort: 5250,
+  };
+  const s = new Session(profile);
+  const sent: Buffer[] = [];
+  const commandLine = { id: "f1", row: 20, col: 7, length: 153, attr: 0x20, protectedField: false, shift: "alpha shift", monocase: false, mandatory: false, autoEnter: false, mdt: false, seq: Number.MAX_SAFE_INTEGER };
+  Object.assign(s, {
+    conn: { sendRecord: (r: Buffer) => void (sent.push(r), s.looksLikeSignOn() && (s.screen.fields = [{ ...commandLine }] as typeof s.screen.fields)), close() {} },
+    settle: async () => void (s.screen.keyboardLocked = false),
+  });
+  s.open = async () => void s.screen.apply(rec);
+  return { s, sent };
+}
+
+test("6.2: session_open's program is decided as a call in the partition the sign-on System field names; a deny signs nothing on", async () => {
+  const host = fakeScreen();
+  const k = await guardedKit({ policy: d4With("DEVBOX"), screen: () => host.s });
+  try {
+    const r = await k.call("session_open", { program: "livlib/ordfix" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /Denied, session_open did nothing:\n  session_open program LIVLIB\/ORDFIX: no rule matches call LIVLIB\.ORDFIX \(environment unmatched, partition dev\)/);
+    assert.match(r.text, /Ask the user how to proceed/);
+    assert.deepEqual(host.sent, [], "no sign on reached the box");
+    const [line] = k.log();
+    assert.deepEqual([line.tool, line.kind, line.text, line.names, line.raw[0].class, line.raw[0].object], ["session_open", "tool", "session_open program LIVLIB/ORDFIX", { system: "MYBOX1", rdb: "DEVRDB" }, "call", { lib: "LIVLIB", name: "ORDFIX" }]);
+  } finally {
+    await k.close();
+  }
+  // A System name that maps to another partition than the RDB denies, as in 5.1.
+  const qa = fakeScreen();
+  const c = await guardedKit({ policy: d4With("QABOX"), screen: () => qa.s });
+  try {
+    const r = await c.call("session_open", { library: "JDOE" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /System MYBOX1, RDB DEVRDB map to different partitions: dev and qa/);
+    assert.deepEqual(qa.sent, []);
+  } finally {
+    await c.close();
+  }
+});
+
+test("6.2: a 5250 command line is decided as CL when the key is pressed; a denied one is never sent", async () => {
+  const host = fakeScreen();
+  const k = await guardedKit({ policy: d4With("DEVBOX"), screen: () => host.s });
+  try {
+    assert.equal((await k.call("session_open", {})).error, false, "nothing to decide");
+    assert.equal(host.sent.length, 1);
+    const r = await k.call("screen_do", { actions: ["type f1: dltlib lvord", "key: Enter"] });
+    assert.equal(r.error, true);
+    assert.match(r.text, /"key: Enter" failed: Denied, screen_command did nothing:\n  dltlib lvord: no rule matches ddl library LVORD \(environment live, partition dev\)/);
+    assert.equal(host.sent.length, 1, "Enter never went out");
+    const ok = await k.call("screen_do", { actions: ["type f1: DSPLIBL", "key: Enter"] });
+    assert.equal(ok.error, false, ok.text);
+    assert.equal(host.sent.length, 2);
+    // F4 prompts: the values come later on a screen with no command line, so it is denied as `?`.
+    const f4 = await k.call("screen_do", { actions: ["type f1: ADDLIBLE", "key: F4"] }); // ADDLIBLE alone is allowed (rule 9)
+    assert.equal(f4.error, true);
+    assert.match(f4.text, /\?ADDLIBLE: prompting \(\?\) lets values be typed later/);
+    assert.equal(host.sent.length, 2);
+    assert.deepEqual(k.log().map((l) => [l.tool, l.kind, l.text, l.effective, l.outcome.split(":")[0]]), [
+      ["screen_command", "cl", "dltlib lvord", "deny", "denied"], // replay adds the CL: itself
+      ["screen_command", "cl", "DSPLIBL", "allow", "ok"],
+      ["screen_command", "cl", "?ADDLIBLE", "deny", "denied"],
+    ]);
+    // The engine's own sign off is not decided.
+    await k.call("session_close", {});
+    assert.equal(host.sent.length, 3);
+    assert.equal(k.log().length, 3);
   } finally {
     await k.close();
   }

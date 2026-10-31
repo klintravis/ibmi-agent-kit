@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery.
+// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery; pressKey takes an optional `guarded` check of the command line before the key is sent; the sign on screen's System name is read.
 // One 5250 session: transport, screen, and settle logic. The host says it is done twice, by
 // unlocking the keyboard and then definitively by sending a read command, so nothing here polls.
 
@@ -30,6 +30,10 @@ const POLL_MS = 5;
 const CA_KEYS = new Set(["F3", "F12", "Clear"]);
 
 const EXIT_PRESSES = 6; // menus nest
+
+// The kit's execution guard for a key the caller pressed: given every command line text the key
+// would send, it throws to refuse, and may return a function told how the key ended.
+export type CommandGuard = (commands: string[]) => Promise<((outcome: string) => void) | void>;
 
 export class Session extends EventEmitter {
   readonly screen: ScreenBuffer;
@@ -213,14 +217,18 @@ export class Session extends EventEmitter {
     this.emit("screen", this.screen);
   }
 
-  async pressKey(key: string, reporter: Reporter = NOOP_REPORTER): Promise<void> {
-    this.firstContact = false;
-    this.seen = { saved: false, restored: false, cleared: false };
+  // `guarded` is set by the tool layer only, never by sign on, recovery or sign off, which press
+  // keys of their own: those are not decided.
+  async pressKey(key: string, reporter: Reporter = NOOP_REPORTER, opts: { guarded?: CommandGuard } = {}): Promise<void> {
     const name = normaliseKey(key);
     const aid = KEY_TO_AID[name];
     if (aid === undefined && name !== "Attn") {
       throw new Error(`unknown key "${key}". Known: ${KEYS.join(", ")}`);
     }
+    // CA keys and Attn send no field data, so whatever the command line holds goes nowhere.
+    const settled = opts.guarded && aid !== undefined && !CA_KEYS.has(name) ? await this.decideCommandLine(opts.guarded, name === "F4") : undefined;
+    this.firstContact = false;
+    this.seen = { saved: false, restored: false, cleared: false };
     const values = [...this.typed.values()].filter(Boolean);
     const selected = values.length > 0 && values.every((v) => /^\d+$/.test(v));
     this.typed.clear();
@@ -237,10 +245,43 @@ export class Session extends EventEmitter {
     if (!attn) this.screen.keyboardLocked = true;
     this.screen.alarm = false;
     this.restartSettle();
-    this.conn.sendRecord(record);
-    await this.settle(`the response to ${key}`, attn ? ATTN_GRACE_MS : 0);
+    try {
+      this.conn.sendRecord(record);
+      await this.settle(`the response to ${key}`, attn ? ATTN_GRACE_MS : 0);
+    } catch (e) {
+      settled?.(`failed: ${(e as Error).message}`);
+      throw e;
+    }
+    settled?.("ok");
     this.lastMove = this.stack.observe(this.screen, { key: name, selected, ...this.seen });
     this.emit("moved");
+  }
+
+  // What the command lines hold now, typed or retrieved by the host (F9), is what the key sends.
+  // Read again after the guard, which may wait on a confirmation: only what was decided is sent.
+  // F4 prompts the command, whose values are typed later on a screen with no command line: it is
+  // decided as `?command`, which the guard refuses like any prompted command.
+  private async decideCommandLine(guarded: CommandGuard, prompt: boolean): Promise<((outcome: string) => void) | undefined> {
+    const read = () =>
+      this.commandLineCandidates()
+        .filter((f) => !isNondisplay(f.attr)) // a passphrase is never decided, nor logged
+        .map((f) => this.screen.valueOf(f).trim())
+        .filter(Boolean);
+    const commands = read();
+    if (!commands.length) return undefined;
+    const done = (await guarded(prompt ? commands.map((c) => `?${c}`) : commands)) || undefined;
+    if (read().join("\n") !== commands.join("\n")) {
+      done?.("not sent: the command line changed while it was decided");
+      throw new Error("the command line changed while it was being decided, so nothing was sent. Look at the screen and press the key again.");
+    }
+    return done;
+  }
+
+  // The sign on screen's "System . . . . :" value, the name partition detection matches. Only on
+  // a sign on screen: WRKSYSSTS paints the same label.
+  signOnSystem(): string | undefined {
+    if (!this.looksLikeSignOn()) return undefined;
+    return /^\s*System[ .]*:\s*([A-Z0-9#$@_]{1,8})(?=\s|$)/im.exec(this.screen.text())?.[1].toUpperCase();
   }
 
   async signOn(reporter: Reporter = NOOP_REPORTER): Promise<void> {

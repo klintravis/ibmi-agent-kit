@@ -1,6 +1,6 @@
 # @ibmi-agent-kit/screen
 
-<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, mounting). -->
+<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, mounting, the kit's execution guard hook). -->
 
 The 5250 screen engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-5250-mcp.
 
@@ -271,6 +271,15 @@ it like any tool that can act on the box.
 - **Least privilege first.** The server can do exactly what the profile in the env file can do, so
   give it one that reaches the program under test and nothing else. Add `lmtcpb(*yes)` and IBM i
   itself refuses almost everything typed on a command line. Restricted mode narrows it further.
+- **Execution guard (kit server only).** Mounted in the kit server, `register(mcp, { guard })` gets
+  the kit's execution guard. Before `screen_do` or `run_tests` sends a key that carries field data
+  (not F3, F12, Clear or Attn), it decides whatever the command line holds then, typed or retrieved
+  with F9, and F4 with a command on the line is always denied (its prompt's values go unseen);
+  `session_open` reads the sign-on screen's System name, then has the program and library
+  it would type decided before signing on. A deny sends nothing. Sign-on, recovery and sign-off
+  keys the server sends itself are not decided. The standalone `ibmi-agent-kit-screen` bin has no
+  guard. Restricted mode checks text as it is typed, so in the standalone bin a command retrieved
+  with F9 is not checked. See the [root README](../../README.md#safety).
 - **Password masking.** Anything the screen hides while you type it stays hidden. Your password never
   shows up in what the assistant reads, in the live view, or in the logs.
 - **The live view.** A non interactive page, served on 127.0.0.1 only, gated by a token that is new

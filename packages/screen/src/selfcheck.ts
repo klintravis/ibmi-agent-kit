@@ -16,6 +16,10 @@ import { KEY_TO_AID, AID, CMD, ESC, FFW, ORDER, attrName, attrOf } from "./codes
 import { buildAttention, buildInbound, buildQueryReply, buildSaveScreenReply } from "./inbound.js";
 import { MAX_STEPS, renderFrame } from "./render.js";
 import { formatSuite, parseTest } from "./testrun.js";
+import { register } from "./tools.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { lastPaintedRow, messageLine, renderSnapshot, structuralSignature } from "./snapshot.js";
 import { ScreenStack, windowTitle, type Exchange } from "./stack.js";
 
@@ -1266,4 +1270,162 @@ test("importing tools.js adds no process listeners, writes no stdout and leaves 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "", "importing tools.js must write nothing to stdout");
   assert.deepEqual(JSON.parse(r.stderr), { same: true, listeners: [0, 0, 0, 0], envSame: true });
+});
+
+// --- the kit's execution guard on 5250 keys (guarded-tools spec; task 6.2) ---
+
+// The captured sign on record with its System name set: MYBOX1 is six bytes at offset 82, so a
+// six-character name such as PUB400 moves no offset.
+const signOnAs = (system: string) => {
+  const rec = Buffer.from(fixture("signon.bin"));
+  assert.equal(decode(rec.subarray(82, 88)), "MYBOX1");
+  enc(system).copy(rec, 82);
+  return rec;
+};
+const commandEntry = () =>
+  gds(ESC, CMD.CLEAR_UNIT, ESC, CMD.WRITE_TO_DISPLAY, 0, 0, ORDER.SBA, 20, 2, ...enc("===>"), ...sf(20, 7, 153));
+
+// A session over a fake host: open() paints the sign on capture, the key that signs on lands on a
+// command entry screen, and F9 writes `retrieve` onto its command line. Every record sent is kept.
+function fakeHost(o: { program?: string; retrieve?: string } = {}) {
+  const profile = loadProfile({
+    IBMI_HOST: "h", IBMI_USER: "MYUSER", IBMI_PASSWORD: "S3CRET", IBMI_RESTRICTED: "false", IBMI_5250_TERMINAL: "IBM-3179-2",
+    ...(o.program ? { IBMI_5250_PROGRAM: o.program } : {}),
+  });
+  const s = new Session(profile);
+  const sent: Buffer[] = [];
+  Object.assign(s, {
+    conn: {
+      sendRecord(r: Buffer) {
+        sent.push(r);
+        if (r[12] === KEY_TO_AID.F9 && o.retrieve) s.screen.typeInto(s.screen.fields[0], o.retrieve, enc); // the host, not the caller
+        else if (s.looksLikeSignOn()) s.screen.apply(commandEntry());
+      },
+      close() {},
+    },
+    settle: async () => void (s.screen.keyboardLocked = false),
+  });
+  s.open = async () => void s.screen.apply(signOnAs("PUB400"));
+  return { s, sent };
+}
+
+// The screen tools on a fake host, with a guard that records every call and denies what `deny` matches.
+async function guardedScreen(o: { program?: string; retrieve?: string; deny?: RegExp } = {}) {
+  const host = fakeHost(o);
+  const calls: { tool: string; input: Record<string, unknown>; server: string; outcome?: string }[] = [];
+  const mcp = new McpServer({ name: "t", version: "0" });
+  const engine = register(mcp, {
+    listServers: false,
+    newSession: () => host.s,
+    guard: async (tool, input, server) => {
+      const call: (typeof calls)[number] = { tool, input, server };
+      calls.push(call);
+      if (o.deny?.test(JSON.stringify(input))) throw new Error(`Denied, ${tool} did nothing: rule 1 denies it`);
+      return (outcome) => void (call.outcome = outcome);
+    },
+  });
+  const client = new Client({ name: "t", version: "0" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([mcp.connect(b), client.connect(a)]);
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const r = await client.callTool({ name, arguments: args });
+    return { error: r.isError === true, text: (r.content as { text: string }[])[0].text };
+  };
+  return { ...host, calls, call, engine, close: () => client.close() };
+}
+
+test("6.2: F9 then Enter decides the command the line holds at the key, so a denied retrieved command sends nothing", async () => {
+  const k = await guardedScreen({ retrieve: "DLTLIB LVORD", deny: /DLTLIB/ });
+  try {
+    assert.equal((await k.call("session_open", {})).error, false);
+    assert.equal(k.sent.length, 1, "the sign on Enter");
+    const r = await k.call("screen_do", { actions: ["type f1: DSPLIBL", "key: F9", "key: Enter"] });
+    assert.equal(r.error, true);
+    assert.match(r.text, /"key: Enter" failed: Denied, screen_command did nothing: rule 1 denies it/);
+    assert.equal(k.sent.length, 2, "F9 went out, Enter did not");
+    assert.equal(k.sent[1][12], KEY_TO_AID.F9);
+    assert.deepEqual(k.calls.map((c) => [c.tool, c.input.commands, c.server, c.outcome]), [
+      ["screen_command", ["DSPLIBL"], "default", "ok"], // what was typed, sent with F9
+      ["screen_command", ["DLTLIB LVORD"], "default", undefined], // what F9 put there, never what was typed
+    ]);
+    // CA keys send no field data: F3 leaves with the denied command still on the line, undecided.
+    assert.equal((await k.call("screen_do", { actions: ["key: F3"] })).error, false);
+    assert.equal(k.calls.length, 2);
+    assert.equal(k.sent.length, 3);
+  } finally {
+    await k.close();
+  }
+});
+
+test("6.2: the engine's own sign on and sign off are never decided", async () => {
+  const k = await guardedScreen({ deny: /./ }); // a guard that refuses everything it is asked
+  try {
+    assert.equal((await k.call("session_open", {})).error, false, "sign on typed nothing a caller chose");
+    const r = await k.call("session_close", {});
+    assert.match(r.text, /Signed off cleanly/);
+    assert.equal(k.sent.length, 2, "the sign on Enter and the sign off Enter");
+    assert.match(decode(k.sent[1]), /signoff/i);
+    assert.deepEqual(k.calls, []);
+  } finally {
+    await k.close();
+  }
+  // And the shutdown path, which signs every open session off.
+  const s = await guardedScreen({ deny: /./ });
+  try {
+    assert.equal((await s.call("session_open", {})).error, false);
+    s.s.screen.typeInto(s.s.screen.fields[0], "DLTLIB LVORD", enc); // left on the line by the caller
+    await s.engine.shutdown();
+    assert.equal(s.sent.length, 2);
+    assert.match(decode(s.sent[1]), /signoff/i);
+    assert.deepEqual(s.calls, []);
+  } finally {
+    await s.close();
+  }
+});
+
+test("6.2: session_open decides the sign on program and library before typing them; a deny sends nothing", async () => {
+  const denied = await guardedScreen({ program: "LIVLIB/ORDFIX", deny: /ORDFIX/ });
+  try {
+    const r = await denied.call("session_open", { library: "MYLIB" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /Denied, session_open did nothing/);
+    assert.deepEqual(denied.calls.map((c) => [c.tool, c.input]), [["session_open", { program: "LIVLIB/ORDFIX", library: "MYLIB" }]]);
+    assert.equal(denied.sent.length, 0, "no sign on was sent");
+    assert.equal(denied.engine.openSessions().length, 0, "and the session is gone");
+  } finally {
+    await denied.close();
+  }
+  const allowed = await guardedScreen({ program: "LIVLIB/ORDFIX" });
+  try {
+    assert.equal((await allowed.call("session_open", {})).error, false);
+    assert.deepEqual(allowed.calls.map((c) => [c.tool, c.input, c.outcome]), [["session_open", { program: "LIVLIB/ORDFIX", library: undefined }, "ok"]]);
+    // signOn: false types nothing, so nothing is decided.
+    await allowed.call("session_close", { signOff: false });
+    assert.equal((await allowed.call("session_open", { signOn: false })).error, false);
+    assert.equal(allowed.calls.length, 1);
+  } finally {
+    await allowed.close();
+  }
+});
+
+test("6.2: the System name is read from a captured PUB400-style sign on screen, and only from a sign on screen", async () => {
+  const stub = (rec: Buffer) => {
+    const s = new ScreenBuffer(24, 80, 37);
+    s.apply(rec);
+    return Object.assign(Object.create(Session.prototype), { screen: s, firstContact: true }) as Session;
+  };
+  assert.equal(stub(signOnAs("PUB400")).signOnSystem(), "PUB400");
+  assert.equal(stub(fixture("signon.bin")).signOnSystem(), "MYBOX1");
+  const elsewhere = stub(signOnAs("PUB400"));
+  elsewhere.screen.fields = []; // the same System line on a screen that takes no sign on (WRKSYSSTS)
+  assert.equal(elsewhere.signOnSystem(), undefined);
+  // session_open keeps it per server, for the guard's partition detection.
+  const k = await guardedScreen();
+  try {
+    assert.equal(k.engine.systemName("default"), undefined);
+    await k.call("session_open", {});
+    assert.equal(k.engine.systemName("default"), "PUB400");
+  } finally {
+    await k.close();
+  }
 });

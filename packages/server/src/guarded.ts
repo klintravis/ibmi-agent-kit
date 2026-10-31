@@ -1,6 +1,6 @@
 // The server's half of the execution guard (design D5-D7): who and where a connection is, the
 // catalog lookups, `run_script`, `policy_check` and the confirmation, the same context for verbs
-// (verbs.ts), and the source engine's tool hook. The guard package decides;
+// (verbs.ts), and the engines' tool hooks (source tools, 5250 command lines and sign on). The guard package decides;
 // this file does the I/O. Engines never write to stdout, and neither does this.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -274,6 +274,41 @@ export async function toolStatements(
       const c = await classify(String(input.statement ?? ""), ctx);
       return { statements: c.statements, notes: c.notes };
     }
+    case "screen_command": {
+      // A 5250 command line runs one command: each is decided, and logged, as a CL line.
+      const statements: ClassifiedStatement[] = [];
+      const notes: string[] = [];
+      for (const command of (input.commands as unknown[] | undefined) ?? []) {
+        const text = String(command);
+        if (/[\r\n]/.test(text)) throw new Error("refused: a command line holds one line");
+        const c = await classify(`CL: ${text}`, ctx);
+        statements.push(...c.statements);
+        notes.push(...c.notes);
+      }
+      return { statements, notes };
+    }
+    case "session_open": {
+      // The sign on screen's Program/procedure field calls it, the Current library field sets it.
+      // CALL is classified so a program the guard cannot see into (QCMDEXC) is danger, as anywhere.
+      const ops: Operation[] = [];
+      const notes: string[] = [];
+      const parts: string[] = [];
+      if (input.program) {
+        const [a, b, more] = String(input.program).split("/");
+        if (more !== undefined) throw new Error(`invalid program: "${input.program}"`);
+        const pgm = b === undefined ? name(a, "program") : `${a.toUpperCase() === "*LIBL" ? "*LIBL" : name(a, "program library")}/${name(b, "program")}`;
+        const c = await classify(`CL: CALL PGM(${pgm})`, ctx);
+        ops.push(...c.operations);
+        notes.push(...c.notes);
+        parts.push(`program ${pgm}`);
+      }
+      if (input.library) {
+        const l = name(input.library, "library");
+        ops.push({ class: "liblist", object: libRef(l), source: "cl" });
+        parts.push(`library ${l}`);
+      }
+      return { statements: [toolStatement(`session_open ${parts.join(" ")}`, ops)], notes };
+    }
     case "compile_member": {
       const command = String(input.command ?? "");
       if (/[\r\n]/.test(command)) throw new Error("refused: the compile command must be one line");
@@ -442,7 +477,7 @@ export function registerGuarded(
 
   const key = (server?: string) => server || "default";
 
-  // The source engine's hook (design D6): an engine tool call decided and confirmed before the
+  // The engines' hook (design D6): an engine tool call decided and confirmed before the
   // engine acts. Throws to refuse (logged then); otherwise returns what logs the call's outcome.
   async function guardTool(tool: string, input: Record<string, unknown>, server: string | undefined): Promise<(outcome: string) => void> {
     const s = key(server);

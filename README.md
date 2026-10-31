@@ -135,14 +135,28 @@ member's statements, read at decision time, for an SQL member or `RUNSQLSTM`. A 
 nothing to the IBM i, and the source engine's own checks still apply.
 `compile_member`'s default target `*CURLIB` is decided as the job's current library; with none, the
 compile is denied as unqualified, so pass `targetLibrary`.
+
+The 5250 tools are decided too. Before `screen_do` or `run_tests` sends a key that carries field
+data (any key but F3, F12, Clear and Attn), the text on the screen's command line at that moment,
+typed or brought back with F9, is decided as a CL command; a denied one is not sent. F4 with a
+command on the line is denied in every mode, observe included, like a `?` prompt: the prompter's
+values are typed later on a screen with no command line, where the guard does not see them.
+`session_open` reads the sign-on screen's System name (which then places the box in its partition),
+then decides its `program` (or the profile's `IBMI_5250_PROGRAM`) as a `call` and its `library` (or
+`IBMI_5250_CURLIB`) as `liblist` before typing them; a deny signs nothing on. `menu` is not
+decided. The session's own sign-on, recovery and sign-off keys are never decided. Each decision
+reads the user's identity over SQL, so when the profile's SQL connection fails, a key sent with a
+command on the line, or a sign-on with a program or library, is refused.
 These decisions, and those of `run_script` and `verb_run`, go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
 [docs/policy.md](docs/policy.md) for the policy file, and [docs/verbs.md](docs/verbs.md) for verbs.
 
 Limits, stated plainly: the guard sees only the text it is given, not what called programs or
-triggers do; IBM i authority remains the real boundary. It is not yet wired into the 5250 tools,
-which keep their own checks. The source tools also use `IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES` and
-`IBMI_BLOCKED_CL` (compile commands only). The 5250 tools use `IBMI_RESTRICTED` (an allowlist, on by default), `IBMI_ALLOWED_CL` and
+triggers do, nor menu options, prompted fields or options typed on a list screen; IBM i authority
+remains the real boundary. The source tools also use `IBMI_READ_ONLY`, `IBMI_BLOCKED_TABLES` and
+`IBMI_BLOCKED_CL` (compile commands only). The 5250 tools also use `IBMI_RESTRICTED` (an allowlist, on by default), `IBMI_ALLOWED_CL` and
 `IBMI_BLOCKED_CL` (the last applies only when restricted is off); they ignore `IBMI_READ_ONLY`.
+Those three check text as it is typed into a command line, so a command brought back with F9 meets
+only the guard.
 The guard's catalog lookups have not yet been verified on a live IBM i.
 
 ## Words
@@ -154,7 +168,7 @@ as a YAML file; see [docs/verbs.md](docs/verbs.md).
 ## Roadmap
 
 `unified-kit` is done; `execution-guard` is in progress (the guard decides `run_script`,
-`verb_run`, `policy_check` and the source tools; the 5250 tools and a live check are open).
+`verb_run`, `policy_check`, the source tools and the 5250 tools; docs and a live check are open).
 `project-verbs` is in progress (`verb_list`, `verb_run` and `policy_check` verb input are done;
 an example verb and a live check are open). Next: `config-bootstrap`, a company pilot. See
 `docs/idea.md`.
