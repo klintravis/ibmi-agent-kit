@@ -117,8 +117,9 @@ earlier is decided as its base table.
 ## Running
 
 1. Setup, in order. Each `requires_absent` query runs just before its own setup statement; if it
-   returns a row the verb fails there, so a verb never overwrites, and later deletes, data it did
-   not create. Setup that already succeeded is still cleaned up.
+   returns a row the verb fails there: that setup statement does not run and its cleanup does not
+   delete the row that was already there when the query ran. The check happens only before the
+   statement. Setup that already succeeded is still cleaned up.
 2. Steps, in order, stopping at the first failure. A nested verb runs its own setup, steps and
    cleanup in place. An `expect` checks `equals` (values in the first row), `rows` (a row count)
    or `empty`; one that does not hold fails the verb, reporting expected and found values, and
