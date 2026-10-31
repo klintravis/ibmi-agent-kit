@@ -1,5 +1,7 @@
+// Modified by ibmi-agent-kit (2026): added the tools.js import-side-effect check.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1123,3 +1125,23 @@ test("a yes or no setting refuses a value that is neither, rather than reading a
   assert.throws(() => loadProfile({ ...base, IBMI_5250_VIEWER: "ture" }), /neither true nor false/);
 });
 
+
+test("importing tools.js adds no process listeners, writes no stdout and leaves process.env alone", () => {
+  // A fresh process, so a module already loaded here cannot hide a side effect of the import.
+  const toolsUrl = new URL("./tools.js", import.meta.url).href;
+  const script = `
+    const events = ["SIGINT", "SIGTERM", "uncaughtException", "unhandledRejection"];
+    const before = events.map((e) => process.listenerCount(e));
+    const env = JSON.stringify(process.env);
+    const log = console.log;
+    await import(${JSON.stringify(toolsUrl)});
+    process.stderr.write(JSON.stringify({
+      same: log === console.log,
+      listeners: events.map((e, i) => process.listenerCount(e) - before[i]),
+      envSame: env === JSON.stringify(process.env),
+    }));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "", "importing tools.js must write nothing to stdout");
+  assert.deepEqual(JSON.parse(r.stderr), { same: true, listeners: [0, 0, 0, 0], envSame: true });
+});

@@ -12,7 +12,7 @@
 
 ## 3. Engines become mountable kit packages (unified-server spec; D3, D4, D6, D8)
 
-- [ ] 3.1 Rename screen to `@ibmi-agent-kit/screen` (bin `ibmi-agent-kit-screen`, `exports` with `./tools`, `declaration: true`, author/contributors), split `index.ts` into `tools.ts` + bootstrap, switch `config.ts` to `resolveProfileEnv` and delete its module-level `loadEnv`, add annotations and titles to every tool, add modification notices; verify `npm run check -w packages/screen` passes every pre-existing check
+- [x] 3.1 Rename screen to `@ibmi-agent-kit/screen` (bin `ibmi-agent-kit-screen`, `exports` with `./tools`, `declaration: true`, author/contributors), split `index.ts` into `tools.ts` + bootstrap, switch `config.ts` to `resolveProfileEnv` and delete its module-level `loadEnv`, add annotations and titles to every tool, add modification notices; verify `npm run check -w packages/screen` passes every pre-existing check
 - [ ] 3.2 Same for source as `@ibmi-agent-kit/source` (bin `ibmi-agent-kit-source`); verify `npm run check -w packages/source` passes every pre-existing check
 - [ ] 3.3 Per engine, selfcheck that importing `./tools.js` adds no process listeners (SIGINT, SIGTERM, uncaughtException, unhandledRejection), writes nothing to stdout, and leaves `process.env` unchanged; verify both pass
 

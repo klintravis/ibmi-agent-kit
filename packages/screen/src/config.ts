@@ -1,64 +1,31 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { config as loadEnv, parse } from "dotenv";
+// Modified by ibmi-agent-kit (2026): profiles now resolve through @ibmi-agent-kit/core; the module-level dotenv loading is removed.
+import { CONFIG_DIRS, listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
 import { DEFAULT_CCSID } from "./ebcdic.js";
 import type { Profile } from "./types.js";
 
-// First match wins. IBMI_MCP_CONFIG_DIR and .ibm-i-servers are shared with the other IBM i MCP
-// servers, so one set of profiles serves them all. Use a home folder with npx: the install folder
-// lives in the npx cache and is wiped on update.
-export const CONFIG_DIRS = [
-  process.env.IBMI_MCP_CONFIG_DIR,
-  join(homedir(), ".ibm-i-servers"),
-  join(homedir(), ".ibm-i-5250-mcp"),
-  join(dirname(fileURLToPath(import.meta.url)), ".."),
-]
-  .filter((d): d is string => Boolean(d))
-  .map((d) => resolve(d));
+export { CONFIG_DIRS, listServers };
 
-// The first file found wins the whole profile. Merging per variable would let a file holding only a
-// host inherit another box's password.
-const defaultEnv = CONFIG_DIRS.map((d) => join(d, ".env")).find((p) => existsSync(p));
-if (defaultEnv) loadEnv({ path: defaultEnv });
-
-// The name arrives as a tool argument and becomes part of a filename, so "../../../sibling" would
-// otherwise read another box's credentials.
+// The name arrives as a tool argument, so a traversing one is refused here with the message this
+// engine has always given, before core is asked.
 const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export function listServers(): string[] {
-  const names = new Set<string>();
-  for (const d of CONFIG_DIRS) {
-    let files: string[] = [];
-    try {
-      files = readdirSync(d);
-    } catch {
-      continue;
-    }
-    for (const f of files) {
-      if (f === ".env") names.add("default");
-      else if (f.startsWith(".env.") && f !== ".env.example") names.add(f.slice(5));
-    }
-  }
-  return [...names].sort();
-}
-
 export function loadProfileFor(server?: string): Profile {
-  if (!server || server.toLowerCase() === "default") return loadProfile();
-  if (!SERVER_NAME.test(server)) {
+  const isDefault = !server || server.toLowerCase() === "default";
+  if (!isDefault && !SERVER_NAME.test(server)) {
     throw new Error(
       `invalid server name "${server}". A server is named by its config file, so the ` +
         `name may only contain letters, digits, dot, dash and underscore.`,
     );
   }
-  for (const d of CONFIG_DIRS) {
-    const p = join(d, `.env.${server}`);
-    if (existsSync(p)) return loadProfile(parse(readFileSync(p)));
+  const name = isDefault ? undefined : server;
+  if (!listServers().includes(name ?? "default")) {
+    // No profile file: the default falls through to the missing-settings error, a named one is unknown.
+    if (isDefault) return loadProfile({});
+    throw new Error(
+      `no config for server "${server}" (expected a .env.${server} file). Available: ${listServers().join(", ") || "none"}`,
+    );
   }
-  throw new Error(
-    `no config for server "${server}" (expected a .env.${server} file). Available: ${listServers().join(", ") || "none"}`,
-  );
+  return loadProfile(resolveProfileEnv(name));
 }
 
 // Unrecognised throws rather than reading as false, so a typo cannot quietly turn a setting off.
