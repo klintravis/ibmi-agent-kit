@@ -33,5 +33,5 @@ export { BUILTIN_POLICY, builtinPolicy, loadPolicy, parsePolicy } from "./policy
 export type { Mode, Policy, Rule, Verdict } from "./policy.js";
 export { decide, detectPartition, environmentOf, rolesOf } from "./decide.js";
 export type { Decision, Identity, OperationDecision, RoleSource } from "./decide.js";
-export { bindArgs, loadVerbs, MAX_VERB_DEPTH, resolveVerb, substitute } from "./verbs.js";
+export { bindArgs, callArgs, loadVerbs, MAX_VERB_DEPTH, resolveVerb, substitute } from "./verbs.js";
 export type { CleanupStep, Layer, SetupStep, Substituted, TemplateKind, Value, Values, Verb, VerbParam, VerbSet, VerbSources, VerbStep } from "./verbs.js";

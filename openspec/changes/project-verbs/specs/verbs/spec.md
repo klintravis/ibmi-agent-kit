@@ -99,7 +99,7 @@ SHALL report each.
 
 ### Requirement: Nested verbs are bounded
 A `verb` step SHALL call another verb by address with arguments. A cycle SHALL be refused at load
-and nesting SHALL be limited to 5 levels.
+and a call chain SHALL hold at most 5 verbs, the top one counted.
 
 #### Scenario: Cycle
 - **WHEN** verb A calls B and B calls A

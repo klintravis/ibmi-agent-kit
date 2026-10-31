@@ -2,7 +2,7 @@
 
 ## 1. Verb format and loading (verbs spec; D1, D4)
 
-- [x] 1.1 Add the verb zod schema and loader to `packages/guard`: three layer folders, `<cwd>/.ibmi-kit/verbs` auto-load, `IBMI_KIT_VERBS`, closest-layer resolution with overridden marks, same-layer duplicate refusal, unknown-key refusal, cycle and depth ≤ 5 checks; selfcheck rows with temp folders for every load-time scenario; verify `npm run check -w packages/guard` passes
+- [x] 1.1 Add the verb zod schema and loader to `packages/guard`: three layer folders, `<cwd>/.ibmi-kit/verbs` auto-load, `IBMI_KIT_VERBS`, closest-layer resolution with overridden marks, same-layer duplicate refusal, unknown-key refusal, cycle checks and at most 5 verbs in one call chain, the top one counted; selfcheck rows with temp folders for every load-time scenario; verify `npm run check -w packages/guard` passes
 - [x] 1.2 Implement parameter validation and substitution: types incl. boolean, `:p` → ordered bound markers, `${p}` only for `allowed` or validated numeric/date/boolean, quote doubling in CL literals, load-time refusal of a free-text string in `${}`; selfcheck: string `${env}` without `allowed` refused, value outside `allowed` refused, `x' or '1'='1` arrives as a bound value with the statement text unchanged
 
 ## 2. Running verbs (verbs spec; D2, D3)

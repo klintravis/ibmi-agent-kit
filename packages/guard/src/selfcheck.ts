@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 import {
   bindArgs,
   builtinCommands,
+  callArgs,
+  MAX_VERB_DEPTH,
   classify,
   classifyCl,
   builtinPolicy,
@@ -1136,6 +1138,7 @@ test("verbs: nesting is limited to 5 verbs in a chain, the top one counted", () 
   const files: Record<string, string> = {};
   for (let i = 1; i <= 6; i++) files[`${P}v${i}.yaml`] = i < 6 ? calls(`V${i}`, `V${i + 1}`) : verbYaml("V6");
   const set = loadVerbs(verbRoot(files).src);
+  assert.equal(MAX_VERB_DEPTH, 5);
   assert.deepEqual(addresses(set), ["proj:V2", "proj:V3", "proj:V4", "proj:V5", "proj:V6"]);
   assert.match(set.errors.join("\n"), /v1\.yaml: proj:V1 nests more than 5 verbs deep: proj:V1 → proj:V2 → proj:V3 → proj:V4 → proj:V5 → proj:V6/);
 });
@@ -1223,6 +1226,34 @@ test("verbs: value outside allowed: the call fails before any statement is built
   assert.throws(() => bindArgs(v, { env: "PRD" }), /proj:X: env: "PRD" is not one of IN1, IN2/);
   assert.throws(() => bindArgs(v, { env: "in2" }), /is not one of/);
   assert.deepEqual(bindArgs(v, { env: "IN2" }), { env: "IN2" });
+  // decimals compare as numbers
+  const d = { address: "proj:X", params: { r: { type: "decimal", allowed: [1.5] } } as Record<string, VerbParam> };
+  assert.deepEqual(bindArgs(d, { r: "1.50" }), { r: "1.50" });
+  assert.throws(() => bindArgs(d, { r: "1.51" }), /is not one of 1\.5/);
+});
+
+test("verbs: substitute validates what it splices, even values that skipped bindArgs", () => {
+  assert.throws(() => substitute("DELETE FROM T WHERE ID = ${n}", "sql", { n: { type: "integer" } }, { n: "0 OR 1=1" }), /\$\{n\}: "0 OR 1=1" is not an integer/);
+  assert.throws(() => substitute("SELECT * FROM ORD${e}.T", "sql", { e: { type: "string", allowed: ["IN1"] } }, { e: "IN1.T; DROP TABLE X --" }), /is not one of IN1/);
+  assert.throws(() => substitute("VALUES :n", "sql", { n: { type: "integer" } }, { n: "1 OR 1=1" }), /:n: "1 OR 1=1" is not an integer/);
+});
+
+test("verbs: a nested arg that is exactly ${p} passes the typed value; types must match at load", () => {
+  const callee = "name: CALLEE\ndescription: d\nparams:\n  flag: { type: boolean }\n  who: { type: string }\nsteps:\n  - sql: VALUES (:flag, :who)\n";
+  const caller = "name: CALLER\ndescription: d\nparams:\n  on: { type: boolean, default: true }\n  name: { type: string, default: \"x' or '1'='1\" }\nsteps:\n  - verb: CALLEE\n    args: { flag: \"${on}\", who: \"${name}\" }\n";
+  const wrong = "name: WRONG\ndescription: d\nparams:\n  n: { type: integer, default: 1 }\nsteps:\n  - verb: CALLEE\n    args: { flag: \"${n}\", who: a }\n";
+  const set = loadVerbs(verbRoot({ [P + "callee.yaml"]: callee, [P + "caller.yaml"]: caller, [P + "wrong.yaml"]: wrong }).src);
+  assert.deepEqual(addresses(set), ["proj:CALLEE", "proj:CALLER"]);
+  assert.match(set.errors.join("\n"), /wrong\.yaml: steps\.0\.args\.flag: n is integer but proj:CALLEE takes flag as boolean/);
+  const outer = resolveVerb(set, "CALLER");
+  const inner = resolveVerb(set, "CALLEE");
+  const args = callArgs(outer.steps[0], outer.params, bindArgs(outer));
+  assert.deepEqual(args, { flag: true, who: "x' or '1'='1" });
+  const values = bindArgs(inner, args);
+  assert.deepEqual(values, { flag: true, who: "x' or '1'='1" });
+  assert.deepEqual(substitute(inner.steps[0].sql!, "sql", inner.params, values), { text: "VALUES (?, ?)", params: [true, "x' or '1'='1"] });
+  // mixed text stays text
+  assert.deepEqual(callArgs({ args: { who: "a${on}" } }, outer.params, { on: false, name: "n" }), { who: "aFALSE" });
 });
 
 test("verbs: injection: x' or '1'='1 arrives as a bound value with the statement text unchanged", () => {
@@ -1260,7 +1291,9 @@ test("verbs: templates are refused at load where substitution would be unsafe or
     ["n: { type: decimal, default: .inf }", 'sql: "VALUES :n"', /params\.n\.default: Infinity is not a decimal number/],
     ["n: { type: integer, allowed: [1, two] }", 'sql: "VALUES :n"', /params\.n\.allowed\.1: "two" is not an integer/],
     ["s: { type: string, allowed: [01] }", 'sql: "VALUES :s"', /params\.s\.allowed\.0: 1 is not a string/],
-    ["s: { type: string }", 'verb: OTHER\n    args: { t: "${s}" }', /steps\.0\.args\.t: \$\{s\}: parameter s is a string with no allowed list/],
+    ["s: { type: string }", 'verb: OTHER\n    args: { t: "x${s}" }', /steps\.0\.args\.t: \$\{s\}: parameter s is a string with no allowed list/],
+    ["s: { type: string }", 'verb: OTHER\n    args: { t: "${q}" }', /steps\.0\.args\.t: \$\{q\} is not a parameter/],
+    ["b: { type: boolean }", 'cl: "CHGJOB LOG(${b})"', /steps\.0\.cl: \$\{b\}: a boolean has no CL form; use a string parameter with allowed: \['\*YES', '\*NO'\]/],
     ["n: { type: integer, required: false }", 'sql: "VALUES :n"', /params\.n\.required: false needs a default/],
     ["n: { type: integer, required: true, default: 1 }", 'sql: "VALUES :n"', /params\.n\.required: true with a default/],
     ["n: { type: integer }", "expect: { sql: VALUES 1, equals: {} }", /steps\.0\.expect\.equals: name at least one column/],

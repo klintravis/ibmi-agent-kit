@@ -44,7 +44,7 @@ cleanup:
   rows it proved were not there before.
 
 ### D2. Decide everything, confirm once, then run
-`verb_run` substitutes all three lists (and nested verbs, depth ≤ 5), classifies and decides every
+`verb_run` substitutes all three lists (and nested verbs, at most 5 verbs in one call chain, the top one counted), classifies and decides every
 statement, gathers every `confirm` into one elicitation, and only then runs requires_absent →
 setup → steps → cleanup through `run_script`'s executor.
 

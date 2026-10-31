@@ -110,7 +110,6 @@ export type Values = Record<string, Value>;
 
 const EXPECTED = { string: "a string", integer: "an integer", decimal: "a decimal number", date: "a date (YYYY-MM-DD)", boolean: "true or false" };
 const show = (v: unknown) => (typeof v === "string" ? JSON.stringify(v) : String(v));
-const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 
 // `v` as a value of `type`, normalised (decimals stay strings, so no digit is lost); undefined if
 // it is not one. Nothing typed here can hold a quote, a blank or a comment.
@@ -140,7 +139,8 @@ function typed(type: VerbParam["type"], v: unknown): Value | undefined {
 function valueOf(p: VerbParam, v: unknown): { value: Value } | { error: string } {
   const value = typed(p.type, v);
   if (value === undefined) return { error: `${show(v)} is not ${EXPECTED[p.type]}` };
-  if (p.allowed && !p.allowed.some((a) => typed(p.type, a) === value)) return { error: `${show(v)} is not one of ${p.allowed.join(", ")}` };
+  const same = (a: Value | undefined) => (p.type === "decimal" ? a !== undefined && Number(a) === Number(value) : a === value); // 1.5 = 1.50
+  if (p.allowed && !p.allowed.some((a) => same(typed(p.type, a)))) return { error: `${show(v)} is not one of ${p.allowed.join(", ")}` };
   return { value };
 }
 
@@ -150,9 +150,9 @@ function valueOf(p: VerbParam, v: unknown): { value: Value } | { error: string }
 export function bindArgs(verb: Pick<Verb, "address" | "params">, args: Record<string, unknown> = {}): Values {
   const errors: string[] = [];
   const values: Values = {};
-  for (const k of Object.keys(args)) if (!has(verb.params, k)) errors.push(`${k} is not a parameter`);
+  for (const k of Object.keys(args)) if (!Object.hasOwn(verb.params, k)) errors.push(`${k} is not a parameter`);
   for (const [k, p] of Object.entries(verb.params)) {
-    const v = has(args, k) && args[k] !== undefined ? args[k] : p.default;
+    const v = Object.hasOwn(args, k) && args[k] !== undefined ? args[k] : p.default;
     if (v === undefined) {
       errors.push(`${k} has no value and no default`);
       continue;
@@ -241,7 +241,7 @@ function templateErrors(t: string, kind: TemplateKind, params: Record<string, Ve
   // the bound values are one list for one statement, as execute(sql, params) takes them
   if (kind === "sql") errors.push(...notOneStatement(t));
   for (const r of refs(t, kind)) {
-    const p = r.name !== undefined && has(params, r.name) ? params[r.name] : undefined;
+    const p = r.name !== undefined && Object.hasOwn(params, r.name) ? params[r.name] : undefined;
     const ref = `\${${r.name}}`;
     if (r.sigil === "?") errors.push("a ? marker: write :name so the value is bound");
     else if (r.sigil === ":") {
@@ -250,6 +250,7 @@ function templateErrors(t: string, kind: TemplateKind, params: Record<string, Ve
     } else if (r.name === undefined) errors.push("${ must be ${name}");
     else if (!p) errors.push(`${ref} is not a parameter`);
     else if (r.ctx === "comment") errors.push(`${ref} is inside a comment`);
+    else if (kind === "cl" && p.type === "boolean") errors.push(`${ref}: a boolean has no CL form; use a string parameter with allowed: ['*YES', '*NO']`);
     else if (p.type === "string" && !p.allowed) errors.push(`${ref}: parameter ${r.name} is a string with no allowed list, so it would be free text${kind === "sql" ? `; use :${r.name}` : ""}`);
     else if (kind === "sql" && r.ctx === "code" && p.type === "date") errors.push(`${ref} is a date outside quotes, which SQL reads as arithmetic; write '${ref}'`);
     else if (kind !== "arg" && r.ctx === "code" && p.allowed?.some((a) => /['"]/.test(String(a)))) errors.push(`${ref} is outside quotes and an allowed value holds a quote`);
@@ -273,8 +274,11 @@ export function substitute(t: string, kind: TemplateKind, params: Record<string,
   for (const r of refs(t, kind)) {
     if (r.sigil === ":" && kind === "cl") continue; // not a parameter: CL text as written
     const name = r.name as string;
-    if (!has(values, name)) throw new Error(`parameter ${name} has no value`);
-    const v = values[name];
+    if (!Object.hasOwn(values, name)) throw new Error(`parameter ${name} has no value`);
+    // values may not have come through bindArgs: check them again before they reach text
+    const checked = valueOf(params[name], values[name]);
+    if ("error" in checked) throw new Error(`${r.sigil === "$" ? `\${${name}}` : `:${name}`}: ${checked.error}`);
+    const v = checked.value;
     out += t.slice(at, r.start);
     at = r.end;
     if (r.sigil === ":") {
@@ -295,6 +299,22 @@ export function substitute(t: string, kind: TemplateKind, params: Record<string,
   const split = kind === "sql" ? notOneStatement(out) : [];
   if (split.length) throw new Error(`substituted: ${split.join("; ")}`);
   return { text: out, params: bound };
+}
+
+const EXACT = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+
+// A nested call's arguments from the caller's values: an arg that is exactly `${p}` passes p's
+// typed value through (loading checked the types match); other text has `${}` substituted; other
+// values stay as written. The callee's bindArgs validates the result.
+export function callArgs(step: Pick<VerbStep, "args">, params: Record<string, VerbParam>, values: Values): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(step.args ?? {}).map(([k, a]) => {
+      const exact = typeof a === "string" ? EXACT.exec(a) : null;
+      if (!exact) return [k, typeof a === "string" ? substitute(a, "arg", params, values).text : a];
+      if (!Object.hasOwn(values, exact[1])) throw new Error(`parameter ${exact[1]} has no value`);
+      return [k, values[exact[1]]];
+    }),
+  );
 }
 
 // --- loading ---
@@ -356,7 +376,11 @@ function parseVerb(file: string, layer: Layer): { verb: Verb; errors: string[] }
   v.steps.forEach((s, i) => {
     statement(`steps.${i}`, s);
     check(`steps.${i}.expect.sql`, s.expect?.sql, "sql");
-    for (const [k, a] of Object.entries(s.args ?? {})) if (typeof a === "string") check(`steps.${i}.args.${k}`, a, "arg");
+    for (const [k, a] of Object.entries(s.args ?? {})) {
+      const exact = typeof a === "string" ? EXACT.exec(a) : null;
+      if (exact && !Object.hasOwn(params, exact[1])) errors.push(`steps.${i}.args.${k}: \${${exact[1]}} is not a parameter`);
+      else if (!exact && typeof a === "string") check(`steps.${i}.args.${k}`, a, "arg");
+    }
   });
   (v.cleanup ?? []).forEach((s, i) => {
     if (!ids.has(s.undoes)) errors.push(`cleanup.${i}.undoes: no setup step has id ${s.undoes}`);
@@ -441,7 +465,7 @@ export function loadVerbs(s: VerbSources): VerbSet {
     for (let changed = true; changed; ) {
       changed = false;
       for (const v of [...live]) {
-        const why = v.steps.map((s, i) => (s.verb ? callProblem(s, i) : undefined)).find((w) => w);
+        const why = v.steps.map((s, i) => (s.verb ? callProblem(v, s, i) : undefined)).find((w) => w);
         if (why) {
           refuse(v, why);
           changed = true;
@@ -453,7 +477,7 @@ export function loadVerbs(s: VerbSources): VerbSet {
     const path = cycle.map((v) => v.address).join(" → ");
     for (const v of new Set(cycle)) refuse(v, `${v.address} is in a cycle: ${path}`);
   }
-  function callProblem(s: VerbStep, i: number): string | undefined {
+  function callProblem(v: Verb, s: VerbStep, i: number): string | undefined {
     let t: Verb;
     try {
       t = callee(s);
@@ -462,11 +486,13 @@ export function loadVerbs(s: VerbSources): VerbSet {
     }
     const args = s.args ?? {};
     for (const [k, a] of Object.entries(args)) {
-      if (!has(t.params, k)) return `steps.${i}.args.${k}: ${t.address} has no parameter ${k}`;
+      if (!Object.hasOwn(t.params, k)) return `steps.${i}.args.${k}: ${t.address} has no parameter ${k}`;
+      const exact = typeof a === "string" ? EXACT.exec(a) : null;
+      if (exact && v.params[exact[1]].type !== t.params[k].type) return `steps.${i}.args.${k}: ${exact[1]} is ${v.params[exact[1]].type} but ${t.address} takes ${k} as ${t.params[k].type}`;
       const r = typeof a === "string" && a.includes("${") ? undefined : valueOf(t.params[k], a);
       if (r && "error" in r) return `steps.${i}.args.${k}: ${r.error}`;
     }
-    for (const [k, p] of Object.entries(t.params)) if (p.default === undefined && !has(args, k)) return `steps.${i}: ${t.address} needs ${k}`;
+    for (const [k, p] of Object.entries(t.params)) if (p.default === undefined && !Object.hasOwn(args, k)) return `steps.${i}: ${t.address} needs ${k}`;
     return undefined;
   }
   function findCycle(): Verb[] | undefined {
