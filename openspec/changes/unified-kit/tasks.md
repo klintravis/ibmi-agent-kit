@@ -7,13 +7,13 @@
 
 ## 2. Source engine on the transport (sql-transport spec; D2)
 
-- [ ] 2.1 Refactor `MapepireBackend` onto `SqlTransport` with `ssh` (existing SSH/jar path) and `daemon` (`DaemonServer`) implementations selected by `IBMI_SQL_TRANSPORT` / `IBMI_MAPEPIRE_PORT`; add public `execute(sql, params)` and `cl(command)`; add modification notices; verify `npm run check -w packages/source` passes every pre-existing check
-- [ ] 2.2 Selfcheck with a stub transport: daemon profile makes no SSH connection, unknown transport fails naming the allowed values, `execute` passes bound values with the statement text unchanged, `cl` failure returns message ids and text; verify all pass
+- [x] 2.1 Refactor `MapepireBackend` onto `SqlTransport` with `ssh` (existing SSH/jar path) and `daemon` (`DaemonServer`) implementations selected by `IBMI_SQL_TRANSPORT` / `IBMI_MAPEPIRE_PORT`; add public `execute(sql, params)` and `cl(command)`; add modification notices; verify `npm run check -w packages/source` passes every pre-existing check
+- [x] 2.2 Selfcheck with a stub transport: daemon profile makes no SSH connection, unknown transport fails naming the allowed values, `execute` passes bound values with the statement text unchanged, `cl` failure returns message ids and text; verify all pass
 
 ## 3. Engines become mountable kit packages (unified-server spec; D3, D4, D6, D8)
 
 - [ ] 3.1 Rename screen to `@ibmi-agent-kit/screen` (bin `ibmi-agent-kit-screen`, `exports` with `./tools`, `declaration: true`, author/contributors), split `index.ts` into `tools.ts` + bootstrap, switch `config.ts` to `resolveProfileEnv` and delete its module-level `loadEnv`, add annotations and titles to every tool, add modification notices; verify `npm run check -w packages/screen` passes every pre-existing check
-- [ ] 3.2 Same for source as `@ibmi-agent-kit/source` (bin `ibmi-agent-kit-source`); verify `npm run check -w packages/source` passes every pre-existing check
+- [x] 3.2 Same for source as `@ibmi-agent-kit/source` (bin `ibmi-agent-kit-source`); verify `npm run check -w packages/source` passes every pre-existing check
 - [ ] 3.3 Per engine, selfcheck that importing `./tools.js` adds no process listeners (SIGINT, SIGTERM, uncaughtException, unhandledRejection), writes nothing to stdout, and leaves `process.env` unchanged; verify both pass
 
 ## 4. Kit server (unified-server spec; D5, D6)

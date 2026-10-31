@@ -1,9 +1,21 @@
+// Modified by ibmi-agent-kit (2026): checks for the SQL transports, execute and cl, and a side-effect-free tools.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Client } from "ssh2";
+import mapepire from "@ibm/mapepire-js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { assertSelectOnly, extFor, likeLiteral, parseFndstrpdm, sqlJson, textTable, typeFromPath, withTimeLimit } from "./util.js";
 import { loadProfile } from "./config.js";
 import { MapepireBackend, aliasStmt, memberMetaStmt, qcmdexc, validLibOrStar, validName } from "./mapepire.js";
 import { ToolReporter } from "./report.js";
+import { MapepireTransport } from "./transport.js";
+import { register } from "./tools.js";
 import { COMMAND_TEMPLATES, assertCompileCommandAllowed, buildCompileCommand, buildLibraryListCommands, parseEvfevent } from "./compile.js";
 
 // the three variables a profile cannot do without, spread where a test adds more
@@ -482,4 +494,186 @@ test("ToolReporter: the stall watchdog repeats the last message during silence a
   const count = sent.length;
   await new Promise((res) => setTimeout(res, 150));
   assert.equal(sent.length, count, "nothing may be sent after dispose");
+});
+
+// --- sql transport ---
+test("IBMI_SQL_TRANSPORT defaults to ssh, takes daemon with its port, and refuses anything else naming both", () => {
+  assert.equal(loadProfile(baseEnv).sqlTransport, "ssh");
+  assert.equal(loadProfile(baseEnv).mapepirePort, 8076);
+  const d = loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon", IBMI_MAPEPIRE_PORT: "9076" });
+  assert.equal(d.sqlTransport, "daemon");
+  assert.equal(d.mapepirePort, 9076);
+  assert.throws(() => loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "odbc" }), (e: Error) => /ssh/.test(e.message) && /daemon/.test(e.message) && /odbc/.test(e.message));
+});
+
+// swaps prototype methods for one test and puts them back, so nothing real is ever reached
+function patch(target: any, methods: Record<string, any>): () => void {
+  const saved = Object.fromEntries(Object.keys(methods).map((k) => [k, target[k]]));
+  Object.assign(target, methods);
+  return () => Object.assign(target, saved);
+}
+const oneRow = { success: true, is_done: true, has_results: true, data: [{ N: 1 }], metadata: { columns: [{ name: "N", type: "INTEGER", precision: 10, scale: 0 }] } };
+
+test("a daemon profile runs run_sql over the daemon connection and makes no ssh connection or upload", async () => {
+  const ssh: string[] = [];
+  const daemon: any[] = [];
+  const restore = [
+    patch(Client.prototype, { connect() { ssh.push("connect"); throw new Error("ssh must not be used"); }, sftp() { ssh.push("sftp"); throw new Error("no upload"); } }),
+    patch(mapepire.SQLJob.prototype, {
+      async connect(server: any) { daemon.push({ server, naming: (this as any).options.naming }); (this as any).status = "ready"; return { success: true }; },
+      query() { return { execute: async () => oneRow, close: async () => {} }; },
+    }),
+  ];
+  try {
+    const be = new MapepireBackend(loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon" }));
+    const { rows } = await be.runSql("select 1 as n from sysibm.sysdummy1");
+    assert.deepEqual(rows, [{ N: 1 }]);
+    assert.deepEqual(ssh, [], "no ssh connection, no sftp upload");
+    assert.deepEqual(daemon, [{ server: { host: "h", port: 8076, user: "u", password: "pw" }, naming: "system" }]);
+    await be.close();
+  } finally { restore.forEach((r) => r()); }
+});
+
+test("the ssh transport still reaches the bundled server: requests go down the exec stream and replies come back", { timeout: 5000 }, async () => {
+  const sent: any[] = [];
+  let command = "";
+  const channel: any = Object.assign(new EventEmitter(), {
+    stderr: new EventEmitter(),
+    write(data: string) {
+      for (const line of data.split("\n").filter(Boolean)) {
+        const req = JSON.parse(line);
+        sent.push(req);
+        const reply = req.type === "sql" ? { ...oneRow, id: req.id } : { id: req.id, success: true };
+        setImmediate(() => channel.emit("data", Buffer.from(JSON.stringify(reply) + "\n")));
+      }
+    },
+    end() { channel.emit("close"); },
+  });
+  const restore = patch(Client.prototype, {
+    connect() { setImmediate(() => (this as any).emit("ready")); return this; },
+    exec(cmd: string, cb: any) { command = cmd; cb(undefined, channel); },
+    end() {},
+  });
+  try {
+    // IBMI_MAPEPIRE_JAR skips the sftp upload, so only the exec stream is in play
+    const be = new MapepireBackend(loadProfile({ ...baseEnv, IBMI_MAPEPIRE_JAR: "/x/mapepire-server.jar" }));
+    const { rows } = await be.runSql("select 1 as n from sysibm.sysdummy1");
+    assert.deepEqual(rows, [{ N: 1 }]);
+    assert.match(command, /java .*-jar \/x\/mapepire-server\.jar --single/);
+    assert.deepEqual(sent.map((r) => r.type), ["connect", "sql"]);
+    assert.equal(sent[0].technique, "tcp");
+    await be.close();
+  } finally { restore(); }
+});
+
+// a stub job behind the real MapepireTransport: records what reaches the server and answers it
+function stubBackend(answer: (sql: string, opts: any) => any) {
+  const calls: { sql: string; opts: any }[] = [];
+  const job: any = { status: "ready", query: (sql: string, opts: any) => {
+    calls.push({ sql, opts });
+    return { execute: async () => answer(sql, opts), close: async () => {} };
+  } };
+  const profile = loadProfile(baseEnv);
+  return { calls, be: new MapepireBackend(profile, new MapepireTransport(profile, async () => job)) };
+}
+
+test("execute sends the values as bound parameters and the statement text unchanged", async () => {
+  const { calls, be } = stubBackend(() => ({ success: true, has_results: false, update_count: 1 }));
+  const sql = "UPDATE A.T SET C = ? WHERE K = ?";
+  const res = await be.execute(sql, ["x' or '1'='1", 5]);
+  assert.deepEqual(res, { rowsAffected: 1, messages: [] });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].sql, sql, "the statement text reaches the server as written");
+  assert.deepEqual(calls[0].opts, { parameters: ["x' or '1'='1", 5] });
+});
+
+test("a failed cl command reports failure with the IBM i message ids and text", async () => {
+  const { calls, be } = stubBackend(() => ({
+    success: false, error: "[CPF2110] Library NOPE not found.", sql_state: "38501",
+    joblog: [{ MESSAGE_ID: "CPF2110", MESSAGE_TEXT: "Library NOPE not found." }, { MESSAGE_ID: "CPF2103", MESSAGE_TEXT: "Library NOPE not added to the library list." }],
+  }));
+  const res = await be.cl("addlible lib(NOPE)");
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.messages, [
+    { id: "CPF2110", text: "Library NOPE not found." },
+    { id: "CPF2103", text: "Library NOPE not added to the library list." },
+  ]);
+  assert.deepEqual(calls, [{ sql: "addlible lib(NOPE)", opts: { isClCommand: true } }]);
+});
+
+test("a cl failure with no job log still carries the server's message", async () => {
+  const { be } = stubBackend(() => ({ success: false, error: "[CPF9801] Object X not found." }));
+  assert.deepEqual(await be.cl("dltf x"), { ok: false, messages: [{ text: "[CPF9801] Object X not found." }] });
+});
+
+test("a reconnect re-arms the job scoped spool override", async () => {
+  const profile = loadProfile(baseEnv);
+  const sqls: string[] = [];
+  const jobs: any[] = [];
+  const open = async () => {
+    const job: any = { status: "ready", query: (sql: string) => ({ execute: async () => (sqls.push(sql), { success: true, has_results: false }), close: async () => {} }) };
+    jobs.push(job);
+    return job;
+  };
+  const be: any = new MapepireBackend(profile, new MapepireTransport(profile, open));
+  await be.holdSpool();
+  jobs[0].status = "ended"; // the job dropped
+  await be.connect(); // what every public call does first, as compile and search do before holdSpool
+  await be.holdSpool();
+  assert.equal(jobs.length, 2);
+  assert.equal(sqls.filter((s) => s.includes("ovrprtf")).length, 2, "the new job needs ovrprtf again");
+});
+
+// --- mountable tools ---
+test("importing tools.js adds no process listeners, writes nothing to stdout and leaves process.env unchanged", () => {
+  // a fresh process, so nothing this file already imported can hide a side effect
+  const url = new URL("./tools.js", import.meta.url).href;
+  const script = `
+    const ev = ["SIGINT", "SIGTERM", "uncaughtException", "unhandledRejection"];
+    const before = ev.map((e) => process.listenerCount(e));
+    const env = JSON.stringify(process.env);
+    const log = console.log;
+    await import(${JSON.stringify(url)});
+    process.stderr.write(JSON.stringify({ before, after: ev.map((e) => process.listenerCount(e)), envSame: JSON.stringify(process.env) === env, logSame: console.log === log }));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", cwd: fileURLToPath(new URL(".", import.meta.url)) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "", "nothing on stdout");
+  const got = JSON.parse(r.stderr);
+  assert.deepEqual(got.after, got.before, "no SIGINT, SIGTERM, uncaughtException or unhandledRejection listener added");
+  assert.equal(got.envSame, true, "process.env unchanged");
+  assert.equal(got.logSame, true, "console.log not redirected");
+});
+
+test("register mounts every tool with a title and its annotations, and listServers: false skips list_servers", () => {
+  const before = ["SIGINT", "SIGTERM"].map((e) => process.listenerCount(e));
+  const mcp = new McpServer({ name: "t", version: "0" });
+  const handle = register(mcp);
+  assert.equal(typeof handle.shutdown, "function");
+  assert.equal(typeof handle.backend, "function");
+  const tools = (mcp as any)._registeredTools as Record<string, { title?: string; annotations?: any }>;
+  const readOnly = ["list_servers", "run_sql", "read_source_member", "search_source", "list_libraries", "list_source_files", "list_members"];
+  const destructive = ["manage_library_list", "upload_source_member", "compile_member"];
+  assert.deepEqual(Object.keys(tools).sort(), [...readOnly, ...destructive].sort());
+  for (const n of readOnly) assert.equal(tools[n].annotations?.readOnlyHint, true, n);
+  for (const n of destructive) assert.deepEqual(tools[n].annotations, { readOnlyHint: false, destructiveHint: true }, n);
+  for (const [n, t] of Object.entries(tools)) assert.ok(t.title, `${n} has a title`);
+  const kit = new McpServer({ name: "t", version: "0" });
+  register(kit, { listServers: false });
+  assert.ok(!("list_servers" in (kit as any)._registeredTools));
+  assert.deepEqual(["SIGINT", "SIGTERM"].map((e) => process.listenerCount(e)), before, "register installs no signal handlers");
+});
+
+test("backend(server) resolves names exactly, so a cached profile cannot answer to another case", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ikit-source-"));
+  const saved = process.env.IBMI_KIT_CONFIG_DIR;
+  process.env.IBMI_KIT_CONFIG_DIR = dir;
+  try {
+    writeFileSync(join(dir, ".env.ukcase"), "IBMI_HOST=h\nIBMI_USER=u\nIBMI_PASSWORD=pw\n");
+    const handle = register(new McpServer({ name: "t", version: "0" }));
+    assert.ok(handle.backend("ukcase"));
+    assert.throws(() => handle.backend("UKCASE"), /unknown server "UKCASE"/);
+  } finally {
+    if (saved === undefined) delete process.env.IBMI_KIT_CONFIG_DIR; else process.env.IBMI_KIT_CONFIG_DIR = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

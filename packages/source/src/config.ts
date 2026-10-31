@@ -1,46 +1,13 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { config as loadEnv, parse } from "dotenv";
+// Modified by ibmi-agent-kit (2026): profiles resolve through @ibmi-agent-kit/core, no .env is loaded into process.env; adds IBMI_SQL_TRANSPORT and IBMI_MAPEPIRE_PORT.
+import { listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
 import type { Profile } from "./types.js";
 
-// --- constants ---
-// searched in order, first match wins. The shared folder outranks this server's own so one set of
-// credentials serves every IBM i MCP server on the machine. The install folder is last because an
-// npx install lives in a cache that is wiped on every update.
-const CONFIG_DIRS = [
-  process.env.IBMI_MCP_CONFIG_DIR,
-  join(homedir(), ".ibm-i-servers"),
-  join(homedir(), ".ibm-i-source-mcp"),
-  join(dirname(fileURLToPath(import.meta.url)), ".."),
-].filter((d): d is string => Boolean(d));
-
-// dotenv never overrides an already set variable, so a real env var (or the first file found) wins
-for (const d of CONFIG_DIRS) loadEnv({ path: join(d, ".env") });
-
 // --- servers ---
-// the filename is the server name, so the set of .env.<name> files is the registry
-export function listServers(): string[] {
-  const names = new Set<string>();
-  for (const d of CONFIG_DIRS) {
-    let files: string[] = [];
-    try { files = readdirSync(d); } catch { continue; }
-    for (const f of files) {
-      if (f === ".env") names.add("default");
-      else if (f.startsWith(".env.") && f !== ".env.example") names.add(f.slice(5));
-    }
-  }
-  return [...names].sort();
-}
+// core owns the folders and the exact-name check, so a name never reaches a path unchecked
+export { listServers };
 
 export function loadProfileFor(server?: string): Profile {
-  if (!server || server.toLowerCase() === "default") return loadProfile();
-  for (const d of CONFIG_DIRS) {
-    const p = join(d, `.env.${server}`);
-    if (existsSync(p)) return loadProfile(parse(readFileSync(p)));
-  }
-  throw new Error(`no config for server "${server}" (expected a .env.${server} file). Available servers: ${listServers().join(", ") || "none"}`);
+  return loadProfile(resolveProfileEnv(server));
 }
 
 // --- profile ---
@@ -51,13 +18,22 @@ const bool = (v: string | undefined, dflt: boolean) => {
   return !t ? dflt : !/^(0|false|no|off)$/.test(t);
 };
 const list = (v: string | undefined) => (v ? v.split(/[,\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean) : []);
+const TRANSPORTS = ["ssh", "daemon"] as const;
 
-export function loadProfile(env: NodeJS.ProcessEnv = process.env): Profile {
+function transport(v: string | undefined): Profile["sqlTransport"] {
+  const t = (v?.trim().toLowerCase() || "ssh") as Profile["sqlTransport"];
+  if (!TRANSPORTS.includes(t)) throw new Error(`IBMI_SQL_TRANSPORT must be ${TRANSPORTS.join(" or ")}, got "${v}"`);
+  return t;
+}
+
+export function loadProfile(env: Record<string, string | undefined>): Profile {
   const { IBMI_HOST: host, IBMI_USER: user, IBMI_PASSWORD: password } = env;
   if (!host || !user || !password) throw new Error("missing IBMI_HOST, IBMI_USER and/or IBMI_PASSWORD in the env file");
   return {
     host, user, password,
     sshPort: Number(env.IBMI_SSH_PORT || 22),
+    sqlTransport: transport(env.IBMI_SQL_TRANSPORT),
+    mapepirePort: Number(env.IBMI_MAPEPIRE_PORT || 8076),
     sourceFileCcsid: Number(env.IBMI_SOURCE_FILE_CCSID || 37),
     mapepireJar: env.IBMI_MAPEPIRE_JAR || undefined,
     readOnly: bool(env.IBMI_READ_ONLY, false),

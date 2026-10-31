@@ -1,9 +1,12 @@
+// Modified by ibmi-agent-kit (2026): Profile carries the SQL transport and the Mapepire daemon port.
 // --- config ---
 export interface Profile {
   host: string;
   user: string;
   password: string;
   sshPort: number;               // default 22
+  sqlTransport: "ssh" | "daemon"; // IBMI_SQL_TRANSPORT, default ssh
+  mapepirePort: number;          // daemon transport only, default 8076
   sourceFileCcsid: number;       // fallback ccsid for 65535 columns, default 37
   mapepireJar?: string;          // override jar path on the box (else the uploaded copy)
   readOnly: boolean;             // when true, upload and compile are refused (default false)
