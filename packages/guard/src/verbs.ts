@@ -1,8 +1,8 @@
 // Verbs (project-verbs design D1, D4): one YAML file each, loaded once at startup from three
 // layers. Loading validates the shape and every parameter reference; `bindArgs` and `substitute`
 // turn a verb's templates into statement text plus bound values. Running a verb is the server's.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { issueLines, parseYaml } from "./commands.js";
 import { splitScript } from "./lexer.js";
@@ -39,7 +39,10 @@ const setupSchema = z
 const expectSchema = z
   .object({
     sql: text,
-    equals: z.record(z.string(), z.union([scalar, z.null()])).optional(),
+    equals: z
+      .record(z.string(), z.union([scalar, z.null()]))
+      .refine((o) => Object.keys(o).length > 0, "name at least one column")
+      .optional(),
     rows: z.number().int().min(0).optional(),
     empty: z.literal(true).optional(),
   })
@@ -126,7 +129,10 @@ function typed(type: VerbParam["type"], v: unknown): Value | undefined {
       return typeof v === "string" && /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(v) ? v : undefined;
     case "date": {
       const m = typeof v === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(v) : null;
-      return m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toISOString().slice(0, 10) === v ? v : undefined;
+      if (!m || +m[1] < 1) return undefined; // Db2 dates start at 0001-01-01
+      const d = new Date(0);
+      d.setUTCFullYear(+m[1], +m[2] - 1, +m[3]); // Date.UTC would read years 0-99 as 1900-1999
+      return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? m[0] : undefined;
     }
   }
 }
@@ -300,10 +306,24 @@ export interface VerbSources {
   policyFile?: string; // org layer: verbs/ beside it
 }
 
-// One file: the verb, and why it is refused (empty if it is not). Throws if the shape is wrong.
-function parseVerb(source: string, file: string, layer: Layer): { verb: Verb; errors: string[] } {
-  const r = verbSchema.safeParse(parseYaml(source, file));
-  if (!r.success) throw new Error(issueLines(file, r.error));
+// A refused file still holds its address, so a bare name stops at it: its `name` if that is a
+// name, else the file name.
+function refusedFile(file: string, layer: Layer, raw: unknown, errors: string[]): { verb: Verb; errors: string[] } {
+  const declared = (raw as { name?: unknown } | null)?.name;
+  const name = (word.safeParse(declared).success ? (declared as string) : basename(file).replace(/\.ya?ml$/i, "")).toUpperCase();
+  return { verb: { address: `${layer}:${name}`, name, layer, file, description: "", tags: [], params: {}, setup: [], steps: [], cleanup: [], overridden: false }, errors };
+}
+
+// One file: the verb, and why it is refused (empty if it is not).
+function parseVerb(file: string, layer: Layer): { verb: Verb; errors: string[] } {
+  let raw: unknown;
+  try {
+    raw = parseYaml(readFileSync(file, "utf8"), file);
+  } catch (e) {
+    return refusedFile(file, layer, undefined, [(e as Error).message]);
+  }
+  const r = verbSchema.safeParse(raw);
+  if (!r.success) return refusedFile(file, layer, raw, [issueLines(file, r.error)]);
   const v = r.data;
   const params = v.params ?? {};
   const errors: string[] = [];
@@ -315,6 +335,9 @@ function parseVerb(source: string, file: string, layer: Layer): { verb: Verb; er
     check(`${where}.cl`, s.cl, "cl");
   };
   for (const [k, p] of Object.entries(params)) {
+    // required means "has no default"; saying otherwise is a mistake about what callers must give
+    if (p.required === false && p.default === undefined) errors.push(`params.${k}.required: false needs a default`);
+    if (p.required === true && p.default !== undefined) errors.push(`params.${k}.required: true with a default; drop one`);
     p.allowed?.forEach((a, i) => { if (typed(p.type, a) === undefined) errors.push(`params.${k}.allowed.${i}: ${show(a)} is not ${EXPECTED[p.type]}`); });
     if (p.default !== undefined) {
       const d = valueOf(p, p.default);
@@ -374,23 +397,22 @@ export function loadVerbs(s: VerbSources): VerbSet {
   ];
   const errors: string[] = [];
   const parsed: { verb: Verb; errors: string[] }[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, Layer>(); // real path → the layer that read it
   for (const [layer, dir, named] of folders) {
-    if (seen.has(resolve(dir))) continue; // IBMI_KIT_VERBS naming .ibmi-kit/verbs again
-    seen.add(resolve(dir));
     if (!existsSync(dir)) {
       if (named) errors.push(`IBMI_KIT_VERBS: ${dir} not found`);
       continue;
     }
     try {
-      for (const f of readdirSync(dir).filter((f) => /\.ya?ml$/i.test(f)).sort()) {
-        const file = join(dir, f);
-        try {
-          parsed.push(parseVerb(readFileSync(file, "utf8"), file, layer));
-        } catch (e) {
-          errors.push((e as Error).message);
-        }
+      const real = realpathSync.native(dir);
+      const first = seen.get(real);
+      if (first === layer) continue; // IBMI_KIT_VERBS naming .ibmi-kit/verbs again
+      if (first) {
+        errors.push(`${dir} is already read as the ${first} layer; it is not read again as ${layer}`);
+        continue;
       }
+      seen.set(real, layer);
+      for (const f of readdirSync(dir).filter((f) => /\.ya?ml$/i.test(f)).sort()) parsed.push(parseVerb(join(dir, f), layer));
     } catch (e) {
       errors.push(`${dir}: ${(e as Error).message}`);
     }
@@ -401,8 +423,8 @@ export function loadVerbs(s: VerbSources): VerbSet {
   const byAddress = new Map<string, { verb: Verb; errors: string[] }[]>();
   for (const p of parsed) byAddress.set(p.verb.address, [...(byAddress.get(p.verb.address) ?? []), p]);
   for (const [address, ps] of byAddress) {
+    for (const p of ps) errors.push(...p.errors);
     if (ps.length > 1) errors.push(`${address} is declared by ${ps.map((p) => p.verb.file).join(" and ")}; none of them loads`);
-    else errors.push(...ps[0].errors);
     if (ps.length > 1 || ps[0].errors.length) refused.add(address);
     else live.push(ps[0].verb);
   }

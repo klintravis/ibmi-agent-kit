@@ -4,14 +4,12 @@
 // stubbed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync } from "node:fs";
-import { delimiter, dirname } from "node:path";
-import { bindArgs, loadVerbs, resolveVerb, substitute, type VerbParam, type VerbSources } from "./index.js";
 import {
+  bindArgs,
   builtinCommands,
   classify,
   classifyCl,
@@ -21,17 +19,22 @@ import {
   detectPartition,
   environmentOf,
   loadPolicy,
+  loadVerbs,
   mergeCommands,
   parsePolicy,
+  resolveVerb,
   rolesOf,
   parseCommandFile,
   splitScript,
+  substitute,
   type Classification,
   type ClassifyContext,
   type CommandTable,
   type Identity,
   type Lookups,
   type Operation,
+  type VerbParam,
+  type VerbSources,
 } from "./index.js";
 
 // --- helpers ---
@@ -1093,6 +1096,21 @@ test("verbs: a refused closer verb stops a bare name instead of falling through"
   assert.deepEqual(set.refused, ["user:RESET-DATA"]);
   assert.throws(() => resolveVerb(set, "RESET-DATA"), /user:RESET-DATA was refused at load/);
   assert.equal(resolveVerb(set, "org:RESET-DATA").overridden, true);
+  // a schema failure (step: typo) refuses its declared name; a YAML syntax error, its file name
+  const typo = loadVerbs(verbRoot({ [U + "r.yaml"]: "name: RESET-DATA\ndescription: d\nstep:\n  - sql: VALUES 1\n", [O + "r.yaml"]: verbYaml("RESET-DATA") }).src);
+  assert.deepEqual(typo.refused, ["user:RESET-DATA"]);
+  assert.throws(() => resolveVerb(typo, "RESET-DATA"), /user:RESET-DATA was refused at load/);
+  const syntax = loadVerbs(verbRoot({ [U + "reset-data.yaml"]: "name: RESET-DATA\nsteps: [\n", [O + "r.yaml"]: verbYaml("RESET-DATA") }).src);
+  assert.deepEqual(syntax.refused, ["user:RESET-DATA"]);
+  assert.match(syntax.errors.join("\n"), /reset-data\.yaml line \d+:/);
+  assert.throws(() => resolveVerb(syntax, "RESET-DATA"), /user:RESET-DATA was refused at load/);
+});
+
+test("verbs: one folder in two layers is read once, as the first, and reported", () => {
+  const { root, src } = verbRoot({ [U + "m.yaml"]: verbYaml("MINE") });
+  const set = loadVerbs({ ...src, extra: join(root, "home", ".ibmi-agent-kit", "verbs") });
+  assert.deepEqual(addresses(set), ["user:MINE"]);
+  assert.deepEqual(set.errors, [`${join(root, "home", ".ibmi-agent-kit", "verbs")} is already read as the user layer; it is not read again as proj`]);
 });
 
 test("verbs: duplicate in one layer: neither loads, and the error names both files", () => {
@@ -1219,9 +1237,9 @@ test("verbs: injection: x' or '1'='1 arrives as a bound value with the statement
 
 test("verbs: typed values are validated, and what is not one is refused", () => {
   const p = (type: VerbParam["type"]) => ({ address: "proj:X", params: { v: { type } as VerbParam } });
-  const bad = [["integer", "1 OR 1=1"], ["integer", 1.5], ["integer", "9007199254740993"], ["integer", Infinity], ["decimal", "1;DROP"], ["decimal", NaN], ["decimal", Infinity], ["decimal", 1e21], ["decimal", "1e5"], ["date", "2026-01-01' OR"], ["date", "2026-02-30"], ["date", 20260101], ["boolean", "true"], ["boolean", 1], ["string", 42]] as const;
+  const bad = [["integer", "1 OR 1=1"], ["integer", 1.5], ["integer", "9007199254740993"], ["integer", Infinity], ["decimal", "1;DROP"], ["decimal", NaN], ["decimal", Infinity], ["decimal", 1e21], ["decimal", "1e5"], ["date", "2026-01-01' OR"], ["date", "2026-02-30"], ["date", "0000-01-01"], ["date", 20260101], ["boolean", "true"], ["boolean", 1], ["string", 42]] as const;
   for (const [type, v] of bad) assert.throws(() => bindArgs(p(type), { v }), /^Error: proj:X: v: .+ is not /, `${type} ${String(v)}`);
-  const good = [["integer", "007", 7], ["integer", -3, -3], ["decimal", "12.50", "12.50"], ["decimal", -0.5, "-0.5"], ["date", "2024-02-29", "2024-02-29"], ["boolean", false, false], ["string", "", ""]] as const;
+  const good = [["integer", "007", 7], ["integer", -3, -3], ["decimal", "12.50", "12.50"], ["decimal", -0.5, "-0.5"], ["date", "2024-02-29", "2024-02-29"], ["date", "0001-01-01", "0001-01-01"], ["boolean", false, false], ["string", "", ""]] as const;
   for (const [type, v, want] of good) assert.deepEqual(bindArgs(p(type), { v }), { v: want }, `${type} ${String(v)}`);
   assert.throws(() => bindArgs(p("integer")), /v has no value and no default/);
   assert.throws(() => bindArgs(p("integer"), { v: 1, w: 2 }), /w is not a parameter/);
@@ -1243,6 +1261,9 @@ test("verbs: templates are refused at load where substitution would be unsafe or
     ["n: { type: integer, allowed: [1, two] }", 'sql: "VALUES :n"', /params\.n\.allowed\.1: "two" is not an integer/],
     ["s: { type: string, allowed: [01] }", 'sql: "VALUES :s"', /params\.s\.allowed\.0: 1 is not a string/],
     ["s: { type: string }", 'verb: OTHER\n    args: { t: "${s}" }', /steps\.0\.args\.t: \$\{s\}: parameter s is a string with no allowed list/],
+    ["n: { type: integer, required: false }", 'sql: "VALUES :n"', /params\.n\.required: false needs a default/],
+    ["n: { type: integer, required: true, default: 1 }", 'sql: "VALUES :n"', /params\.n\.required: true with a default/],
+    ["n: { type: integer }", "expect: { sql: VALUES 1, equals: {} }", /steps\.0\.expect\.equals: name at least one column/],
     ["n: { type: integer }", 'sql: "VALUES :n; VALUES :n"', /steps\.0\.sql: one SQL statement per step/],
     ["n: { type: integer }", 'sql: "VALUES :n\\nCL: DLTLIB X"', /steps\.0\.sql: one SQL statement per step/],
     ["n: { type: integer }", "expect: { sql: \"VALUES 'a\", empty: true }", /steps\.0\.expect\.sql: a string literal is never closed/],
