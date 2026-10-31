@@ -23,6 +23,9 @@ import {
   environmentOf,
   loadPolicy,
   loadVerbs,
+  decideVerb,
+  plannedStatements,
+  planVerb,
   mergeCommands,
   parsePolicy,
   resolveVerb,
@@ -1130,14 +1133,17 @@ test("verbs: a refused closer verb stops a bare name instead of falling through"
   assert.deepEqual(set.refused, ["user:RESET-DATA"]);
   assert.throws(() => resolveVerb(set, "RESET-DATA"), /user:RESET-DATA was refused at load/);
   assert.equal(resolveVerb(set, "org:RESET-DATA").overridden, true);
-  // a schema failure (step: typo) refuses its declared name; a YAML syntax error, its file name
+  // a schema failure (step: typo) refuses its declared name; a YAML syntax error, the name on its
+  // `name:` line, else its file name
   const typo = loadVerbs(verbRoot({ [U + "r.yaml"]: "name: RESET-DATA\ndescription: d\nstep:\n  - sql: VALUES 1\n", [O + "r.yaml"]: verbYaml("RESET-DATA") }).src);
   assert.deepEqual(typo.refused, ["user:RESET-DATA"]);
   assert.throws(() => resolveVerb(typo, "RESET-DATA"), /user:RESET-DATA was refused at load/);
-  const syntax = loadVerbs(verbRoot({ [U + "reset-data.yaml"]: "name: RESET-DATA\nsteps: [\n", [O + "r.yaml"]: verbYaml("RESET-DATA") }).src);
+  const syntax = loadVerbs(verbRoot({ [U + "r.yaml"]: "name: 'reset-data' # mine\nsteps: [\n", [O + "r.yaml"]: verbYaml("RESET-DATA") }).src);
   assert.deepEqual(syntax.refused, ["user:RESET-DATA"]);
-  assert.match(syntax.errors.join("\n"), /reset-data\.yaml line \d+:/);
+  assert.match(syntax.errors.join("\n"), /r\.yaml line \d+:/);
   assert.throws(() => resolveVerb(syntax, "RESET-DATA"), /user:RESET-DATA was refused at load/);
+  const nameless = loadVerbs(verbRoot({ [U + "reset-data.yaml"]: "steps: [\n", [O + "r.yaml"]: verbYaml("RESET-DATA") }).src);
+  assert.deepEqual(nameless.refused, ["user:RESET-DATA"]);
 });
 
 test("verbs: one folder in two layers is read once, as the first, and reported", () => {
@@ -1291,9 +1297,9 @@ test("verbs: a nested arg that is exactly ${p} passes the typed value; types mus
 test("verbs: injection: x' or '1'='1 arrives as a bound value with the statement text unchanged", () => {
   const params: Record<string, VerbParam> = { name: { type: "string" } };
   const values = bindArgs({ address: "proj:X", params }, { name: "x' or '1'='1" });
-  const sql = `SELECT * FROM T WHERE A = :name AND B = ':name' AND "C:name" = 1 -- :name\nAND D = 1 /* :name */`;
+  const sql = `SELECT * FROM T WHERE A = :name AND B = ':name' AND "C:name" = 1 -- :name\nAND /* :name */ D = 1`;
   assert.deepEqual(substitute(sql, "sql", params, values), {
-    text: `SELECT * FROM T WHERE A = ? AND B = ':name' AND "C:name" = 1 -- :name\nAND D = 1 /* :name */`,
+    text: `SELECT * FROM T WHERE A = ? AND B = ':name' AND "C:name" = 1 -- :name\nAND /* :name */ D = 1`,
     params: ["x' or '1'='1"],
   });
 });
@@ -1352,9 +1358,111 @@ test("verbs: ${p} doubles quotes inside literals and refuses a value that would 
   assert.equal(substitute("DELETE FROM T WHERE A > 1 - ${n}", "sql", n, { n: -1 }).text, "DELETE FROM T WHERE A > 1 - -1");
   assert.throws(() => substitute("VALUES :n", "sql", n, {}), /parameter n has no value/);
   assert.equal(substitute("${lib}", "arg", lib, { lib: "IN1" }).text, "IN1");
-  assert.equal(substitute("VALUES 1;", "sql", n, {}).text, "VALUES 1;");
+  assert.equal(substitute("VALUES 1;", "sql", n, {}).text, "VALUES 1", "the splitter's statement, no trailing ;");
   const semi: Record<string, VerbParam> = { s: { type: "string", allowed: ["IN1; DELETE FROM T"] } };
   assert.throws(() => substitute("SELECT * FROM ORD${s}.T", "sql", semi, { s: "IN1; DELETE FROM T" }), /substituted: one SQL statement per step/);
+});
+
+// --- planning and deciding a verb run (verbs spec; task 2.1, design D2) ---
+
+const W_VERB = `name: W
+description: write and check
+params:
+  k: { type: integer, default: 1 }
+setup:
+  - id: seed
+    requires_absent: "SELECT 1 FROM INORD.T WHERE K = :k"
+    sql: "INSERT INTO INORD.T (K) VALUES (:k)"
+steps:
+  - cl: "CALL PGM(INORD/P) PARM('\${k}')"
+  - verb: INNER
+    args: { n: "\${k}" }
+  - expect: { sql: "SELECT K FROM INORD.T WHERE K = :k", rows: 1 }
+cleanup:
+  - { undoes: seed, sql: "DELETE FROM INORD.T WHERE K = :k" }
+`;
+const INNER_VERB = "name: INNER\ndescription: d\nparams:\n  n: { type: integer }\nsteps:\n  - sql: UPDATE INORD.T SET S = 'X' WHERE K = :n\n";
+
+test("verbs: a plan binds and substitutes every list and nested verb, in run order", async () => {
+  const set = loadVerbs(verbRoot({ [P + "w.yaml"]: W_VERB, [P + "inner.yaml"]: INNER_VERB }).src);
+  assert.deepEqual(set.errors, []);
+  const plan = planVerb(set, "W", { k: 7 });
+  const list = plannedStatements(plan);
+  assert.deepEqual(
+    list.map((s) => [s.verb, s.where, s.kind, s.text, s.params]),
+    [
+      ["proj:W", "setup.0.requires_absent", "sql", "SELECT 1 FROM INORD.T WHERE K = ?", [7]],
+      ["proj:W", "setup.0", "sql", "INSERT INTO INORD.T (K) VALUES (?)", [7]],
+      ["proj:W", "steps.0", "cl", "CALL PGM(INORD/P) PARM('7')", []],
+      ["proj:INNER", "steps.0", "sql", "UPDATE INORD.T SET S = 'X' WHERE K = ?", [7]],
+      ["proj:W", "steps.2.expect", "sql", "SELECT K FROM INORD.T WHERE K = ?", [7]],
+      ["proj:W", "cleanup.0", "sql", "DELETE FROM INORD.T WHERE K = ?", [7]],
+    ],
+  );
+  const r = await decideVerb(plan, as("dev", "dev"), D4, lookups());
+  assert.deepEqual(r.refusals, []);
+  assert.deepEqual(r.statements.map((s) => s.decision.decision), ["allow", "allow", "allow", "allow", "allow", "allow"]);
+  assert.deepEqual(r.statements[1].statement.operations.map((o) => `${o.class} ${o.object?.lib}.${o.object?.name}`), ["write INORD.T"]);
+  const analyst = await decideVerb(plan, as("analyst", "prod"), D4, lookups());
+  assert.deepEqual(analyst.statements.map((s) => s.decision.effective), ["allow", "deny", "deny", "deny", "allow", "deny"]);
+});
+
+test("verbs: a nested verb's bad value fails the plan before any statement could be sent", () => {
+  const callee = "name: CALLEE\ndescription: d\nparams:\n  env: { type: string, allowed: [IN1] }\nsteps:\n  - sql: VALUES :env\n";
+  const caller = "name: CALLER\ndescription: d\nparams:\n  n: { type: integer, default: 1 }\nsteps:\n  - sql: DELETE FROM INORD.T\n  - verb: CALLEE\n    args: { env: \"IN${n}\" }\n";
+  const set = loadVerbs(verbRoot({ [P + "callee.yaml"]: callee, [P + "caller.yaml"]: caller }).src);
+  assert.deepEqual(set.errors, []);
+  assert.equal(plannedStatements(planVerb(set, "CALLER")).length, 2);
+  assert.throws(() => planVerb(set, "CALLER", { n: 2 }), /proj:CALLEE: env: "IN2" is not one of IN1/);
+});
+
+test("verbs: the call chain is bounded at plan time too, with MAX_VERB_DEPTH", () => {
+  const files: Record<string, string> = {};
+  for (let i = 1; i <= 6; i++) files[`${P}v${i}.yaml`] = i < 5 ? calls(`V${i}`, `V${i + 1}`) : verbYaml(`V${i}`);
+  const set = loadVerbs(verbRoot(files).src);
+  assert.equal(plannedStatements(planVerb(set, "V1")).length, 1);
+  resolveVerb(set, "V5").steps.push({ verb: "V6" }); // a set changed after loading
+  assert.throws(() => planVerb(set, "V1"), new RegExp(`more than ${MAX_VERB_DEPTH} verbs in one call chain: proj:V1 → .* → proj:V6`));
+});
+
+test("verbs: requires_absent and expect queries must only read, by the classifier, not the first word", async () => {
+  const sneaky = (key: string, q: string) => `name: S\ndescription: d\nparams:\n  k: { type: integer, default: 1 }\nsetup:\n  - id: s\n    ${key === "requires_absent" ? `requires_absent: "${q}"\n    ` : ""}sql: INSERT INTO INORD.T (K) VALUES (:k)\nsteps:\n  - ${key === "expect" ? `expect: { sql: "${q}", empty: true }` : "sql: VALUES 1"}\n`;
+  const q = "SELECT * FROM OLD TABLE (DELETE FROM INORD.T WHERE K = :k)";
+  for (const key of ["requires_absent", "expect"]) {
+    const set = loadVerbs(verbRoot({ [P + "s.yaml"]: sneaky(key, q) }).src);
+    assert.deepEqual(set.errors, [], key);
+    const r = await decideVerb(planVerb(set, "S"), as("dev", "dev"), D4, lookups());
+    assert.equal(r.refusals.length, 1, key);
+    assert.match(r.refusals[0], new RegExp(`proj:S (setup\\.0\\.requires_absent|steps\\.0\\.expect): a ${key} query must only read, but it is write INORD\\.T`));
+  }
+});
+
+test("policy tests: a verb case decides every statement the verb would send", async () => {
+  const { root, src } = verbRoot({ [P + "w.yaml"]: W_VERB, [P + "inner.yaml"]: INNER_VERB });
+  const set = loadVerbs({ cwd: src.cwd });
+  const cases = parsePolicyTests(
+    `- name: dev runs it
+  as: { user: JDOE, groups: [GRPDEV], partition: dev }
+  verb: W
+  args: { k: 5 }
+  expect: [allow, allow, allow, allow, allow, allow]
+- name: analyst cannot
+  as: { user: ANL01, groups: [GRPANL], partition: prod }
+  verb: proj:W
+  expect: deny
+- name: wrong
+  as: { user: ANL01, groups: [GRPANL], partition: prod }
+  verb: W
+  expect: allow
+`,
+    join(root, "t.yaml"),
+  );
+  const [dev, analyst, wrong] = await runPolicyTests(D4, cases, set);
+  assert.equal(dev.ok, true, describeFailure(dev));
+  assert.equal(analyst.ok, true, describeFailure(analyst));
+  assert.equal(wrong.ok, false);
+  assert.match(describeFailure(wrong), /statement 2: proj:W setup\.0: INSERT INTO INORD\.T \(K\) VALUES \(\?\)\n    deny/);
+  await assert.rejects(runPolicyTests(D4, parsePolicyTests("- { name: bad, as: { user: X }, verb: W, args: { k: two }, expect: allow }\n", "t.yaml"), set), /case "bad": proj:W: k: "two" is not an integer/);
 });
 
 // --- run log (run-log spec; task 4.1) ---
@@ -1683,7 +1791,9 @@ test("policy tests: per-statement expects, lookups, curlib; bad files are refuse
   const [alias, count] = await runPolicyTests(D4, cases);
   assert.equal(alias.ok, true, describeFailure(alias));
   assert.equal(count.ok, false, "one statement, two expects");
-  assert.throws(() => parsePolicyTests("- { name: v, as: { user: X }, verb: deploy, args: {}, expect: allow }\n", "t.yaml"), /t\.yaml: 0: verb cases need verbs/);
+  assert.throws(() => parsePolicyTests("- { name: v, as: { user: X }, script: S, verb: deploy, expect: allow }\n", "t.yaml"), /t\.yaml: 0: give exactly one of script, verb/);
+  assert.throws(() => parsePolicyTests("- { name: v, as: { user: X }, script: S, args: { a: 1 }, expect: allow }\n", "t.yaml"), /t\.yaml: 0: args go with verb/);
+  await assert.rejects(runPolicyTests(D4, parsePolicyTests("- { name: v, as: { user: X }, verb: deploy, expect: allow }\n", "t.yaml")), /case "v": no verbs were loaded/);
   assert.throws(() => parsePolicyTests("- { name: x, as: { user: X }, script: S, expect: alow }\n", "t.yaml"), /t\.yaml: 0\.expect/);
   assert.throws(() => parsePolicyTests("- { name: x, as: { user: X, group: [G] }, script: S, expect: allow }\n", "t.yaml"), /Unrecognized key/);
   assert.throws(() => parsePolicyTests("[]\n", "t.yaml"), /t\.yaml/);

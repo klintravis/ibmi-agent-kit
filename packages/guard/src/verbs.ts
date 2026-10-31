@@ -139,7 +139,9 @@ function typed(type: VerbParam["type"], v: unknown): Value | undefined {
 function valueOf(p: VerbParam, v: unknown): { value: Value } | { error: string } {
   const value = typed(p.type, v);
   if (value === undefined) return { error: `${show(v)} is not ${EXPECTED[p.type]}` };
-  const same = (a: Value | undefined) => (p.type === "decimal" ? a !== undefined && Number(a) === Number(value) : a === value); // 1.5 = 1.50
+  // 1.5 = 1.50. shortcut: decimals compare as JS numbers, so values past 15-17 significant digits
+  // can compare equal; compare digit strings if an allowed list ever needs that precision.
+  const same = (a: Value | undefined) => (p.type === "decimal" ? a !== undefined && Number(a) === Number(value) : a === value);
   if (p.allowed && !p.allowed.some((a) => same(typed(p.type, a)))) return { error: `${show(v)} is not one of ${p.allowed.join(", ")}` };
   return { value };
 }
@@ -229,11 +231,16 @@ function refs(t: string, kind: TemplateKind): Ref[] {
   return out;
 }
 
-function notOneStatement(sql: string): string[] {
+// The one SQL statement in `sql` as the splitter reads it (no trailing ;), or why there is not one.
+function oneStatement(sql: string): { text: string } | { errors: string[] } {
   const parts = splitScript(sql);
-  if (parts.length !== 1 || parts[0].kind !== "sql") return ["one SQL statement per step: no ; between statements and no CL: line"];
-  return parts[0].error ? [parts[0].error] : [];
+  if (parts.length !== 1 || parts[0].kind !== "sql") return { errors: ["one SQL statement per step: no ; between statements and no CL: line"] };
+  return parts[0].error ? { errors: [parts[0].error] } : { text: parts[0].text };
 }
+const notOneStatement = (sql: string): string[] => {
+  const r = oneStatement(sql);
+  return "errors" in r ? r.errors : [];
+};
 
 // What makes a template unsafe or wrong, one line each, given the verb's parameters.
 function templateErrors(t: string, kind: TemplateKind, params: Record<string, VerbParam>): string[] {
@@ -296,9 +303,10 @@ export function substitute(t: string, kind: TemplateKind, params: Record<string,
     out += s;
   }
   out += t.slice(at);
-  const split = kind === "sql" ? notOneStatement(out) : [];
-  if (split.length) throw new Error(`substituted: ${split.join("; ")}`);
-  return { text: out, params: bound };
+  if (kind !== "sql") return { text: out, params: bound };
+  const one = oneStatement(out);
+  if ("errors" in one) throw new Error(`substituted: ${one.errors.join("; ")}`);
+  return { text: one.text, params: bound };
 }
 
 const EXACT = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
@@ -320,16 +328,16 @@ export function callArgs(step: Pick<VerbStep, "args">, params: Record<string, Ve
 // --- loading ---
 
 export interface VerbSources {
-  home: string; // user layer: <home>/.ibmi-agent-kit/verbs
+  home?: string; // user layer: <home>/.ibmi-agent-kit/verbs; omitted by policy test, so CI is not personal
   cwd: string; // proj layer: <cwd>/.ibmi-kit/verbs
   extra?: string; // proj layer: IBMI_KIT_VERBS, folders joined with the path delimiter
   policyFile?: string; // org layer: verbs/ beside it
 }
 
 // A refused file still holds its address, so a bare name stops at it: its `name` if that is a
-// name, else the file name.
-function refusedFile(file: string, layer: Layer, raw: unknown, errors: string[]): { verb: Verb; errors: string[] } {
-  const declared = (raw as { name?: unknown } | null)?.name;
+// name (from a top-level `name:` line when the YAML does not parse), else the file name.
+function refusedFile(file: string, layer: Layer, raw: unknown, errors: string[], text = ""): { verb: Verb; errors: string[] } {
+  const declared = raw === undefined ? /^name:[ \t]*["']?([^"'\s#]+)/m.exec(text)?.[1] : (raw as { name?: unknown } | null)?.name;
   const name = (word.safeParse(declared).success ? (declared as string) : basename(file).replace(/\.ya?ml$/i, "")).toUpperCase();
   return { verb: { address: `${layer}:${name}`, name, layer, file, description: "", tags: [], params: {}, setup: [], steps: [], cleanup: [], overridden: false }, errors };
 }
@@ -337,10 +345,12 @@ function refusedFile(file: string, layer: Layer, raw: unknown, errors: string[])
 // One file: the verb, and why it is refused (empty if it is not).
 function parseVerb(file: string, layer: Layer): { verb: Verb; errors: string[] } {
   let raw: unknown;
+  let text = "";
   try {
-    raw = parseYaml(readFileSync(file, "utf8"), file);
+    text = readFileSync(file, "utf8");
+    raw = parseYaml(text, file);
   } catch (e) {
-    return refusedFile(file, layer, undefined, [(e as Error).message]);
+    return refusedFile(file, layer, undefined, [(e as Error).message], text);
   }
   const r = verbSchema.safeParse(raw);
   if (!r.success) return refusedFile(file, layer, raw, [issueLines(file, r.error)]);
@@ -414,7 +424,7 @@ export function resolveVerb(set: VerbSet, ref: string): Verb {
 // in IBMI_KIT_VERBS, which is an error. A refused verb is reported in `errors`; the rest still load.
 export function loadVerbs(s: VerbSources): VerbSet {
   const folders: [Layer, string, boolean][] = [
-    ["user", join(s.home, ".ibmi-agent-kit", "verbs"), false],
+    ...(s.home ? [["user", join(s.home, ".ibmi-agent-kit", "verbs"), false] as [Layer, string, boolean]] : []),
     ["proj", join(s.cwd, ".ibmi-kit", "verbs"), false],
     ...(s.extra ?? "").split(delimiter).filter((d) => d.trim()).map((d): [Layer, string, boolean] => ["proj", resolve(s.cwd, d.trim()), true]),
     ...(s.policyFile ? [["org", join(dirname(s.policyFile), "verbs"), false] as [Layer, string, boolean]] : []),

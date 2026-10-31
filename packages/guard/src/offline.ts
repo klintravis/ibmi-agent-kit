@@ -9,6 +9,8 @@ import { decide, detectPartition, worst, type Decision, type Identity } from "./
 import type { Policy, Verdict } from "./policy.js";
 import { statedLookups, statementRule, type Answers, type RunLogLine } from "./runlog.js";
 import type { Classification, Lookups } from "./types.js";
+import { decideVerb, planVerb } from "./verbplan.js";
+import type { VerbSet } from "./verbs.js";
 
 // Classify a script with the policy's command table and RDB map, and decide each statement.
 export async function decideStatements(script: string, identity: Identity, policy: Policy, lookups: Lookups): Promise<{ classification: Classification; decisions: Decision[] }> {
@@ -31,7 +33,9 @@ const caseSchema = z
         curlib: z.string().optional(),
       })
       .strict(),
-    script: z.string().min(1),
+    script: z.string().min(1).optional(),
+    verb: z.string().min(1).optional(),
+    args: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
     lookups: z
       .object({
         schemas: z.record(z.string()).optional(),
@@ -42,15 +46,15 @@ const caseSchema = z
     // One decision for the whole script (its most restrictive), or one per statement.
     expect: z.union([verdict, z.array(verdict).min(1)]),
   })
-  .strict();
+  .strict()
+  .superRefine((c, ctx) => {
+    if ((c.script === undefined) === (c.verb === undefined)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "give exactly one of script, verb" });
+    if (c.args && c.verb === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "args go with verb" });
+  });
 export type PolicyTest = z.infer<typeof caseSchema>;
 
 export function parsePolicyTests(text: string, file: string): PolicyTest[] {
   const raw = parseYaml(text, file);
-  if (Array.isArray(raw))
-    raw.forEach((c, i) => {
-      if (c && typeof c === "object" && "verb" in c) throw new Error(`${file}: ${i}: verb cases need verbs (project-verbs); state the script`);
-    });
   const r = z.array(caseSchema).min(1).safeParse(raw);
   if (!r.success) throw new Error(issueLines(file, r.error));
   return r.data;
@@ -69,8 +73,9 @@ export interface TestResult {
 }
 
 // Each case decided offline; `expect` is compared with the policy's decision, not the effective
-// one, so a deny on an observe-mode partition is still tested.
-export async function runPolicyTests(policy: Policy, cases: PolicyTest[]): Promise<TestResult[]> {
+// one, so a deny on an observe-mode partition is still tested. A verb case decides every statement
+// the verb would send, as verb_run does; `verbs` is where its verb is found.
+export async function runPolicyTests(policy: Policy, cases: PolicyTest[], verbs?: VerbSet): Promise<TestResult[]> {
   const out: TestResult[] = [];
   for (const t of cases) {
     const p = t.as.partition;
@@ -87,10 +92,24 @@ export async function runPolicyTests(policy: Policy, cases: PolicyTest[]): Promi
     if (t.lookups?.schemas) answers.schemas = upper(t.lookups.schemas);
     if (t.lookups?.bases) answers.bases = upper(t.lookups.bases);
     if (t.as.curlib) answers.curlib = t.as.curlib;
-    const { classification, decisions } = await decideStatements(t.script, identity, policy, statedLookups(answers));
-    const got = decisions.map((d) => d.decision);
+    let statements: TestResult["statements"];
+    if (t.verb !== undefined) {
+      if (!verbs) throw new Error(`case "${t.name}": no verbs were loaded to find ${t.verb} in`);
+      let r: Awaited<ReturnType<typeof decideVerb>>;
+      try {
+        r = await decideVerb(planVerb(verbs, t.verb, t.args), identity, policy, statedLookups(answers));
+      } catch (e) {
+        throw new Error(`case "${t.name}": ${(e as Error).message}`);
+      }
+      if (r.refusals.length) throw new Error(`case "${t.name}": ${r.refusals.join("; ")}`);
+      statements = r.statements.map((s) => ({ text: `${s.planned.verb} ${s.planned.where}: ${s.statement.display}`, decision: s.decision }));
+    } else {
+      const { classification, decisions } = await decideStatements(t.script as string, identity, policy, statedLookups(answers));
+      statements = classification.statements.map((s, i) => ({ text: s.display, decision: decisions[i] }));
+    }
+    const got = statements.map((s) => s.decision.decision);
     const ok = typeof t.expect === "string" ? worst(got) === t.expect : got.length === t.expect.length && got.every((g, i) => g === (t.expect as Verdict[])[i]);
-    out.push({ name: t.name, ok, expected: t.expect, statements: classification.statements.map((s, i) => ({ text: s.display, decision: decisions[i] })) });
+    out.push({ name: t.name, ok, expected: t.expect, statements });
   }
   return out;
 }

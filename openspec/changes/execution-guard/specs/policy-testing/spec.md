@@ -19,9 +19,11 @@ answers for lookups (alias base tables, long-to-system schema names) where a cas
 ### Requirement: Policy test files state expected decisions
 A policy test file SHALL be a YAML list of cases, each with `as` (identity), `script` (or `verb`
 and `args`), optional `lookups`, and `expect` (`allow`, `confirm` or `deny`, overall or per
-statement). `ibmi-agent-kit policy test <policy> <tests>` SHALL run every case, print each
-mismatch with the operations, matching rule and actual decision, and exit non-zero if any case
-fails.
+statement). A verb case SHALL decide every statement the verb would send, nested verbs and
+cleanup included, with the verb found in `.ibmi-kit/verbs/` in the working directory or `verbs/`
+beside the policy file; a person's own verbs SHALL NOT be read. `ibmi-agent-kit policy test
+<policy> <tests>` SHALL run every case, print each mismatch with the operations, matching rule and
+actual decision, and exit non-zero if any case fails.
 
 #### Scenario: Passing suite
 - **WHEN** every case's decision matches its `expect`
