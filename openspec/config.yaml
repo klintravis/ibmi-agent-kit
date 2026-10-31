@@ -1,12 +1,18 @@
 schema: spec-driven
 
 context: |
-  Public repo. Never put a real enterprise's schema, workflows, hostnames or credentials in it;
-  examples target PUB400 or invented data. Real packs live in private repos.
-  packages/screen and packages/source are imported Apache-2.0 code (git subtree from SH4RKKK);
-  keep their LICENSE and NOTICE, keep changes small so upstream fixes can still be pulled.
+  Public repo. Never put a real enterprise's library names, partitions, vendor command names,
+  hostnames or credentials in it; examples use PUB400 or invented names. A company's real
+  policy lives in that company's private repo and is loaded by path.
+  packages/screen and packages/source began as SH4RKKK's Apache-2.0 servers and are now a hard
+  fork owned by this kit: restructure freely, but keep the original LICENSE/NOTICE text and
+  add a modification line to each file changed from upstream.
+  Each user signs on with their own IBM i credentials. IBM i object authority is the real
+  boundary; the kit's guard catches mistakes, it does not stop a determined user.
+  Knowledge of a company's system belongs in Claude skills, not in this MCP.
   Must run without Docker on Windows, macOS and Linux with Node >= 18.
-  The IBM i user profile is the real safety boundary; the kit's guards are a second layer only.
+  Tests follow the engines' style: one src/selfcheck.ts per package run by `node --test` via
+  `npm run check`, no test framework dependency, stubs instead of a live IBM i.
 
 rules:
   proposal:
