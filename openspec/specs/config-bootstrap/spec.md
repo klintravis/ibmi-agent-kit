@@ -54,11 +54,13 @@ leave the edit with updated tests on a branch, never on the default branch.
 - **THEN** the skill reports it with counts, proposes an environment entry, adds test cases, and shows the replay result
 
 ### Requirement: The skill is not shipped to end users
-Published kit packages SHALL NOT include the skill or the templates.
+Published kit packages SHALL NOT include the skill or the templates. A selfcheck SHALL fail when
+any package's `files` list in `package.json` names or globs `.claude` or `templates`.
 
 #### Scenario: Packed contents
 - **WHEN** a kit package is packed
-- **THEN** the archive contains no `.claude/` or `templates/` paths
+- **THEN** the archive contains no `.claude/` or `templates/` paths, and the selfcheck on every
+  package's `files` list guards this on each CI run
 
 ### Requirement: The bootstrap starts in an empty company repo
 The `ibmi-kit-config` bootstrap SHALL refuse a folder that holds anything besides `.git`, `README*`,
