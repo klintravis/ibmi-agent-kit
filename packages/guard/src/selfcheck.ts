@@ -1552,6 +1552,21 @@ test("policy tests: a verb case decides every statement the verb would send", as
   assert.match(describeFailure(ro), /statement 1: proj:W setup\.0\.requires_absent: .*\n    deny .*\n    - proj:W setup\.0\.requires_absent: a requires_absent query must only read, but it is write INORD\.T/);
 });
 
+test("policy tests: an undeclared-parameter warning rides on the result, script and verb, and ok is unchanged", async () => {
+  const WARNING = /^CALL XYZKW\(\): the command table does not declare this parameter/;
+  const as = "as: { user: JDOE, groups: [GRPDEV], partition: dev }";
+  const [plain, withKw] = await runPolicyTests(D4, parsePolicyTests(`- { name: plain, ${as}, script: "CL: CALL PGM(INORD/P)", expect: allow }\n- { name: kw, ${as}, script: "CL: CALL PGM(INORD/P) XYZKW(PRODLIB)", expect: allow }\n`, "t.yaml"));
+  assert.equal(plain.statements[0].warnings, undefined);
+  assert.equal(withKw.ok, true);
+  assert.match(withKw.statements[0].warnings![0], WARNING);
+  assert.match(describeFailure(withKw), /\n {4}! CALL XYZKW\(\): /);
+  const set = loadVerbs(verbRoot({ [P + "c.yaml"]: verbYaml("C", "  - cl: CALL PGM(INORD/P) XYZKW(PRODLIB)") }).src);
+  const [v] = await runPolicyTests(D4, parsePolicyTests(`- { name: v, ${as}, verb: C, expect: allow }\n`, "t.yaml"), set);
+  assert.equal(v.ok, true);
+  assert.match(v.statements[0].warnings![0], WARNING);
+  assert.match(describeFailure(v), /\n {4}! CALL XYZKW\(\): /);
+});
+
 test("verbs: verbs decided together see what earlier ones set up: a QTEMP alias, a changed current library", async () => {
   const set = loadVerbs(
     verbRoot({

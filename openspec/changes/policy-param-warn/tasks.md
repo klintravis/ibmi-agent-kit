@@ -9,8 +9,8 @@
 
 ## 2. Guard offline: policy test results
 
-- [ ] 2.1 `offline.ts`: `TestResult.statements[]` gains optional `warnings`, filled from the classified statement in both the script and the verb branch of `runPolicyTests`; `describeFailure` prints each as `    ! <warning>` under its statement. Verify with a selfcheck case (script and verb) that a passing case carries the warning, `ok` is unchanged, and `describeFailure` shows it.
-- [ ] 2.2 `packages/guard/README.md` (Offline `policy test` bullet): say undeclared-parameter warnings go to stderr and do not change the exit code. Verify the text matches the CLI behaviour in 3.2.
+- [x] 2.1 `offline.ts`: `TestResult.statements[]` gains optional `warnings`, filled from the classified statement in both the script and the verb branch of `runPolicyTests`; `describeFailure` prints each as `    ! <warning>` under its statement. Verify with a selfcheck case (script and verb) that a passing case carries the warning, `ok` is unchanged, and `describeFailure` shows it.
+- [x] 2.2 `packages/guard/README.md` (Offline `policy test` bullet): say undeclared-parameter warnings go to stderr and do not change the exit code. Verify the text matches the CLI behaviour in 3.2.
 
 ## 3. Server: policy_check and policy test output
 

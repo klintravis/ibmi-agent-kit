@@ -69,7 +69,7 @@ export interface TestResult {
   name: string;
   ok: boolean;
   expected: Verdict | Verdict[];
-  statements: { text: string; decision: Decision; refused?: string }[];
+  statements: { text: string; decision: Decision; refused?: string; warnings?: string[] }[];
 }
 
 // Each case decided offline; `expect` is compared with the policy's decision, not the effective
@@ -104,11 +104,12 @@ export async function runPolicyTests(policy: Policy, cases: PolicyTest[], verbs?
       // A requires_absent or expect query that does more than read is refused in every mode: deny.
       statements = r.statements.map((s) => ({
         text: `${s.planned.verb} ${s.planned.where}: ${s.statement.display}`,
+        ...(s.statement.warnings ? { warnings: s.statement.warnings } : {}),
         ...(s.refusal ? { decision: { ...s.decision, decision: "deny" as const, effective: "deny" as const, enforced: true }, refused: s.refusal } : { decision: s.decision }),
       }));
     } else {
       const { classification, decisions } = await decideStatements(t.script as string, identity, policy, statedLookups(answers));
-      statements = classification.statements.map((s, i) => ({ text: s.display, decision: decisions[i] }));
+      statements = classification.statements.map((s, i) => ({ text: s.display, decision: decisions[i], ...(s.warnings ? { warnings: s.warnings } : {}) }));
     }
     const got = statements.map((s) => s.decision.decision);
     const ok = typeof t.expect === "string" ? worst(got) === t.expect : got.length === t.expect.length && got.every((g, i) => g === (t.expect as Verdict[])[i]);
@@ -124,6 +125,7 @@ export function describeFailure(r: TestResult): string {
   r.statements.forEach((s, i) => {
     const rule = statementRule(s.decision);
     lines.push(`  statement ${i + 1}: ${s.text}`, `    ${s.decision.decision}${rule ? ` by rule ${rule}` : ""} (roles ${s.decision.roles.join(", ") || "none"})`);
+    for (const w of s.warnings ?? []) lines.push(`    ! ${w}`);
     if (s.refused) lines.push(`    - ${s.refused}`);
     for (const o of s.decision.operations) lines.push(`    - ${o.message}`);
     if (!s.decision.operations.length) lines.push(`    - ${s.decision.reason}`);
