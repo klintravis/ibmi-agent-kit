@@ -36,7 +36,8 @@ CL SHALL be classified only by a command table giving each command a class (`rea
 `ddl`, `compile`, `call`, `liblist`, `promote`, `danger`), the parameters that name objects or
 libraries, and optionally the partition a parameter's library belongs to. A command not in the
 table, or qualified to a library other than `QSYS`, `QSYS2` or one the table names, SHALL
-classify as `danger`; the unqualified ones SHALL carry the reason `unknown_command`.
+classify as `danger`; the unqualified ones (or qualified `*LIBL`/`*NLVLIBL`) SHALL carry the reason
+`unknown_command`.
 
 #### Scenario: Display with an outfile
 - **WHEN** a command is `DSPOBJD OBJ(A/*ALL) OBJTYPE(*FILE) OUTPUT(*OUTFILE) OUTFILE(B/OUT)`
