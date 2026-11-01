@@ -287,6 +287,19 @@ test("showcase: every SEED-BUILD member has a source file, DDS columns hold, no 
   }
 });
 
+// showcase-demo 3.2: the screen tests parse and run as shipped inside the demo's session: no command typed, no library.
+test("showcase: both screen tests parse, type no CALL and name no library", async () => {
+  const dir = join(EXAMPLES, "showcase/screen-tests");
+  const files = readdirSync(dir).sort();
+  assert.deepEqual(files, ["01-list.md", "02-detail.md"]);
+  const { parseTest } = await import(new URL("../../screen/dist/testrun.js", import.meta.url).href);
+  for (const f of files) {
+    const text = readFileSync(join(dir, f), "utf8");
+    assert.ok(parseTest(text, f).steps.length > 0, f);
+    assert.doesNotMatch(text, /CALL|MYLIB/, f);
+  }
+});
+
 // demo-quickstart 3: the /demo skill names only real tools and paths, and its connection query is a read.
 test("demo skill: frontmatter, tool names, repo paths and the connection SELECT are valid", async () => {
   const root = join(EXAMPLES, "..");

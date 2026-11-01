@@ -20,8 +20,8 @@ tests and docs quote them. Selfcheck tests go in `packages/server/src/selfcheck.
 
 ## 3. Screen tests
 
-- [ ] 3.1 Write `examples/showcase/screen-tests/01-list.md` (expects `Seed Stock List`, `5=Display`, rows, `Bottom`, `8 seeds.`, cursor on the first option field; F5 and the same expectations) and `02-detail.md` (option 5 on Tomato shows `Seed Detail` and `In stock`, F12 back; option 5 on Basil and Kale, Enter through both details back to the list); both start and end on the list, no command typed, no library; verify with 3.2
-- [ ] 3.2 Add a selfcheck test that parses each screen test with `parseTest` (dynamic import of `../../screen/dist/testrun.js` by URL, as the demo test imports `source/dist/util.js`) and asserts the text has no `CALL` and no `MYLIB`; verify it passes, and fails on a malformed `5250-do` line
+- [x] 3.1 Write `examples/showcase/screen-tests/01-list.md` (expects `Seed Stock List`, `5=Display`, rows, `Bottom`, `8 seeds.`, cursor on the first option field; F5 and the same expectations) and `02-detail.md` (option 5 on Tomato shows `Seed Detail` and `In stock`, F12 back; option 5 on Basil and Kale, Enter through both details back to the list); both start and end on the list, no command typed, no library; verify with 3.2
+- [x] 3.2 Add a selfcheck test that parses each screen test with `parseTest` (dynamic import of `../../screen/dist/testrun.js` by URL, as the demo test imports `source/dist/util.js`) and asserts the text has no `CALL` and no `MYLIB`; verify it passes, and fails on a malformed `5250-do` line
 
 ## 4. Guided part and skill
 
