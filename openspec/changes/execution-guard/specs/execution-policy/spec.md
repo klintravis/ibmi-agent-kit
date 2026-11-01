@@ -79,7 +79,7 @@ in observe mode.
 
 #### Scenario: No policy installed
 - **WHEN** `IBMI_KIT_POLICY` is unset
-- **THEN** every pre-existing tool behaves as before this change, and decisions are logged
+- **THEN** every pre-existing tool behaves as before this change except that `danger` operations and unqualified changes are denied, and decisions are logged
 
 ### Requirement: Partitions are identified by system name and RDB name
 Each partition SHALL list `systems` (matched against the 5250 sign-on System name, which some sign-on screens label "Server name") and/or `rdbs`

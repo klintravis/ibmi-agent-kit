@@ -126,7 +126,8 @@ statement of a verb, its nested verbs and its cleanup, and for every verb of a t
 as one script before the first is sent; a verb runs with the signed-on user's rules, so sharing
 one grants nothing. `policy_check` makes the same decisions but only reports them. With no
 policy file the built-in policy (observe mode, one `allow` rule) logs every decision and runs
-everything except `danger` and `unqualified` operations, which it still denies (see [Policy](#policy)).
+everything except `danger` operations and unqualified changes (a write with no library), which it
+still denies (see [Policy](#policy)).
 
 The source tools are decided the same way before they act: `run_sql`, `read_source_member` and
 `search_source` as reads of their table, source file or library; `upload_source_member` as a write
@@ -212,16 +213,19 @@ rules:                                    # first match wins; omitted key or `an
 
 - **Observe first.** `mode: observe` decides and logs and lets a statement run; `enforce` applies the
   decision. A map (`mode: { default: observe, prod: enforce }`) sets it per partition, so you switch
-  boxes one at a time. In every mode `danger`, `unqualified` and a partition conflict are denied.
-  With no policy file the built-in policy (observe, one `allow` rule) still denies `danger` and
-  `unqualified` operations and logs everything.
+  boxes one at a time. A policy file without `mode` enforces. In every mode `danger` operations,
+  unqualified changes (a write with no library) and a partition conflict are denied (except an
+  unqualified command missing from the table in observe mode; see the limits below). With no policy
+  file the built-in policy (observe, one `allow` rule) still denies `danger` operations and
+  unqualified changes and logs everything.
 - **Sections.** `partitions` map a 5250 System name and an SQL RDB name to a named box
   (`unknown_partition` catches the rest); `environments` group libraries by name or pattern, first
   match wins; `roles` and `default_role` say who is who; `rules` decide by role, partition,
   environment and class (`read`, `write`, `ddl`, `compile`, `call`, `liblist`, `promote`, your own),
   first match wins, no match is deny. A statement takes the most restrictive decision of its parts.
 - **Command files.** The shipped CL command table is `packages/guard/src/commands.yaml`; an unlisted
-  command is `danger`. `command_files` and `commands` add entries, and `class_by_param` classes a
+  command is `danger` (except an unqualified command missing from the table in observe mode; see the
+  limits below). `command_files` and `commands` add entries, and `class_by_param` classes a
   command by a parameter's value, so a change-management product's promotion to QA and to production
   are different classes (`CMPRM ... LEVEL(QA)` is `promote_qa` in the example's `cm-product.yaml`).
 - **Roles.** A user holds every role whose group profile or supplemental group (`groups`),
@@ -229,17 +233,21 @@ rules:                                    # first match wins; omitted key or `an
   guard reads these over SQL as the signed-on user.
 - **When the identity lookup fails** (a 5250-only profile with no working SQL connection, say), the
   guard decides as the profile's user with `default_role`, and the run log says so. User-name roles
-  still match, and `danger` and `unqualified` stay denied. A failed lookup is retried after about 60
-  seconds.
+  still match, and `danger` operations and unqualified changes stay denied. A failed lookup is
+  retried after about 60 seconds and decides with `default_role` until then, so keep `default_role`
+  your narrowest role.
 - **`confirm`** asks the user once through MCP elicitation, naming each operation. Only an accepted
   form with `confirm: true` runs; a client without elicitation, a decline, a cancel and the 120 second
   timeout all deny.
 - **Check before you trust it.** `policy_check` (a tool) reports the decisions for a script or verb
-  without sending anything; give `as` and `policy` to try another user or file. `ibmi-agent-kit
-  policy test <policy> <tests>` (see docs/policy.md for the command line) runs a test file offline (exit 0 pass, 1 fail, 2 bad file): run it in
+  without running it; it sends only the catalog lookups needed. With `as` (and optionally `policy`,
+  a candidate file) it decides offline and sends nothing. `ibmi-agent-kit
+  policy test <policy> <tests>` (see [docs/policy.md](docs/policy.md) for the command line) runs a test file offline (exit 0 pass, 1 fail, 2 bad file): run it in
   your company repo's CI. `ibmi-agent-kit policy replay <candidate> --since 14` replays the run log
   under a candidate and lists each statement whose decision changes: run it before you enforce.
-- **Run log.** Every decision goes to `runs/` in your profile folder as JSON lines. It is a local file
+- **Run log.** `run_script`, `verb_run`, guarded source tool and 5250 decisions are logged to
+  `runs/YYYY-MM-DD.jsonl` in the first folder in `CONFIG_DIRS()` (`~/.ibmi-agent-kit/runs` unless
+  `IBMI_KIT_CONFIG_DIR` is set); `policy_check` never logs. It is a local file
   the user can edit, not tamper-proof and not an audit trail.
 - **Keep the agent out of the files.** Add client permission rules that deny the agent edits to the
   policy file, the profile files and any verb files; otherwise it can loosen its own rules.

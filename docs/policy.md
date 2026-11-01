@@ -6,7 +6,7 @@ The guard catches mistakes. It classifies the text it is given, not what called 
 
 ## Turn it on
 
-Set `IBMI_KIT_POLICY` in a profile file to the absolute path of the policy. Without it the built-in policy applies: observe mode, one `allow` rule, so nothing is blocked except `danger` and unqualified operations, and every statement is logged.
+Set `IBMI_KIT_POLICY` in a profile file to the absolute path of the policy. Without it the built-in policy applies: observe mode, one `allow` rule, so nothing is blocked except `danger` operations and unqualified changes (a write with no library), and every statement is logged.
 
 ```ini
 # %USERPROFILE%\.ibmi-agent-kit\.env.pub400   (Linux and macOS: ~/.ibmi-agent-kit/.env.pub400)
@@ -80,7 +80,7 @@ roles:
 default_role: analyst
 ```
 
-A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match. If the identity lookup itself fails (a profile with no working SQL connection, as a 5250-only one may be), the profile's user is decided the same way with no groups, so usually as `default_role`; the run log notes the failure, it is tried again after about 60 seconds, and `danger` and `unqualified` stay denied in every mode.
+A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match. If the identity lookup itself fails (a profile with no working SQL connection, as a 5250-only one may be), the profile's user is decided the same way with no groups, so usually as `default_role`; the run log notes the failure, it is tried again after about 60 seconds, and `danger` operations and unqualified changes stay denied in every mode.
 
 ### Rules
 

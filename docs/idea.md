@@ -26,11 +26,12 @@ Each step lands as an OpenSpec change under `openspec/changes/`.
    policy file (partitions, environments, roles, rules) for `run_script`, `verb_run`, `policy_check`,
    the source tools and the 5250 command line; `confirm` asks through elicitation; decisions go to a
    local run log; `policy test` and `policy replay` run offline. Observe mode still denies `danger`
-   and `unqualified` operations, and its limits are stated in the README. See `docs/policy.md`.
+   operations and unqualified changes (a write with no library), and its limits are stated in the
+   README. See [policy.md](policy.md).
 3. `project-verbs`: named, reviewed operations a project defines on top of statements and commands.
 4. `config-bootstrap`: create and validate a user's profiles and settings.
 5. Company pilot, starting in observe mode: log what the guard would block, and run it apart from
-   what is always denied (`danger`, `unqualified`, a partition conflict).
+   what is always denied (`danger` operations, unqualified changes, a partition conflict).
 
 ## Open questions
 
