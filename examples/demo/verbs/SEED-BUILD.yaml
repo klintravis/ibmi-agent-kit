@@ -1,0 +1,23 @@
+name: SEED-BUILD
+description: Showcase step 2, builds the seed-stock app from SEEDSRC and runs its unit tests
+tags: [showcase]
+params:
+  # your own library; never QGPL. Replace MYLIB with it before running.
+  lib: { type: string, default: MYLIB, allowed: [MYLIB] }
+steps:
+  # the current library resolves /copy SEEDSRC,SEEDPR and the dcl-f names, so no member names a library
+  - cl: "CHGCURLIB CURLIB(${lib})"
+  - cl: "CRTPF FILE(${lib}/SEEDS) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDS)"
+  - sql: "INSERT INTO ${lib}.SEEDS (SEEDID, SEEDNAME, SEEDQTY) VALUES (1, 'Sunflower', 0), (2, 'Basil', 12), (3, 'Tomato', 240), (4, 'Sweet pea', 0), (5, 'Lavender', 24), (6, 'Carrot', 500), (7, 'Zinnia', 75), (8, 'Kale', 900)"
+  - expect:
+      sql: "SELECT SEEDID FROM ${lib}.SEEDS"
+      rows: 8
+  - cl: "CRTDSPF FILE(${lib}/SEEDDSPF) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDDSPF)"
+  - cl: "CRTRPGMOD MODULE(${lib}/SEEDSRV) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDSRV)"
+  - cl: "CRTRPGMOD MODULE(${lib}/SEEDLST) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDLST)"
+  - cl: "CRTRPGMOD MODULE(${lib}/SEEDTST) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDTST)"
+  - cl: "CRTSRVPGM SRVPGM(${lib}/SEEDSRV) MODULE(${lib}/SEEDSRV) EXPORT(*ALL)"
+  - cl: "CRTPGM PGM(${lib}/SEEDLST) MODULE(${lib}/SEEDLST) BNDSRVPGM((${lib}/SEEDSRV))"
+  - cl: "CRTPGM PGM(${lib}/SEEDTST) MODULE(${lib}/SEEDTST) BNDSRVPGM((${lib}/SEEDSRV))"
+  # a failed assertion ends SEEDTST with an escape message, which fails this step
+  - cl: "CALL PGM(${lib}/SEEDTST)"

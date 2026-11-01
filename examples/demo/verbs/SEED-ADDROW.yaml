@@ -1,0 +1,11 @@
+name: SEED-ADDROW
+description: Showcase live row, adds seed 9 Marigold to SEEDS while the list is open
+tags: [showcase]
+params:
+  # your own library; never QGPL. Replace MYLIB with it before running.
+  lib: { type: string, default: MYLIB, allowed: [MYLIB] }
+steps:
+  - sql: "INSERT INTO ${lib}.SEEDS (SEEDID, SEEDNAME, SEEDQTY) VALUES (9, 'Marigold', 40)"
+  - expect:
+      sql: "SELECT SEEDID FROM ${lib}.SEEDS"
+      rows: 9

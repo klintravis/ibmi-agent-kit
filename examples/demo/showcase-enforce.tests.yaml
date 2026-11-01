@@ -1,0 +1,27 @@
+# Expected decisions for part E of the demo (enforce): only the DDL asks (CRTSRCPF, CRTPF, each
+# DLT*). MYLIB and MYUSER are placeholders; keep them in step with policy-enforce.yaml and
+# verbs/SEED-*.yaml.
+- name: SEED-PREP asks before the source file
+  as: { user: MYUSER, groups: [], partition: demo }
+  verb: SEED-PREP
+  args: { lib: MYLIB }
+  expect: [allow, confirm]
+- name: SEED-BUILD asks before the physical file only
+  as: { user: MYUSER, groups: [], partition: demo }
+  verb: SEED-BUILD
+  args: { lib: MYLIB }
+  expect: [allow, confirm, allow, allow, allow, allow, allow, allow, allow, allow, allow, allow]
+- name: SEED-ADDROW runs without a question
+  as: { user: MYUSER, groups: [], partition: demo }
+  verb: SEED-ADDROW
+  args: { lib: MYLIB }
+  expect: [allow, allow]
+- name: SEED-CLEAN asks before each delete
+  as: { user: MYUSER, groups: [], partition: demo }
+  verb: SEED-CLEAN
+  args: { lib: MYLIB }
+  expect: [confirm, confirm, confirm, confirm, confirm, confirm, confirm, confirm, confirm, allow]
+- name: the 5250 session calls the list program
+  as: { user: MYUSER, groups: [], partition: demo }
+  script: "CL: CALL PGM(MYLIB/SEEDLST)"
+  expect: allow

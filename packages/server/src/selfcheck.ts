@@ -12,7 +12,7 @@ import { ElicitRequestSchema, LATEST_PROTOCOL_VERSION, type ElicitResult } from 
 import { builtinPolicy, classify, decide, loadPolicy, parsePolicy, recordLookups, replayRunLog, runLogLines, statedLookups, type Policy } from "@ibmi-agent-kit/guard";
 import { MapepireBackend } from "@ibmi-agent-kit/source/tools";
 import { Session } from "@ibmi-agent-kit/screen/tools";
-import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js";
+import { CONFIRM_TIMEOUT_MS, supplementalGroups, toolStatements, type Conn } from "./guarded.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine, type ServerDeps } from "./server.js";
 import "./verbs-selfcheck.js"; // project-verbs runner and tools
@@ -236,6 +236,30 @@ test("policy test: both demo policies pass their tests", async () => {
   for (const p of ["observe", "enforce"]) {
     const r = await runBin(["policy", "test", join(EXAMPLES, `demo/policy-${p}.yaml`), join(EXAMPLES, `demo/${p}.tests.yaml`)]);
     assert.equal(r.code, 0, p + "\n" + r.stdout + r.stderr);
+  }
+});
+
+// showcase-demo 1.3: part E's verbs (org layer beside the demo policies) and its session call pass both demo policies.
+test("policy test: both demo policies pass their showcase tests, verbs load without warnings", async () => {
+  for (const p of ["observe", "enforce"]) {
+    const r = await runBin(["policy", "test", join(EXAMPLES, `demo/policy-${p}.yaml`), join(EXAMPLES, `demo/showcase-${p}.tests.yaml`)]);
+    assert.equal(r.code, 0, p + "\n" + r.stdout + r.stderr);
+    assert.doesNotMatch(r.stderr, /warning:/, p);
+  }
+});
+
+test("showcase: the upload into MYLIB/SEEDSRC and the session on MYLIB/SEEDLST are allowed for the owner", async () => {
+  const calls: [string, Record<string, unknown>][] = [
+    ["upload_source_member", { library: "MYLIB", sourceFile: "SEEDSRC", member: "SEEDLST" }],
+    ["session_open", { program: "MYLIB/SEEDLST", library: "MYLIB" }],
+  ];
+  for (const p of ["observe", "enforce"]) {
+    const policy = loadPolicy(join(EXAMPLES, `demo/policy-${p}.yaml`));
+    for (const [tool, input] of calls) {
+      const { statements } = await toolStatements(tool, input, policy, statedLookups(), async () => undefined);
+      assert.ok(statements.length > 0, `${p} ${tool}`);
+      for (const s of statements) assert.equal(decide(s.operations, { user: "MYUSER", partition: "demo" }, policy).decision, "allow", `${p} ${tool}: ${s.display}`);
+    }
   }
 });
 

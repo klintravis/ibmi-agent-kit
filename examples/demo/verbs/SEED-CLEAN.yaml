@@ -1,0 +1,19 @@
+name: SEED-CLEAN
+description: Showcase clean-up, deletes exactly the objects the demo made and checks none is left
+tags: [showcase]
+params:
+  # your own library; never QGPL. Replace MYLIB with it before running.
+  lib: { type: string, default: MYLIB, allowed: [MYLIB] }
+steps:
+  - cl: "DLTPGM PGM(${lib}/SEEDLST)"
+  - cl: "DLTPGM PGM(${lib}/SEEDTST)"
+  - cl: "DLTSRVPGM SRVPGM(${lib}/SEEDSRV)"
+  - cl: "DLTMOD MODULE(${lib}/SEEDSRV)"
+  - cl: "DLTMOD MODULE(${lib}/SEEDLST)"
+  - cl: "DLTMOD MODULE(${lib}/SEEDTST)"
+  - cl: "DLTF FILE(${lib}/SEEDDSPF)"
+  - cl: "DLTF FILE(${lib}/SEEDS)"
+  - cl: "DLTF FILE(${lib}/SEEDSRC)"
+  - expect:
+      sql: "SELECT OBJNAME FROM TABLE(QSYS2.OBJECT_STATISTICS('${lib}', '*ALL')) X WHERE OBJNAME IN ('SEEDSRC', 'SEEDS', 'SEEDDSPF', 'SEEDSRV', 'SEEDLST', 'SEEDTST')"
+      empty: true

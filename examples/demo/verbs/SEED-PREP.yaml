@@ -1,0 +1,11 @@
+name: SEED-PREP
+description: Showcase step 1, checks no demo object is left in the library and makes the demo's source file SEEDSRC
+tags: [showcase]
+params:
+  # your own library; never QGPL. Replace MYLIB with it before running.
+  lib: { type: string, default: MYLIB, allowed: [MYLIB] }
+steps:
+  - expect:
+      sql: "SELECT OBJNAME FROM TABLE(QSYS2.OBJECT_STATISTICS('${lib}', '*ALL')) X WHERE OBJNAME IN ('SEEDSRC', 'SEEDS', 'SEEDDSPF', 'SEEDSRV', 'SEEDLST', 'SEEDTST')"
+      empty: true
+  - cl: "CRTSRCPF FILE(${lib}/SEEDSRC) RCDLEN(112)"
