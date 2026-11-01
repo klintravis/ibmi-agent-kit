@@ -37,6 +37,8 @@ node <abs path>/packages/server/dist/index.js setup [name]
 
 It asks for the host, the user, the password (hidden) and an optional policy file, writes the profile, then connects and prints `OK` or why it failed. See [`setup` command](packages/server/README.md#setup-command).
 
+**In a company config repo** (one the `ibmi-kit-config` skill made; layout in [templates/company-repo](templates/company-repo/README.md)), follow that repo's README, Get started: clone it, run `setup` inside the clone, set `IBMI_KIT_HOME` to this checkout, run `claude` there. `setup` then takes the host, partition and other settings from the repo's profile skeleton and the policy path from the clone, and asks only your user and password. Its `.mcp.json` registers the server, so `claude mcp add` is not needed. See [In a company config repo](packages/server/README.md#in-a-company-config-repo).
+
 Try it: [docs/demo.md](docs/demo.md) is a quick-start demo you can run against your own IBM i (or guided: `/demo`).
 
 ## Tools

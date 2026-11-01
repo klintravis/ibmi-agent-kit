@@ -42,11 +42,11 @@
 
 ## 3. Docs and integration
 
-- [ ] 3.1 Root `README.md` Install: one paragraph "In a company config repo" pointing at the
+- [x] 3.1 Root `README.md` Install: one paragraph "In a company config repo" pointing at the
   company repo's Get started; `docs/demo.md` Part D: copying the demo's `.mcp.json` into the empty
   repo still works, the bootstrap then replaces it with the portable one. Verify with
   `node C:/IbmiKit/Source/desk/scripts/docs-check.mjs .` and `node scripts/check-names.mjs`.
-- [ ] 3.2 Run `npm run clean && npm run check` and `openspec validate team-onboarding --strict`;
+- [x] 3.2 Run `npm run clean && npm run check` and `openspec validate team-onboarding --strict`;
   both exit 0.
 
 ## Workflow follow-up

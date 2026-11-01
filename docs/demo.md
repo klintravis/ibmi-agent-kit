@@ -151,7 +151,10 @@ password anywhere in the files).
 The skill asks its questions one at a time: **Human** answers. Discovery reads system-wide catalogs,
 so on a shared box (PUB400) it may come back partial. Expected: the files in
 [`templates/company-repo/README.md`](../templates/company-repo/README.md), a policy in observe mode,
-and a commit on a `kit-config/bootstrap-<date>` branch. **Human**, in a terminal in that folder:
+and a commit on a `kit-config/bootstrap-<date>` branch. The bootstrap replaces the copied
+`.mcp.json` with a portable one that starts the kit from `${IBMI_KIT_HOME}`, so this session keeps
+its server, and a later session in that folder needs `IBMI_KIT_HOME` set (the repo's README, Get
+started). **Human**, in a terminal in that folder:
 `node <abs path>/packages/server/dist/index.js policy test policy.yaml policy.tests.yaml` prints
 `N cases passed`.
 
