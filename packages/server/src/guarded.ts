@@ -67,8 +67,8 @@ const str = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim
 
 // --- lookups (design D1) ---
 
-// Catalog answers for the classifier, values always bound. Column names are unverified on a live
-// box (group 8 checks them on PUB400).
+// Catalog answers for the classifier, values always bound. The lookups ran on PUB400 without
+// error (2026-11-01).
 export function sqlLookups(conn: Conn): Lookups {
   const rows = async (sql: string, params: unknown[]) => (await conn.query(sql, params, 1000)).rows;
   return {
@@ -130,7 +130,7 @@ interface Box {
 
 // SUPPLEMENTAL_GROUP_LIST: ten-character slots (a full name runs into the next, the last may be
 // trimmed), read as slots only when every padded slot is one name; otherwise blank-separated
-// (unverified on a live box: tasks 8.2 checks it on PUB400).
+// (unverified on a live box: the PUB400 test user has no groups).
 export function supplementalGroups(list: string): string[] {
   const slots = list.padEnd(Math.ceil(list.length / 10) * 10).match(/.{10}/g) ?? [];
   return (slots.every((s) => /^\S+ *$/.test(s)) ? slots : list.split(/\s+/)).map((s) => s.trim()).filter(Boolean);

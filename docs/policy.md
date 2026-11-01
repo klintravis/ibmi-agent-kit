@@ -1,6 +1,6 @@
 # Policy file reference
 
-The execution policy is one YAML file that tells the [guard](../packages/guard/README.md) what each user may do in which library. It decides `run_script`, `verb_run` and `policy_check`, the source tools, the 5250 command line before each key that sends it, and `session_open`'s sign-on program and library (see [Safety in the root README](../README.md#safety)). Status: verified on PUB400 with a normal (non-admin) user in observe and enforce mode; the supplemental-group list format is not yet verified (the test user has no groups).
+The execution policy is one YAML file that tells the [guard](../packages/guard/README.md) what each user may do in which library. It decides `run_script`, `verb_run` and `policy_check`, the source tools, the 5250 command line before each key that sends it, and `session_open`'s sign-on program and library (see [Safety in the root README](../README.md#safety)). Status: its decisions and catalog lookups ran on PUB400 as a normal (non-admin) user, in observe and enforce mode; not exercised there: roles from groups or authorization lists, alias and view resolution with real aliases or views, and the supplemental-group list format (the test user has no groups).
 
 The guard catches mistakes. It classifies the text it is given, not what called programs or triggers do. IBM i object authority stays the real boundary.
 

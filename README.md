@@ -275,13 +275,13 @@ as a YAML file; see [docs/verbs.md](docs/verbs.md).
 
 ## Roadmap
 
-`unified-kit` is done; `execution-guard` is built (the guard decides `run_script`,
+`unified-kit` is done; `execution-guard` is done (the guard decides `run_script`,
 `verb_run`, `policy_check`, the source tools and the 5250 tools, with `policy test` and `policy
-replay`); a live check on PUB400 and the archive are open.
-`project-verbs` is in progress (`verb_list`, `verb_run` and `policy_check` verb input and an example verb
-are done; a live check is open).
-`config-bootstrap` is in progress (the policy templates and the admin skill `ibmi-kit-config` are
-written; packaging and a live run are open). See `docs/idea.md`.
+replay`; live-checked on PUB400).
+`project-verbs` is done (`verb_list`, `verb_run` and `policy_check` verb input and an example verb;
+live-checked on PUB400).
+`config-bootstrap` is done (the policy templates and the admin skill `ibmi-kit-config`;
+live-checked on PUB400). See `docs/idea.md`.
 
 ## Built on
 

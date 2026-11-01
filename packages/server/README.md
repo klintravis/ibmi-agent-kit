@@ -61,6 +61,6 @@ node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--si
 
 ## Tests
 
-`src/selfcheck.ts` (which also loads `src/verbs-selfcheck.ts`), run by `npm run check` from the repo root. Stub transports, no IBM i. Running `run_script`, `verb_run` and `policy_check` against PUB400 has not been done yet.
+`src/selfcheck.ts` (which also loads `src/verbs-selfcheck.ts`), run by `npm run check` from the repo root. Stub transports, no IBM i. `run_script`, `verb_run` and `policy_check` have also run on PUB400 as a normal user (see the archived execution-guard and project-verbs tasks).
 
 Back to the [root README](../../README.md).
