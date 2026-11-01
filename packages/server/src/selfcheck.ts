@@ -263,6 +263,30 @@ test("showcase: the upload into MYLIB/SEEDSRC and the session on MYLIB/SEEDLST a
   }
 });
 
+// showcase-demo 2.4: the shipped members are exactly what SEED-BUILD compiles, the DDS keeps its columns, no member names a library.
+test("showcase: every SEED-BUILD member has a source file, DDS columns hold, no library named", () => {
+  const src = join(EXAMPLES, "showcase/src");
+  const files = readdirSync(src);
+  const members = files.map((f) => f.replace(/\.[^.]+$/, "").toUpperCase()).sort();
+  const build = readFileSync(join(EXAMPLES, "demo/verbs/SEED-BUILD.yaml"), "utf8");
+  const wanted = [...build.matchAll(/SRCMBR\((\w+)\)/g)].map((m) => m[1]);
+  assert.deepEqual(wanted.sort(), ["SEEDDSPF", "SEEDLST", "SEEDS", "SEEDSRV", "SEEDTST"]);
+  assert.deepEqual(members, [...wanted, "SEEDPR"].sort());
+  for (const f of files) {
+    const text = readFileSync(join(src, f), "utf8");
+    assert.doesNotMatch(text, /MYLIB|QGPL/i, f);
+    const lines = text.replace(/\n$/, "").split("\n");
+    // RCDLEN(112) in SEED-PREP leaves 100 characters of source per line
+    for (const l of lines) assert.ok(l.length <= 100, `${f}: line over 100: ${l}`);
+    if (!/\.(pf|dspf)$/.test(f)) continue;
+    for (const l of lines) {
+      if (l[6] === "*") continue;
+      assert.equal(l[5], "A", `${f}: no A in column 6: ${l}`);
+      assert.ok(l.length <= 80, `${f}: line over 80: ${l}`);
+    }
+  }
+});
+
 // demo-quickstart 3: the /demo skill names only real tools and paths, and its connection query is a read.
 test("demo skill: frontmatter, tool names, repo paths and the connection SELECT are valid", async () => {
   const root = join(EXAMPLES, "..");

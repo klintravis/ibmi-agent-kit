@@ -1,0 +1,55 @@
+     A                                      DSPSIZ(24 80 *DS3)
+     A                                      CA03(03 'Exit')
+     A                                      CA05(05 'Refresh')
+     A          R SEEDSFL                   SFL
+     A            OPT            1A  B  7  3VALUES(' ' '5')
+     A            SSEEDID        5Y 0O  7  7EDTCDE(Z)
+     A            SSEEDNAME     30A  O  7 14
+     A            SSEEDQTY       7Y 0O  7 46EDTCDE(3)
+     A            SSTATUS       10A  O  7 56
+     A          R SEEDCTL                   SFLCTL(SEEDSFL)
+     A                                      SFLSIZ(0050)
+     A                                      SFLPAG(0014)
+     A                                      OVERLAY
+     A  31                                  SFLDSP
+     A  32                                  SFLDSPCTL
+     A  33                                  SFLCLR
+     A  34                                  SFLEND(*MORE)
+     A            RRN1           4S 0H      SFLRCDNBR
+     A                                  1  2'SEEDLST'
+     A                                  1 33'Seed Stock List'
+     A                                      DSPATR(HI)
+     A                                  1 72DATE
+     A                                      EDTCDE(Y)
+     A                                  3  2'Type option, press Enter.'
+     A                                      COLOR(BLU)
+     A                                  4  4'5=Display'
+     A                                      COLOR(BLU)
+     A                                  6  2'Opt'
+     A                                      DSPATR(HI)
+     A                                  6  7'ID'
+     A                                      DSPATR(HI)
+     A                                  6 14'Name'
+     A                                      DSPATR(HI)
+     A                                  6 50'Qty'
+     A                                      DSPATR(HI)
+     A                                  6 56'Status'
+     A                                      DSPATR(HI)
+     A          R SEEDFTR
+     A                                 23  2'F3=Exit  F5=Refresh'
+     A                                      COLOR(BLU)
+     A            MSG           70A  O 24  2DSPATR(HI)
+     A          R SEEDDTL                   CA12(12 'Cancel')
+     A                                  1  2'SEEDLST'
+     A                                  1 35'Seed Detail'
+     A                                      DSPATR(HI)
+     A                                  4  2'Seed ID . . . . :'
+     A            DSEEDID        5Y 0O  4 21EDTCDE(Z)
+     A                                  5  2'Name  . . . . . :'
+     A            DSEEDNAME     30A  O  5 21
+     A                                  6  2'Quantity  . . . :'
+     A            DSEEDQTY       7Y 0O  6 21EDTCDE(3)
+     A                                  7  2'Status  . . . . :'
+     A            DSTATUS       10A  O  7 21DSPATR(HI)
+     A                                 23  2'F3=Exit  F12=Cancel'
+     A                                      COLOR(BLU)

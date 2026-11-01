@@ -58,7 +58,7 @@ the work at the end of the same run). One statement per entry.
   the demo's object names (a catalog table function in FROM is a read), then
   `CRTSRCPF FILE(${lib}/SEEDSRC) RCDLEN(112)`. A leftover from an earlier run fails the first step
   with nothing changed; the part says to run `SEED-CLEAN` and try again.
-- `SEED-BUILD`: `CHGCURLIB CURLIB(${lib})`, `CRTPF FILE(${lib}/SEEDS) SRCFILE(${lib}/SEEDSRC)`,
+- `SEED-BUILD`: `CHGCURLIB CURLIB(${lib})`, `CRTPF FILE(${lib}/SEEDS) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDS)`,
   one multi-row `INSERT INTO ${lib}.SEEDS ...` of the 8 sample rows, `expect rows: 8`,
   `CRTDSPF`, `CRTRPGMOD` for SEEDSRV, SEEDLST and SEEDTST, `CRTSRVPGM SRVPGM(${lib}/SEEDSRV)
   MODULE(${lib}/SEEDSRV) EXPORT(*ALL)`, `CRTPGM` for SEEDLST and SEEDTST with

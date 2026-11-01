@@ -13,10 +13,10 @@ tests and docs quote them. Selfcheck tests go in `packages/server/src/selfcheck.
 
 ## 2. Sample app sources
 
-- [ ] 2.1 Write `examples/showcase/src/SEEDS.pf` and `SEEDDSPF.dspf` in fixed-column DDS (design D3, D4: format `SEEDREC`, UNIQUE key `SEEDID`; `SEEDSFL`/`SEEDCTL`/`SEEDFTR`/`SEEDDTL`, texts `Seed Stock List`, `5=Display`, `Seed Detail`, `F3=Exit  F5=Refresh`, CA03/CA05/CA12, option field VALUES(' ' '5')), LF line endings; verify by the column check in 2.4
-- [ ] 2.2 Write `SEEDPR.rpgle` (prototypes, data structure) and `SEEDSRV.rpgle` (`SeedGet`, `SeedCount`, `SeedStatus` with the D4 thresholds), fully free RPG, `/copy SEEDSRC,SEEDPR` unqualified, no library names; verify by review against D4 and the source check in 2.4
-- [ ] 2.3 Write `SEEDLST.rpgle` (load subfile, footer `<n> seeds.`, option 5 on each selected row shows `SEEDDTL` in turn, F12 or Enter moves on, F5 reloads, F3 ends) and `SEEDTST.rpgle` (the 9 assertions of D4; completion message `SEEDTST: 9 passed, 0 failed`, or an escape message listing failures after `Failed:` via QMHSNDPM); verify by review against D4
-- [ ] 2.4 Add a selfcheck test: every `SRCMBR(...)` in `SEED-BUILD.yaml`, plus `SEEDPR`, has a file in `examples/showcase/src/`; every non-comment line of the `.pf` and `.dspf` members has `A` in column 6 and is at most 80 characters; no member contains `MYLIB` or `QGPL`; verify it passes, and fails when a member file is renamed
+- [x] 2.1 Write `examples/showcase/src/SEEDS.pf` and `SEEDDSPF.dspf` in fixed-column DDS (design D3, D4: format `SEEDREC`, UNIQUE key `SEEDID`; `SEEDSFL`/`SEEDCTL`/`SEEDFTR`/`SEEDDTL`, texts `Seed Stock List`, `5=Display`, `Seed Detail`, `F3=Exit  F5=Refresh`, CA03/CA05/CA12, option field VALUES(' ' '5')), LF line endings; verify by the column check in 2.4
+- [x] 2.2 Write `SEEDPR.rpgle` (prototypes, data structure) and `SEEDSRV.rpgle` (`SeedGet`, `SeedCount`, `SeedStatus` with the D4 thresholds), fully free RPG, `/copy SEEDSRC,SEEDPR` unqualified, no library names; verify by review against D4 and the source check in 2.4
+- [x] 2.3 Write `SEEDLST.rpgle` (load subfile, footer `<n> seeds.`, option 5 on each selected row shows `SEEDDTL` in turn, F12 or Enter moves on, F5 reloads, F3 ends) and `SEEDTST.rpgle` (the 9 assertions of D4; completion message `SEEDTST: 9 passed, 0 failed`, or an escape message listing failures after `Failed:` via QMHSNDPM); verify by review against D4
+- [x] 2.4 Add a selfcheck test: every `SRCMBR(...)` in `SEED-BUILD.yaml`, plus `SEEDPR`, has a file in `examples/showcase/src/`; every non-comment line of the `.pf` and `.dspf` members has `A` in column 6 and is at most 80 characters; no member contains `MYLIB` or `QGPL`; verify it passes, and fails when a member file is renamed
 
 ## 3. Screen tests
 

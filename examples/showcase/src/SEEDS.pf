@@ -1,0 +1,6 @@
+     A                                      UNIQUE
+     A          R SEEDREC                   TEXT('Seed stock')
+     A            SEEDID         5P 0       COLHDG('Seed' 'ID')
+     A            SEEDNAME      30A         COLHDG('Name')
+     A            SEEDQTY        7P 0       COLHDG('Qty')
+     A          K SEEDID
