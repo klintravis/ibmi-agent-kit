@@ -264,6 +264,23 @@ test("policy templates: the bootstrap dry-run's policy matches its discovery fix
   assert.doesNotMatch(r.stderr, /warning:/);
 });
 
+// config-bootstrap 2.5: the README's permission rules, evaluated deny-first, keep runs/ readable and profiles unreadable.
+test("company-repo README: Read rules allow ~/.ibmi-agent-kit/runs and deny the profiles", () => {
+  const md = readFileSync(join(EXAMPLES, "../templates/company-repo/README.md"), "utf8");
+  const perms = JSON.parse(md.split("## Client permission rules")[1].match(/```json\n([\s\S]*?)```/)![1]).permissions;
+  const reads = (l: string[]) => l.filter((r) => r.startsWith("Read(")).map((r) => r.slice(5, -1));
+  const allow = reads(perms.allow), deny = reads(perms.deny);
+  assert.ok(!perms.deny.includes("Read(~/.ibmi-agent-kit/**)"), "blanket deny would beat the runs allow");
+  // shortcut: gitignore-lite (* in one segment, ** any depth, a match covers what is under it); upgrade if rules grow.
+  const match = (pat: string, path: string) => {
+    const re = pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\0").replace(/\*/g, "[^/]*").replace(/\0/g, ".*");
+    return new RegExp(`^${re}(/.*)?$`).test(path);
+  };
+  const allowed = (p: string) => !deny.some((d) => match(d, p)) && allow.some((a) => match(a, p));
+  assert.ok(allowed("~/.ibmi-agent-kit/runs/2026-10-31.jsonl"));
+  for (const f of [".env", ".env.prod", "private.txt"]) assert.ok(!allowed(`~/.ibmi-agent-kit/${f}`), f);
+});
+
 // config-bootstrap: every discovery query passes run_sql's select gate and the guard classes it read-only.
 test("policy templates: every ibmi-kit-config discovery query passes run_sql and classifies as read", async () => {
   const md = readFileSync(join(EXAMPLES, "../.claude/skills/ibmi-kit-config/references/discovery.md"), "utf8");

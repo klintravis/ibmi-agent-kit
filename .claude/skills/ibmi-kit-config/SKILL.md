@@ -106,8 +106,8 @@ verbs/smoke.yaml
 7. **Check per role.** For each role, call `policy_check` with `script` (one read and one write in
    that role's environment), `as` (the role's test user, groups and partition) and `policy` (the
    absolute path to the new `policy.yaml`), and show the decisions beside the tests.
-8. **Write `.claude/settings.json` last**, once tests and checks pass: the deny rules from the
-   same README. They block edits to the files above, so nothing may be fixed after it.
+8. **Write `.claude/settings.json` last**, once tests and checks pass: the permission rules (allow
+   and deny) from the same README. They block edits to the files above, so nothing may be fixed after it.
 9. **Commit on the branch** and give the admin a summary: files written, inferences and the
    answers behind them, partial discovery steps, and the test count. Stop there.
 
@@ -124,9 +124,11 @@ verbs/smoke.yaml
    `<config dir>/runs/YYYY-MM-DD.jsonl` only (the kit's config dir: `IBMI_KIT_CONFIG_DIR`, default
    `~/.ibmi-agent-kit`), never another file in that folder. Count lines
    whose operations have `env: unmatched`, whose `roleSource` is not `matched` (the default role
-   decided), and whose `decision` is `confirm`, grouped by library, user and command. If the
-   session may not read that folder, ask the admin to copy those day files to a folder outside
-   the repo, or to run the counts and paste them.
+   decided), and whose `decision` is `confirm`, grouped by library, user and command. Read the
+   files directly: the generated settings allow `~/.ibmi-agent-kit/runs/**`. Only if the log
+   lives elsewhere (`IBMI_KIT_CONFIG_DIR` set to another folder) or the session's settings still
+   deny the folder, ask the admin to copy those day files to a folder outside the repo, or to
+   run the counts and paste them.
 4. **Propose** each edit as a question with its evidence (as in Bootstrap step 4), then write the
    accepted edits and their new test cases. The repo's `.claude/settings.json` denies those
    edits: the admin lifts the rules for this session or makes the edit.

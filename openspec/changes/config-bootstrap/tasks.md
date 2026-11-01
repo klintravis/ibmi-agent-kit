@@ -12,6 +12,7 @@
 - [x] 2.2 Write `references/discovery.md` (D2 queries, grouped, each with its minimum release and what it feeds) and `references/questions.md` (one question per unknown, with recommended defaults); verify every query is a `SELECT`/`VALUES` and every `policy.yaml` key the questions fill exists in the policy schema
 - [x] 2.3 Dry-run the bootstrap procedure against fixture discovery results (a JSON file of query results for an invented three-partition shop) and verify the generated policy passes its generated tests
 - [x] 2.4 Docs updated (docs-check passes): `docs/policy.md` points at the skill and the dry-run
+- [x] 2.5 Client permission rules (README block, T-44): allow `Read(~/.ibmi-agent-kit/runs/**)`, deny `Read(~/.ibmi-agent-kit/*.*)` instead of the blanket `**` deny (a deny beats an allow); Bootstrap step 8 and Maintain step 3 of the skill read the run log directly, copy/paste only as fallback; verify: a selfcheck evaluates the README's rules deny-first (runs file allowed; `.env`, `.env.prod`, `private.txt` denied; no `Read(~/.ibmi-agent-kit/**)` rule)
 
 ## 3. Packaging
 

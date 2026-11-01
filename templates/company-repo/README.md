@@ -68,14 +68,21 @@ Keep the agent from editing the policy, profiles and verbs. In `.claude/settings
 ```json
 {
   "permissions": {
+    "allow": ["Read(~/.ibmi-agent-kit/runs/**)"],
     "deny": [
       "Edit(policy.yaml)", "Edit(policy.tests.yaml)", "Edit(commands.yaml)",
       "Edit(profiles/**)", "Edit(verbs/**)",
-      "Read(~/.ibmi-agent-kit/**)"
+      "Read(~/.ibmi-agent-kit/*.*)"
     ]
   }
 }
 ```
+
+The run log in `~/.ibmi-agent-kit/runs/` stays readable, for the maintain step's run-log summary;
+the profiles and passwords (`.env`, `.env.<name>`) stay denied. Deny wins over allow in Claude
+Code, so the deny matches only top-level names containing a dot, never `runs`. Limit: a top-level
+name without a dot, or a subfolder other than `runs`, is not denied; the kit keeps only `.env*`
+profiles and `runs/` there.
 
 The `ibmi-kit-config` skill works on a branch and an admin edits through it deliberately, so lift
 these rules for that session, or let the admin make the edit.
