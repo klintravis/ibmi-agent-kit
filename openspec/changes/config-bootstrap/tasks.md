@@ -16,11 +16,11 @@
 
 ## 3. Packaging
 
-- [ ] 3.1 Ensure published packages exclude `.claude/` and `templates/` (`files` allow-lists in each package); verify `npm pack --dry-run -w packages/server` lists neither
+- [x] 3.1 Ensure published packages exclude `.claude/` and `templates/` (`files` allow-lists in each package); verify `npm pack --dry-run -w packages/server` lists neither
 
 ## 4. Integration
 
-- [ ] 4.1 Root `npm run clean && npm run check` passes and CI is green after push
+- [x] 4.1 Root `npm run clean && npm run check` passes and CI is green after push
 - [ ] 4.2 With a PUB400 profile, run the skill's bootstrap in a scratch company repo and record the generated files and test results in the PR; skip with a note if no account exists yet
 
 ## Workflow follow-up
