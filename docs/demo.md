@@ -20,7 +20,7 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
    the kit checkout: in the two policies and two tests files replace `MYLIB` with your library and
    `MYUSER` with your IBM i user (upper case). Check with
    `node <abs path>/packages/server/dist/index.js policy test <demo folder>/demo/policy-observe.yaml <demo folder>/demo/observe.tests.yaml`
-   (prints `3 cases passed`).
+   (prints `5 cases passed`).
 2. Add a line to the profile file, with the absolute path to the copy:
 
    ```ini
