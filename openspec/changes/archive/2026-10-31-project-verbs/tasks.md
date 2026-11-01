@@ -18,7 +18,9 @@
 ## 4. Integration
 
 - [x] 4.1 Root `npm run clean && npm run check` passes and the CI matrix is green after push
-- [ ] 4.2 With a PUB400 profile, run `policy_check` with the sample verb and `verb_run tag: smoke` through Claude Code and record results in the PR; skip with a note if no account exists yet
+- [x] 4.2 With a PUB400 profile, run `policy_check` with the sample verb and `verb_run tag: smoke` through Claude Code and record results in the PR; skip with a note if no account exists yet
+
+  Live results (PUB400, 2026-11-01): `verb_list` showed SMOKE-SAMPLE from the project layer and `policy_check` with the verb gave allow. `verb_run tag: smoke` ran twice and passed both times (setup, expect `NOTE=hello`, cleanup dropped the table). Negative case: with the table created first, the run failed at `requires_absent`, cleanup did not drop the table, and a manual drop worked.
 
 ## Workflow follow-up
 

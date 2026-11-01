@@ -21,7 +21,9 @@
 ## 4. Integration
 
 - [x] 4.1 Root `npm run clean && npm run check` passes and CI is green after push
-- [ ] 4.2 With a PUB400 profile, run the skill's bootstrap in a scratch company repo and record the generated files and test results in the PR; skip with a note if no account exists yet
+- [x] 4.2 With a PUB400 profile, run the skill's bootstrap in a scratch company repo and record the generated files and test results in the PR; skip with a note if no account exists yet
+
+  Live results (PUB400, 2026-11-01): `ibmi-kit-config bootstrap` in an empty git repo made branch `kit-config/bootstrap-<date>` and the files listed in `templates/company-repo/README.md` (`commands.yaml` is optional and was not created): mode observe, a profile skeleton without a password, and settings that allow only `Read(~/.ibmi-agent-kit/runs/**)`. `policy test` passed 10 cases. Discovery against PUB400 refused nothing.
 
 ## Workflow follow-up
 

@@ -167,7 +167,7 @@ remains the real boundary. The source tools also use `IBMI_READ_ONLY`, `IBMI_BLO
 `IBMI_BLOCKED_CL` (the last applies only when restricted is off); they ignore `IBMI_READ_ONLY`.
 Those three check text as it is typed into a command line and again, before the guard, on what the
 line holds when the key is pressed, so a command brought back with F9 meets both.
-The guard's catalog lookups have not yet been verified on a live IBM i.
+The guard's catalog lookups ran on PUB400 as a normal (non-admin) user and none was refused; the supplemental-group list format is still unverified, because the test user has no groups.
 
 ## Policy
 

@@ -7,8 +7,8 @@ People keep their own verbs; teams keep shared ones in the application repo and 
 code. A verb runs with the signed-on user's own policy rules and IBM i authority, so sharing one
 grants nothing. Verbs are files a person writes: no tool creates, changes or deletes them.
 
-Status: the runner and the tools are checked with stub connections only; no verb has run on a
-live IBM i yet.
+Status: the runner and the tools are checked with stub connections, and the sample verb has run
+on PUB400 as a normal user (`verb_run` by tag, twice, plus the `requires_absent` failure case).
 
 ## A verb file
 
