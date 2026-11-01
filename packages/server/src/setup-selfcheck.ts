@@ -122,6 +122,12 @@ test("setup: bad names, extra arguments and a non-terminal are refused before an
       assert.match(r.err, /cannot be a profile name/, name);
     }
     assert.equal((await run(["a", "b"], [])).code, 2);
+    // `Prod` next to `.env.prod`: refused on a case-insensitive file system, a separate file elsewhere
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".env.prod"), "IBMI_USER=keep\n");
+    await run(["Prod"], ["h\r", "u\r", "plainpw\r", "\r"]);
+    assert.equal(readFileSync(join(dir, ".env.prod"), "utf8"), "IBMI_USER=keep\n", "another server's file was changed");
+    rmSync(dir, { recursive: true, force: true });
     const r = await run(["dev"], ["h\r", "u\r", "plainpw\r", "\r"], okProbe, false);
     assert.equal(r.code, 2);
     assert.match(r.err, /needs a real terminal/);

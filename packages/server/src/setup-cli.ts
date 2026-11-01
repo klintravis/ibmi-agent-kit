@@ -2,7 +2,7 @@
 // by reading the file back and connecting. Returns the exit code: 0 OK, 1 the test failed (the file
 // stays written), 2 a usage error or refusal (nothing written), 130 cancelled (nothing written).
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { CONFIG_DIRS, listServers, parseProfile, resolveProfileEnv, serverName } from "@ibmi-agent-kit/core";
 import { loadPolicy } from "@ibmi-agent-kit/guard";
@@ -134,6 +134,11 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
 
   const [dir, ...later] = CONFIG_DIRS();
   const path = join(dir, file);
+  // On a case-insensitive file system `Prod` would open `.env.prod`, another server's file.
+  if (existsSync(path) && !readdirSync(dir).includes(file)) {
+    err(`another profile in ${dir} differs from "${name}" only in case; use its exact name. Nothing was written.\n`);
+    return 2;
+  }
   const old = existsSync(path) ? readFileSync(path, "utf8") : "";
   const cur = parseProfile(old);
   out(`${old ? "updating" : "creating"} ${path}\n`);

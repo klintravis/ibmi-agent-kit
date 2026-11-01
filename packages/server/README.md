@@ -70,7 +70,7 @@ Notes:
 
 - Run it yourself in a real terminal: PowerShell, Windows Terminal, macOS Terminal or a Linux shell. Without a terminal it refuses and writes nothing. That includes running it through Claude, through a pipe, or in Git Bash's mintty window.
 - The password is never taken as an argument and never printed. It is cut from any connection error before that error is shown.
-- Names follow the profile rules: letters, digits, `.`, `_` and `-`, starting with a letter or digit. A name cannot be `example`, contain `..`, end in `.`, or end in `.bak` or `.orig`.
+- Names follow the profile rules: letters, digits, `.`, `_` and `-`, starting with a letter or digit. A name cannot be `example`, contain `..`, end in `.`, or end in `.bak` or `.orig`. On Windows and macOS, a name that matches an existing profile except for case is refused, so it can't overwrite that profile.
 - dotenv cannot store a value that contains a line break, or that contains `'`, `"` and a backtick all at once. Setup refuses such a value instead of saving it wrong.
 - The test connects like any session would. Over `ssh`, that can mean uploading the Mapepire jar the first time.
 
