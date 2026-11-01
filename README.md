@@ -29,6 +29,14 @@ claude mcp add ibmi-agent-kit -- node <abs path>/packages/server/dist/index.js
 Use the absolute path to this checkout in place of `<abs path>`. Restart Claude Code or run
 `/mcp`. The server speaks MCP on stdio and exits when the client closes it.
 
+Then create a profile and test it. Run this yourself in a real terminal (PowerShell, Windows Terminal, macOS Terminal or a Linux shell), not through Claude:
+
+```sh
+node <abs path>/packages/server/dist/index.js setup [name]
+```
+
+It asks for the host, the user, the password (hidden) and an optional policy file, writes the profile, then connects and prints `OK` or why it failed. See [`setup` command](packages/server/README.md#setup-command).
+
 Try it: [docs/demo.md](docs/demo.md) is a quick-start demo you can run against your own IBM i (or guided: `/demo`).
 
 ## Tools
@@ -72,8 +80,10 @@ A profile is one `.env` file naming one IBM i. Folders, first match wins:
 `.env.` with no name, a leftover ending `.bak`, `.orig` or `~`, or anything that is not a regular
 file. A `server` argument must match a listed name exactly. One
 file supplies the whole profile; files are never merged, and nothing from them is loaded into
-the process environment. Copy `packages/source/.env.example` or `packages/screen/.env.example`
-as a starting point. `list_servers` shows the folders searched and the open sessions.
+the process environment. `setup [name]` writes or updates one for you in the first folder
+([`setup` command](packages/server/README.md#setup-command)). To write one by hand, copy
+`packages/source/.env.example` or `packages/screen/.env.example`. `list_servers` shows the folders
+searched and the open sessions.
 
 Protected settings are read from the profile file only, never from the environment, so an MCP
 registration's env cannot override them (`IBMI_KIT_CONFIG_DIR` does choose which profile folder

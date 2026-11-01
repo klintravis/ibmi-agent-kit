@@ -15,6 +15,7 @@ import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js"
 import { policyCli } from "./policy-cli.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine, type ServerDeps } from "./server.js";
 import "./verbs-selfcheck.js"; // project-verbs runner and tools
+import "./setup-selfcheck.js"; // the setup command
 
 const BIN = fileURLToPath(new URL("./index.js", import.meta.url));
 
@@ -215,6 +216,18 @@ test("policy test: the example suite passes and exits 0, without starting MCP", 
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /^\d+ cases passed\r?\n$/);
   assert.doesNotMatch(r.stderr, /MCP server ready/);
+});
+
+test("setup: the real binary refuses when stdin is not a terminal and writes nothing", async () => {
+  const { root, env } = emptyConfig();
+  try {
+    const r = await runBin(["setup", "demo"], env);
+    assert.equal(r.code, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /needs a real terminal/);
+    assert.equal(existsSync(join(root, "config")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // demo-quickstart: the demo policies pass their own tests, so docs/demo.md cannot drift.

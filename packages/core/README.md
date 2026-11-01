@@ -15,6 +15,8 @@ The profile loader and the SQL transport type shared by every package in the [ib
 | `CONFIG_DIRS()` | The profile folders, first match wins: `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`), `~/.ibmi-agent-kit`, `~/.ibm-i-servers`. Evaluated per call. |
 | `listServers()` | Sorted server names: `.env` is `default`, `.env.<name>` is `<name>`. Never a server: `.env.example`, `.env.default`, a bare `.env.`, a leftover ending `.bak`, `.orig` or `~`, anything that is not a regular file. |
 | `resolveProfileEnv(name?)` | The settings of the named server as a plain object. The name must match a listed name exactly (it never becomes part of a path); an unknown name throws and lists what is available. |
+| `serverName(file)` | The server name a file name stands for (`.env` is `default`), or `undefined` when the file is never a server under the rules above. |
+| `parseProfile(text)` | Parses profile file text exactly as `resolveProfileEnv` does (`dotenv`), so a writer can check its text reads back as meant. |
 | `SqlTransport`, `Msg` | Types only: `query`, `execute`, `cl`, `close`. |
 
 ## Configuration it reads

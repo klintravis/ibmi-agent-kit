@@ -8,9 +8,8 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
 ## Prerequisites
 
 - Node 20 or newer, and the kit built as in the [README install](../README.md#install).
-- A profile with the password set: see [Profiles](../README.md#profiles) (`~/.ibmi-agent-kit/.env.<name>`
-  with `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`; on PUB400 see [PUB400](../README.md#pub400)).
-  Below the profile is called `demo`; use your own name.
+- Your IBM i host, user and password. Setup step 2 turns them into a profile (on PUB400 see
+  [PUB400](../README.md#pub400)). Below the profile is called `demo`; use your own name.
 - A library you own, called `MYLIB` here. Never `QGPL`.
 - One connection at a time, and no retry loops: if a call fails unexpectedly, stop and read the error.
 
@@ -21,12 +20,13 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
    `MYUSER` with your IBM i user (upper case). Check with
    `node <abs path>/packages/server/dist/index.js policy test <demo folder>/demo/policy-observe.yaml <demo folder>/demo/observe.tests.yaml`
    (prints `5 cases passed`).
-2. Add a line to the profile file, with the absolute path to the copy:
-
-   ```ini
-   IBMI_KIT_POLICY=<demo folder>/demo/policy-observe.yaml
-   ```
-
+2. Create the profile. In your own terminal (PowerShell, Windows Terminal, macOS Terminal or a
+   Linux shell; not through Claude and not with Claude's `!` prefix), run
+   `node <abs path>/packages/server/dist/index.js setup demo`. It asks for the host, the user, the
+   password (hidden) and a policy file. Answer the policy prompt with
+   `<demo folder>/demo/policy-observe.yaml`. Expected: the last line reads
+   `OK: demo signs on as <user> to <rdb>`. On `failed:`, fix what it names and run it again;
+   Enter keeps an answer. See [`setup` command](../packages/server/README.md#setup-command).
 3. In the demo folder, a `.mcp.json` registering the kit server (the same command as the README's
    `claude mcp add`):
 
@@ -41,10 +41,23 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
    }
    ```
 
+   To watch 5250 sessions live in your browser, add `"env": { "IBMI_5250_VIEWER": "true" }` next to
+   `"args"` (or `claude mcp add -e IBMI_5250_VIEWER=true --transport stdio ibmi-agent-kit -- node <abs path>/packages/server/dist/index.js`).
+   Settings that are not protected, like this one, may go in the registration's env. Protected
+   settings come only from the profile file: host, user, password, policy and every `IBMI_*_PORT`,
+   `IBMI_5250_VIEWER_PORT` included. The full list is in [Profiles](../README.md#profiles). If
+   the profile file sets the same key, the file wins. See the
+   [screen README](../packages/screen/README.md) for the viewer.
+
 4. Copy [`examples/verbs/SMOKE-SAMPLE.yaml`](../examples/verbs/SMOKE-SAMPLE.yaml) to
    `.ibmi-kit/verbs/` in the demo folder and set the library: in its `params.lib`, change
    `default: MYLIB` and `allowed: [MYLIB]` to your library (see [docs/verbs.md](verbs.md)).
-5. Open Claude Code in the demo folder and approve the `ibmi-agent-kit` server.
+5. In a terminal, `cd` into the demo folder and start `claude`, then approve the `ibmi-agent-kit`
+   server. If you declined it, Claude Code remembers that and hides the server without telling you:
+   `claude mcp get ibmi-agent-kit` then shows `✘ Rejected`. To be asked again, run
+   `claude mcp reset-project-choices` in that folder and restart `claude`. If it still shows
+   Rejected, remove `ibmi-agent-kit` from `disabledMcpjsonServers` in `.claude/settings.local.json`
+   there. See Claude Code's MCP docs, Server status.
 
 ## A. Guard in observe mode
 
@@ -84,7 +97,8 @@ under the same policy (see [docs/policy.md](policy.md)).
 
 ## B. Enforce
 
-**Human**: change the profile line to `.../demo/policy-enforce.yaml`, then run `/mcp` and
+**Human**: run `setup demo` again in your terminal. Press Enter for host, user and password, and
+answer the policy prompt with `<demo folder>/demo/policy-enforce.yaml`. Then run `/mcp` and
 restart `ibmi-agent-kit`. Paste:
 
 ```text
@@ -125,8 +139,9 @@ statements needing confirmation: **Human** answers yes.
 
 **Human**: make an empty folder and `git init` it. Copy the demo folder's `.mcp.json` into it, and
 copy `<abs path>/.claude/skills/ibmi-kit-config` into its `.claude/skills/` (or into
-`~/.claude/skills/`): the skill lives in the kit checkout, not in your folder. Open Claude Code
-there and ask:
+`~/.claude/skills/`): the skill lives in the kit checkout, not in your folder. In a terminal, `cd`
+into that folder and start `claude` there. Don't use the VS Code panel: it starts in the workspace
+root, so the bootstrap would run in the wrong folder. Approve the server, then ask:
 
 ```text
 Use the ibmi-kit-config skill to bootstrap this repo for server demo (read-only discovery; no
@@ -147,5 +162,6 @@ run_sql SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = 'MYLIB'
 ```
 
 Expected: none of `T`, `DEMOT`, `DEMOT2`, `SMOKESAMPLE` from this demo. **Human**: delete the demo
-folder copies (they hold your library and user names) and the `IBMI_KIT_POLICY` line if you do not
-want the policy to stay on.
+folder copies (they hold your library and user names). If you don't want the policy to stay on,
+delete the `IBMI_KIT_POLICY` line from the profile file, which is `~/.ibmi-agent-kit/.env.demo`
+unless `IBMI_KIT_CONFIG_DIR` is set (`setup` prints the path).

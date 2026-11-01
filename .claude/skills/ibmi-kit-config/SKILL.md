@@ -56,9 +56,23 @@ verbs/smoke.yaml
 
 ## Bootstrap
 
-1. **Check the session.** `list_servers` names a profile per partition. The working folder is a
-   git repo; if it has no policy yet, this is a bootstrap, otherwise run Maintain. Ask for the
-   kit checkout's path (for templates and the CLI) if it is not known.
+1. **Check the session.** `list_servers` names a profile per partition. The working folder must be
+   a git repo. Check its top level in this order:
+   - It has a `policy.yaml` from this kit (its `version:` and `rules:`): run Maintain.
+   - It holds nothing but `.git`, `README*`, `LICENSE*` and `.gitignore`: this is a bootstrap.
+     This session's own Claude Code files may be there as well: a `.mcp.json` that registers
+     ibmi-agent-kit, and a `.claude` folder with only `skills/` and `settings.local.json` in it.
+   - Anything else: refuse and stop. Name the files that don't belong and say why. That covers an
+     existing `.claude/settings.json`, `packages/`, `scripts/`, a `package.json` or another
+     project's sources. The bootstrap writes `.claude/settings.json`, the policy files and its other
+     files, so it would overwrite another project's files or mix into them. Usually the session
+     started in the wrong folder, for example the workspace root, which is where the VS Code panel
+     starts. Tell the user to make an empty repo, `cd` into it in a terminal and start `claude`
+     there.
+
+   Take the kit checkout's path (for templates and the CLI) from the `Args:` line of
+   `claude mcp get ibmi-agent-kit` (`<kit>/packages/server/dist/index.js`). Ask only if the
+   server is not registered there.
 2. **Branch.** `git switch -c kit-config/bootstrap-<YYYY-MM-DD>`.
 3. **Say the rule 1 sentence**, then discover: every group in `discovery.md`, on each profile
    (`server` set to it). Keep the rows in the conversation, not in files. Note each partial or

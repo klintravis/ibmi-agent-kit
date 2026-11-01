@@ -3,6 +3,9 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse } from "dotenv";
 
+// The parser every profile file is read with, so a writer can prove its text reads back as meant.
+export const parseProfile = (text: string): Record<string, string> => parse(text);
+
 // Evaluated per call, not at import, so a changed environment or home folder is honoured.
 // First match wins. Exactly these folders; the old per-engine folders are not read.
 export function CONFIG_DIRS(): string[] {
@@ -19,7 +22,7 @@ export function CONFIG_DIRS(): string[] {
 // `.env` is "default", `.env.<name>` is "<name>". Never a server: `.env.example`; `.env.default`
 // (the default is `.env`, and one name must mean one file); `.env.` with no name; editor and
 // backup leftovers ending `.bak`, `.orig` or `~`; anything that is not a regular file.
-function serverName(file: string): string | undefined {
+export function serverName(file: string): string | undefined {
   if (file === ".env") return "default";
   if (!file.startsWith(".env.")) return undefined;
   const name = file.slice(5);
@@ -76,7 +79,7 @@ export function resolveProfileEnv(name?: string): Record<string, string> {
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined && k.startsWith("IBMI_") && !PROTECTED.test(k)) env[k] = v;
   }
-  return { ...env, ...parse(readFileSync(path)) };
+  return { ...env, ...parseProfile(readFileSync(path, "utf8")) };
 }
 
 export interface Msg {

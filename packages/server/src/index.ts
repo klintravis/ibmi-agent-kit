@@ -2,10 +2,15 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, onceShutdown, type KitServer } from "./server.js";
+import { setupCli } from "./setup-cli.js";
 
-// `policy test|replay` runs offline and prints to stdout; anything else serves MCP on stdio.
+// `policy test|replay` runs offline and `setup` asks at the terminal, both printing to stdout;
+// anything else serves MCP on stdio.
 if (process.argv[2] === "policy") process.exitCode = await policyCli(process.argv.slice(3));
-else serve();
+else if (process.argv[2] === "setup") {
+  process.exitCode = await setupCli(process.argv.slice(3));
+  setTimeout(() => process.exit(), 1000).unref(); // fires only if a test connection left a handle open
+} else serve();
 
 function serve(): void {
   // stdout is the JSON-RPC channel; every console writer that targets it goes to stderr instead.

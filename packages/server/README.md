@@ -52,6 +52,28 @@ node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--si
 
 `npm link -w packages/server` puts `ibmi-agent-kit` on PATH so you can shorten the command. Offline, no IBM i, output on stdout. Details in the [guard README](../guard/README.md#offline-policy-test-and-policy-replay).
 
+## `setup` command
+
+```sh
+node <repo>/packages/server/dist/index.js setup [name]
+```
+
+Writes or updates one profile and tests it. No name means `default`, so the file is `.env`; any other name writes `.env.<name>`. The file goes in the first profile folder: `IBMI_KIT_CONFIG_DIR` if set, else `~/.ibmi-agent-kit`, created if missing.
+
+1. It asks for the host and the user. If the file already exists, its values are shown in brackets and Enter keeps them.
+2. It asks for the password without showing it. Enter keeps the current one. Backspace edits, and Ctrl-C quits without writing anything.
+3. It asks for a policy file. A relative path is stored as an absolute `IBMI_KIT_POLICY`. Enter leaves the setting as it is.
+4. It saves the file. It replaces only those settings and keeps every other line and comment. The write goes through a temp file and a rename, so you never get a half-written profile. On macOS and Linux the file gets mode `600`.
+5. It reads the profile back from the file, checks the name is in `list_servers` and loads the policy. It then connects the way the server does and runs `SELECT CURRENT USER, CURRENT SERVER FROM SYSIBM.SYSDUMMY1`. It prints one line: `OK: <name> signs on as <user> to <rdb>`, or `failed:` with the reason. A failed test keeps the file and exits 1.
+
+Notes:
+
+- Run it yourself in a real terminal: PowerShell, Windows Terminal, macOS Terminal or a Linux shell. Without a terminal it refuses and writes nothing. That includes running it through Claude, through a pipe, or in Git Bash's mintty window.
+- The password is never taken as an argument and never printed. It is cut from any connection error before that error is shown.
+- Names follow the profile rules: letters, digits, `.`, `_` and `-`, starting with a letter or digit. A name cannot be `example`, contain `..`, end in `.`, or end in `.bak` or `.orig`.
+- dotenv cannot store a value that contains a line break, or that contains `'`, `"` and a backtick all at once. Setup refuses such a value instead of saving it wrong.
+- The test connects like any session would. Over `ssh`, that can mean uploading the Mapepire jar the first time.
+
 ## Logging and shutdown
 
 - stdout is the JSON-RPC channel. The server redirects `console.log`, `console.info` and `console.debug` to stderr; engines write nothing to stdout.
@@ -61,6 +83,6 @@ node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--si
 
 ## Tests
 
-`src/selfcheck.ts` (which also loads `src/verbs-selfcheck.ts`), run by `npm run check` from the repo root. Stub transports, no IBM i. `run_script`, `verb_run` and `policy_check` have also run on PUB400 as a normal user (see the archived execution-guard and project-verbs tasks).
+`src/selfcheck.ts` (which also loads `src/verbs-selfcheck.ts` and `src/setup-selfcheck.ts`), run by `npm run check` from the repo root. Stub transports, no IBM i. `run_script`, `verb_run` and `policy_check` have also run on PUB400 as a normal user (see the archived execution-guard and project-verbs tasks). `setup` has not run against a real IBM i yet.
 
 Back to the [root README](../../README.md).
