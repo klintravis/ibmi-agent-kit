@@ -38,15 +38,8 @@ and roles SHALL NOT be includable.
 `mode` SHALL be `observe`, `enforce`, or a map of partition names to modes with a `default`
 (default `enforce` for a policy file). In observe mode operations are decided and logged and run
 as if allowed, except that `danger` and `unqualified` operations and anything the engines' own
-checks refuse SHALL still be denied. The one exception is a `danger` operation whose only cause is
-an unqualified (or `*LIBL`/`*NLVLIBL`) CL command missing from the command table (reason
-`unknown_command`): in observe mode it is logged as `decision: deny, enforced: false` with that
-reason and runs. This is a stated limit: after `ADDLIBLE MYLIB`, an unqualified unknown `FROBCMD X`
-observed this way runs `MYLIB/FROBCMD`; QSYS commands cannot be shadowed like this. Likewise the
-command table's `danger` entries are the boundary while observing: an IBM command missing from the
-table runs in observe mode. A statement
-runs only if every operation in it runs. The built-in policy SHALL be
-in observe mode.
+checks refuse SHALL still be denied (unknown commands excepted, see scenarios). A statement runs
+only if every operation in it runs. The built-in policy SHALL be in observe mode.
 
 #### Scenario: Observe a would-be deny
 - **WHEN** in observe mode a statement would be denied
@@ -60,6 +53,10 @@ in observe mode.
 - **WHEN** in observe mode `run_script` sends `CL: FROBCMD X`
 - **THEN** it runs, and the run log records `decision: deny, enforced: false, reason: unknown_command`
 
+#### Scenario: Unknown command exception is narrow
+- **WHEN** in observe mode a `danger` operation has a cause other than an unqualified (or `*LIBL`/`*NLVLIBL`) CL command missing from the command table
+- **THEN** it is denied
+
 #### Scenario: Unknown command enforced
 - **WHEN** in enforce mode `run_script` sends `CL: FROBCMD X`
 - **THEN** it is denied
@@ -71,6 +68,14 @@ in observe mode.
 #### Scenario: Unknown command next to a danger command
 - **WHEN** in observe mode `run_script` sends `CL: FROBCMD X` and `CL: PWRDWNSYS OPTION(*IMMED)`
 - **THEN** the script is denied and nothing is sent
+
+#### Scenario: Stated limit, library list shadowing
+- **WHEN** in observe mode `ADDLIBLE MYLIB` has run and an unqualified unknown `FROBCMD X` is sent
+- **THEN** it runs `MYLIB/FROBCMD`; QSYS commands cannot be shadowed like this
+
+#### Scenario: Command table is the boundary while observing
+- **WHEN** in observe mode an IBM command is missing from the command table, whose `danger` entries are the boundary
+- **THEN** it runs
 
 #### Scenario: One partition enforced
 - **WHEN** `mode: { default: observe, prod: enforce }` and a denied write targets the prod partition
