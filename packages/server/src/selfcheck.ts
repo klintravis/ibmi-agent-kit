@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveProfileEnv } from "@ibmi-agent-kit/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, LATEST_PROTOCOL_VERSION, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
@@ -306,12 +307,36 @@ test("policy templates: the bootstrap dry-run's policy matches its discovery fix
     assert.ok(e, `no case "${role.name} ${env.name}"`);
     assert.ok(e.includes("allow") && e.includes("deny"), `"${role.name} ${env.name}" needs an allow and a deny: ${e}`);
   }
-  // Profile skeletons: one per partition, no password line.
+  // Profile skeletons: one per partition, no password line, no policy path (setup writes each clone's).
   for (const p of policy.partitions) {
     const env = readFileSync(join(dir, "profiles", `.env.${p.name}`), "utf8");
     assert.doesNotMatch(env, /^\s*IBMI_PASSWORD/m, p.name);
+    assert.doesNotMatch(env, /IBMI_KIT_POLICY/, p.name);
     assert.match(env, new RegExp(`^IBMI_PARTITION=${p.name}$`, "m"));
   }
+  // team-onboarding: .mcp.json registers the kit with no machine path, and every env key reaches the profile.
+  const server = JSON.parse(readFileSync(join(dir, ".mcp.json"), "utf8")).mcpServers["ibmi-agent-kit"];
+  assert.ok(server, ".mcp.json registers no ibmi-agent-kit");
+  const block = readFileSync(join(EXAMPLES, "../templates/company-repo/README.md"), "utf8").split("## Get started")[1].match(/```json\n([\s\S]*?)```/)![1];
+  assert.deepEqual(JSON.parse(block), JSON.parse(readFileSync(join(dir, ".mcp.json"), "utf8")), "the template's .mcp.json block and the fixture differ");
+  for (const a of [server.command, ...server.args]) assert.ok(!win32.isAbsolute(a) && !posix.isAbsolute(a), `absolute path in .mcp.json: ${a}`);
+  assert.ok(Object.keys(server.env).length > 0);
+  const tmp = mkdtempSync(join(tmpdir(), "kit-mcp-"));
+  const saved = { ...process.env };
+  try {
+    Object.assign(process.env, { IBMI_KIT_CONFIG_DIR: tmp, HOME: tmp, USERPROFILE: tmp }, server.env);
+    writeFileSync(join(tmp, ".env.x"), "IBMI_HOST=h\n");
+    const env = resolveProfileEnv("x");
+    for (const [k, v] of Object.entries(server.env)) assert.equal(env[k], v, `${k} is protected: the profile loader ignores it in .mcp.json`);
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  // The README's Get started names clone, setup, claude, approve and /demo in that order.
+  const start = readFileSync(join(dir, "README.md"), "utf8").split("## Get started\n")[1]?.split("\n## ")[0] ?? "";
+  const at = ["Clone", "setup", "`claude`", "Approve", "/demo", "policy path lives in each person's profile"].map((w) => start.indexOf(w));
+  assert.ok(at.every((i, n) => i >= 0 && (n === 0 || i > at[n - 1])), `README Get started steps out of order or missing: ${at}`);
   const r = await runBin(["policy", "test", join(dir, "policy.yaml"), join(dir, "policy.tests.yaml")]);
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.doesNotMatch(r.stderr, /warning:/);

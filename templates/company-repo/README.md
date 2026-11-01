@@ -13,15 +13,63 @@ Copy a policy from [../policies](../policies) to `policy.yaml` (with its tests),
   profiles/.env.<partition>      profile skeleton per partition: host, user, transport, IBMI_PARTITION
   verbs/smoke.yaml               org-layer verbs, found beside policy.yaml; one smoke verb to start
   .github/workflows/policy.yml   CI: policy test on every push
+  .mcp.json                      registers the kit server for everyone who opens Claude Code here
   .claude/settings.json          client permission rules (below)
 ```
 
+## Get started
+
+You need Node 20 or later and a built checkout of
+[ibmi-agent-kit](https://github.com/klintravis/ibmi-agent-kit) (its README, Install). `<kit>` is
+that checkout's folder.
+
+1. Clone this repo and `cd` into it.
+2. Run setup in this folder, in a real terminal (it hides your password):
+
+   ```sh
+   node <kit>/packages/server/dist/index.js setup
+   ```
+
+   Once the kit is published, `npx ibmi-agent-kit setup` does the same. Setup lists this repo's
+   partitions, asks your IBM i user and password, copies the partition's settings from
+   `profiles/`, points your profile at this repo's `policy.yaml`, and tests the connection. Your
+   password goes only in your own profile folder (`~/.ibmi-agent-kit`), never in this repo. If it
+   prints `set it to <folder>`, set `IBMI_KIT_HOME` to that folder for your user (Windows:
+   `setx IBMI_KIT_HOME "<folder>"`; macOS and Linux: an `export` line in your shell profile) and
+   open a new terminal.
+3. Run `claude` in this folder.
+4. Approve the `ibmi-agent-kit` server when Claude Code asks: this repo's `.mcp.json` registers it.
+5. Optional: run `/demo` for a guided tour. It is a skill of the kit checkout, so run it from `<kit>`,
+   not from this repo.
+
+The policy path lives in each person's profile, not in this repo or `.mcp.json`, because only the
+person whose credentials a policy guards can point a profile at it.
+
+`.mcp.json` starts the kit from `IBMI_KIT_HOME`, so it holds no path of anyone's machine:
+
+```json
+{
+  "mcpServers": {
+    "ibmi-agent-kit": {
+      "command": "node",
+      "args": ["${IBMI_KIT_HOME}/packages/server/dist/index.js"],
+      "env": { "IBMI_5250_VIEWER": "true" }
+    }
+  }
+}
+```
+
+`IBMI_5250_VIEWER=true` turns on the live view: opening a 5250 session starts a small page on your
+own machine, and the agent returns its URL, so you can watch the screen as it works. Delete that
+line to turn it off for everyone.
+
 ## Profiles
 
-Each `profiles/.env.<partition>` holds `IBMI_HOST`, `IBMI_USER` (a placeholder), the transport,
-`IBMI_PARTITION` and `IBMI_KIT_POLICY` (absolute path to `policy.yaml` on that machine), with a
-comment where the password goes. **A password is never written to this repo.** Each person copies
-the file to `~/.ibmi-agent-kit/.env.<partition>` and sets their own password there.
+Each `profiles/.env.<partition>` holds `IBMI_HOST`, `IBMI_USER` (a placeholder), the transport and
+`IBMI_PARTITION`, with a comment where the password goes. **A password is never written to this
+repo**, and no `IBMI_KIT_POLICY` either (its path differs per clone). Don't copy the skeleton: run
+setup (Get started), which copies every setting except the user, the password and the policy path,
+and adds yours.
 
 ## Policy and tests
 

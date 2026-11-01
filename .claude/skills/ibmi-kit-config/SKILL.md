@@ -43,6 +43,7 @@ commands.yaml
 profiles/.env.<partition>
 verbs/smoke.yaml
 .github/workflows/policy.yml
+.mcp.json
 .claude/settings.json
 ```
 
@@ -70,9 +71,9 @@ verbs/smoke.yaml
      starts. Tell the user to make an empty repo, `cd` into it in a terminal and start `claude`
      there.
 
-   Take the kit checkout's path (for templates and the CLI) from the `Args:` line of
-   `claude mcp get ibmi-agent-kit` (`<kit>/packages/server/dist/index.js`). Ask only if the
-   server is not registered there.
+   Take the kit checkout's path (for templates and the CLI) from `$IBMI_KIT_HOME` when it is set,
+   else from the `Args:` line of `claude mcp get ibmi-agent-kit`
+   (`<kit>/packages/server/dist/index.js`). Ask only if neither gives it.
 2. **Branch.** `git switch -c kit-config/bootstrap-<YYYY-MM-DD>`.
 3. **Say the rule 1 sentence**, then discover: every group in `discovery.md`, on each profile
    (`server` set to it). Keep the rows in the conversation, not in files. Note each partial or
@@ -100,21 +101,26 @@ verbs/smoke.yaml
    4. `profiles/.env.<partition>`, one per partition:
 
       ```ini
-      # ibmi-agent-kit profile skeleton for partition <partition>. Copy it to
-      # ~/.ibmi-agent-kit/.env.<partition> and fill in your own user.
+      # ibmi-agent-kit profile skeleton for partition <partition>. Do not copy it: run setup
+      # in this repo (README, Get started); it writes your profile with your own user.
       IBMI_HOST=<host>
       IBMI_USER=YOUR_USER
       IBMI_SQL_TRANSPORT=ssh
       IBMI_PARTITION=<partition>
-      IBMI_KIT_POLICY=<absolute path to this repo>/policy.yaml
-      # The password is not kept here: add it in your own copy only, never in this repo.
+      # The password is not kept here: setup puts it in your profile, never in this repo.
       ```
+
+      No `IBMI_KIT_POLICY` (setup writes each clone's own path) and never a password. Every
+      other line is copied into the colleague's profile by `setup`.
    5. `verbs/smoke.yaml`: one verb, `name: SMOKE`, `tags: [smoke]`, one read step (Q19), and a
       test case for it in `policy.tests.yaml` (`verb: org:SMOKE`, `expect: allow`).
    6. `.github/workflows/policy.yml`: the CI block of `templates/company-repo/README.md`, with
       `ref` pinned to the kit commit the admin uses.
    7. `README.md`: from `templates/company-repo/README.md`, with this company's partitions and
-      roles, and `Last maintenance run:` set to today.
+      roles, its Get started section, and `Last maintenance run:` set to today.
+   8. `.mcp.json`: the block in `templates/company-repo/README.md` (Get started), exactly. It
+      replaces the `.mcp.json` this session started with (same server name), so the committed file
+      holds no path of the admin's machine.
 6. **Test.** `ibmi-agent-kit policy test policy.yaml policy.tests.yaml` must print `N cases passed`
    with no `warning:` line. On a failure, fix the policy or the case with the admin and run again.
 7. **Check per role.** For each role, call `policy_check` with `script` (one read and one write in
@@ -155,5 +161,6 @@ verbs/smoke.yaml
 ## Worked example
 
 `templates/dry-run/` in the kit: `discovery.json` holds the query results and answers for an
-invented three-partition shop, and `policy.yaml`, `commands.yaml`, `policy.tests.yaml` and
-`verbs/smoke.yaml` are what Bootstrap writes from them. The kit's checks run its tests.
+invented three-partition shop, and `policy.yaml`, `commands.yaml`, `policy.tests.yaml`,
+`profiles/`, `verbs/smoke.yaml`, `README.md` and `.mcp.json` are what Bootstrap writes from them.
+The kit's checks run its tests and check the README and `.mcp.json`.

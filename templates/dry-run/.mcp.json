@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ibmi-agent-kit": {
+      "command": "node",
+      "args": ["${IBMI_KIT_HOME}/packages/server/dist/index.js"],
+      "env": { "IBMI_5250_VIEWER": "true" }
+    }
+  }
+}

@@ -22,19 +22,19 @@
 
 ## 2. Bootstrap generates the team files
 
-- [ ] 2.1 Update `.claude/skills/ibmi-kit-config/SKILL.md`: the generated-files list gains
+- [x] 2.1 Update `.claude/skills/ibmi-kit-config/SKILL.md`: the generated-files list gains
   `.mcp.json`; skeletons (step 5) drop `IBMI_KIT_POLICY` and say "run setup in this repo"; step 5
   writes `.mcp.json` (`"command": "node"`, `"args": ["${IBMI_KIT_HOME}/packages/server/dist/index.js"]`, env
   `IBMI_5250_VIEWER: "true"`), replacing the session's one; the kit-path lookup prefers
   `$IBMI_KIT_HOME`. Verify by reading the skill against the config-bootstrap delta.
-- [ ] 2.2 Update `templates/company-repo/README.md`: tree gains `.mcp.json`, Profiles section says
+- [x] 2.2 Update `templates/company-repo/README.md`: tree gains `.mcp.json`, Profiles section says
   run `setup`, new "Get started" section (clone, the repo-local `setup` command with
   `IBMI_KIT_HOME` and `npx ibmi-agent-kit setup` labelled "once published", `claude`, approve the
   server, `/demo` optional and from the kit checkout) with the one line on why the policy path
   lives in each profile.
-- [ ] 2.3 Update `templates/dry-run/`: add `.mcp.json` and `README.md` (generated per 2.1/2.2),
+- [x] 2.3 Update `templates/dry-run/`: add `.mcp.json` and `README.md` (generated per 2.1/2.2),
   remove the `IBMI_KIT_POLICY` line and fix the comment in `profiles/.env.*`.
-- [ ] 2.4 Extend the dry-run test in `packages/server/src/selfcheck.ts` per design.md (Selfchecks):
+- [x] 2.4 Extend the dry-run test in `packages/server/src/selfcheck.ts` per design.md (Selfchecks):
   `.mcp.json` parses, registers `ibmi-agent-kit`, no absolute path, env keys not protected (checked
   through `resolveProfileEnv`); README "Get started" steps in order; no skeleton holds
   `IBMI_KIT_POLICY`. Verify `npm run clean && npm run check` exit 0 and that removing the fixture's
