@@ -44,7 +44,7 @@
 
 ## 8. Integration
 
-- [ ] 8.1 Root `npm run clean && npm run check` passes, and the CI matrix is green after push
+- [x] 8.1 Root `npm run clean && npm run check` passes, and the CI matrix is green after push
 - [ ] 8.2 With a PUB400 profile, run `policy_check` and `run_script` (create, insert, select, drop in the user's own library) through the kit in Claude Code in observe and enforce mode and record results in the PR; also check the guard's catalog lookups there: `USER_INFO.SUPPLEMENTAL_GROUP_LIST` format (ten-character slots or blank-separated), `AUTHORIZATION_LIST_USER_INFO`, `SYSVIEWDEP`/`SYSTABLES` columns, `LIBRARY_LIST_INFO`; skip with a note if no account exists yet
 
 ## Workflow follow-up
