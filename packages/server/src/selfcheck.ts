@@ -13,7 +13,7 @@ import { MapepireBackend } from "@ibmi-agent-kit/source/tools";
 import { Session } from "@ibmi-agent-kit/screen/tools";
 import { CONFIRM_TIMEOUT_MS, supplementalGroups, type Conn } from "./guarded.js";
 import { policyCli } from "./policy-cli.js";
-import { createServer, listServersText, onceShutdown, shutdownAll, type Engine } from "./server.js";
+import { createServer, listServersText, onceShutdown, shutdownAll, type Engine, type ServerDeps } from "./server.js";
 import "./verbs-selfcheck.js"; // project-verbs runner and tools
 
 const BIN = fileURLToPath(new URL("./index.js", import.meta.url));
@@ -432,7 +432,7 @@ function stubConn(
   return { conn, sent, queries };
 }
 
-async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; be?: MapepireBackend; screen?: () => Session; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number; sqlTimeLimitMs?: number } = {}) {
+async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubConn>; be?: MapepireBackend; screen?: () => Session; system?: string; elicit?: (req: any) => Promise<ElicitResult>; timeoutMs?: number; sqlTimeLimitMs?: number; memberText?: ServerDeps["memberText"] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "kit-runs-"));
   const notices: string[] = [];
   const stub = o.stub ?? stubConn();
@@ -442,6 +442,7 @@ async function guardedKit(o: { policy?: Policy; stub?: ReturnType<typeof stubCon
     conn: () => be ?? stub.conn,
     ...(be ? { sourceBackend: () => be } : {}),
     ...(o.screen ? { screenSession: o.screen } : {}),
+    ...(o.memberText ? { memberText: o.memberText } : {}),
     profileEnv: () => ({}),
     ...(o.system !== undefined ? { systemName: () => o.system } : {}), // else the screen engine's sign-on System field
     runLogDir: dir,
@@ -834,7 +835,7 @@ test("5.1: each profile's IBMI_KIT_POLICY is loaded at startup; a missing one re
 
 // The source engine over the stub box: its tools' sends land in stub.sent, the guard's own
 // identity and catalog lookups in stub.queries.
-async function sourceKit(o: { policy?: Policy; member?: string[]; curlib?: string[]; elicit?: (req: any) => Promise<ElicitResult> } = {}) {
+async function sourceKit(o: { policy?: Policy; member?: string[]; curlib?: string[]; elicit?: (req: any) => Promise<ElicitResult>; memberText?: ServerDeps["memberText"] } = {}) {
   const stub = stubConn({ member: o.member, curlib: o.curlib });
   const localDir = mkdtempSync(join(tmpdir(), "kit-src-"));
   const transport = {
@@ -846,7 +847,7 @@ async function sourceKit(o: { policy?: Policy; member?: string[]; curlib?: strin
   };
   const profile = { host: "box", user: "JDOE", password: "Secret1x", sshPort: 22, sqlTransport: "ssh" as const, mapepirePort: 8076, sourceFileCcsid: 37, localDir, readOnly: false, blockedCl: [], blockedTables: [] };
   const be = new MapepireBackend(profile, transport as unknown as ConstructorParameters<typeof MapepireBackend>[1]);
-  const k = await guardedKit({ policy: o.policy ?? D4_ENFORCE, stub, be, ...(o.elicit ? { elicit: o.elicit } : {}) });
+  const k = await guardedKit({ policy: o.policy ?? D4_ENFORCE, stub, be, ...(o.elicit ? { elicit: o.elicit } : {}), ...(o.memberText ? { memberText: o.memberText } : {}) });
   return { ...k, localDir, close: async () => (await k.close(), rmSync(localDir, { recursive: true, force: true })) };
 }
 
@@ -973,6 +974,82 @@ test("6.1: an SQL member in a library the policy denies reading is never fetched
     assert.deepEqual(k.stub.sent, []);
     const read = k.log().at(-1);
     assert.deepEqual([read.kind, read.text, read.effective], ["tool", "read PAYLIB/QSQLSRC(SETUP)", "deny"]);
+  } finally {
+    await k.close();
+  }
+});
+
+// --- an SQL member whose read a rule asks to confirm (task 6.4) ---
+
+const READ_CONFIRM = parsePolicy("version: 1\nmode: enforce\nrules:\n  - { classes: [danger], decision: deny }\n  - { classes: [read], decision: confirm }\n  - { decision: allow }\n", "read-confirm.yaml");
+const SQL_MEMBER = { library: "JDOE", sourceFile: "QSQLSRC", member: "SETUP", type: "SQL", targetLibrary: "JDOE" };
+const MEMBER_SQL = "INSERT INTO JDOE.T VALUES 'ZQX9TOK';"; // ZQX9TOK: the member's text, to find wherever it leaks
+// The run log line holding the member's read: RUNSQLSTM's own command line, or the read line.
+const readLine = (l: any) => l.operations.some((o: any) => o.class === "read" && o.object?.name === "QSQLSRC");
+const COMPILES: [string, Record<string, unknown>][] = [
+  ["RUNSQLSTM", SQL_MEMBER],
+  ["type SQL with its own command", { ...SQL_MEMBER, command: "CRTSQLRPGI OBJ(JDOE/SETUP) SRCFILE(JDOE/QSQLSRC) SRCMBR(SETUP)" }],
+];
+for (const [name, args] of COMPILES) {
+  test(`6.4: ${name}: a confirmed member read is asked before the member is fetched, with none of its lines`, async () => {
+    const calls: string[] = [];
+    const prompts: string[] = [];
+    let text = MEMBER_SQL;
+    const k = await sourceKit({
+      policy: READ_CONFIRM,
+      memberText: async () => (calls.push("memberText"), text),
+      elicit: async (req) => (calls.push("elicit"), prompts.push(req.params.message), { action: "accept", content: { confirm: true } }),
+    });
+    try {
+      const r = await k.call("compile_member", args);
+      assert.equal(r.error, false, r.text);
+      assert.deepEqual(calls, ["elicit", "memberText"], "asked once, then fetched: the command's read is not asked again");
+      assert.match(prompts[0], /read JDOE\.QSQLSRC/);
+      assert.doesNotMatch(prompts[0], /ZQX9TOK|INSERT/);
+      assert.ok(k.stub.sent.length > 0);
+      assert.deepEqual(k.log().filter(readLine).map((l) => l.confirmed), name === "RUNSQLSTM" ? [true] : [true, true]);
+      // A member statement that itself needs confirming is asked in a second prompt, which may show it.
+      calls.length = 0;
+      text = "INSERT INTO JDOE.T SELECT * FROM JDOE.U WHERE C = 'ZQX9TOK';";
+      const again = await k.call("compile_member", args);
+      assert.equal(again.error, false, again.text);
+      assert.deepEqual(calls, ["elicit", "memberText", "elicit"]);
+      assert.match(prompts.at(-1)!, /read JDOE\.U[\s\S]*ZQX9TOK/);
+    } finally {
+      await k.close();
+    }
+  });
+
+  test(`6.4: ${name}: a declined member read, or a client without elicitation, fetches nothing and logs none of it`, async () => {
+    const prompts: string[] = [];
+    for (const elicit of [async (req: any): Promise<ElicitResult> => (prompts.push(req.params.message), { action: "decline" }), undefined]) {
+      const calls: string[] = [];
+      const k = await sourceKit({ policy: READ_CONFIRM, memberText: async () => (calls.push("memberText"), MEMBER_SQL), ...(elicit ? { elicit } : {}) });
+      try {
+        const r = await k.call("compile_member", args);
+        assert.equal(r.error, true);
+        assert.match(r.text, elicit ? /the user chose decline/ : /confirmation is unavailable in this client/);
+        assert.deepEqual(calls, [], "the member was not fetched");
+        assert.deepEqual(k.stub.sent, []);
+        const log = k.log();
+        assert.doesNotMatch(JSON.stringify(log) + r.text + prompts.join("\n"), /ZQX9TOK/);
+        assert.ok(log.filter(readLine).length > 0);
+        for (const l of log.filter(readLine)) assert.deepEqual([l.confirmed, /^not sent: /.test(l.outcome)], [false, true]);
+      } finally {
+        await k.close();
+      }
+    }
+    assert.equal(prompts.length, 1);
+  });
+}
+
+test("6.4: a *CURLIB that moved while the member read was confirmed stops the compile", async () => {
+  const k = await sourceKit({ policy: READ_CONFIRM, curlib: ["JDOE", "OTHER"], memberText: async () => MEMBER_SQL, elicit: async () => ({ action: "accept", content: { confirm: true } }) });
+  try {
+    const r = await k.call("compile_member", { ...SQL_MEMBER, command: "CRTSQLRPGI OBJ(*CURLIB/SETUP) SRCFILE(JDOE/QSQLSRC) SRCMBR(SETUP)" });
+    assert.equal(r.error, true);
+    assert.match(r.text, /current library changed from JDOE to OTHER while confirming/);
+    assert.deepEqual(k.stub.sent, []);
   } finally {
     await k.close();
   }

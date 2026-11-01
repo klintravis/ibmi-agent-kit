@@ -133,8 +133,10 @@ The source tools are decided the same way before they act: `run_sql`, `read_sour
 `search_source` as reads of their table, source file or library; `upload_source_member` as a write
 to the member's source file; `manage_library_list` changes as `liblist` on each library (`show` is
 not decided); `compile_member` from its final command, `command` override included, plus the
-member's statements, read at decision time, for an SQL member or `RUNSQLSTM`. A denied call sends
-nothing to the IBM i, and the source engine's own checks still apply.
+member's statements, read at decision time, for an SQL member or `RUNSQLSTM`. A member whose read
+is denied is never fetched; one whose read a rule asks to confirm is fetched only after a yes, so
+that prompt shows none of its lines. A denied call sends nothing to the IBM i, and the source
+engine's own checks still apply.
 `compile_member`'s default target `*CURLIB` is decided as the job's current library; with none, the
 compile is denied as unqualified, so pass `targetLibrary`.
 

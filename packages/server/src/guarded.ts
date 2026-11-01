@@ -270,7 +270,7 @@ export async function toolStatements(
   input: Record<string, unknown>,
   policy: Policy,
   lookups: Lookups,
-  memberText: (ref: MemberRef) => Promise<string | undefined>, // undefined: its read is denied, not fetched
+  memberText: (ref: MemberRef) => Promise<string | undefined>, // undefined: its read is denied or waits for confirmation, not fetched
 ): Promise<{ statements: (ClassifiedStatement | ToolStatement)[]; notes: string[] }> {
   const name = (v: unknown, what: string) => validName(String(v ?? ""), what);
   const ctx = { lookups, commands: policy.commands, rdbs: policy.rdbs };
@@ -362,18 +362,13 @@ export async function toolStatements(
         if (String(input.type ?? "").toLowerCase() === "sql") member = { library: name(input.library, "library"), sourceFile: name(input.sourceFile, "sourceFile"), member: name(input.member, "member") };
       }
       if (member) {
-        let text: string | undefined;
-        try {
-          text = await memberText(member);
-        } catch (e) {
-          throw new Error(`refused: cannot read ${member.library}/${member.sourceFile}(${member.member}) to decide its statements: ${(e as Error).message}`);
-        }
+        const text = await memberText(member);
         if (text !== undefined) {
           const c = await classify(text, ctx);
           notes.push(...c.notes);
           statements.push(...c.statements);
         } else if (!runsqlstm) {
-          // Not fetched because its read is denied: RUNSQLSTM's own read of SRCFILE says so, else this.
+          // Not fetched (its read is denied or waits for confirmation): RUNSQLSTM's own read of SRCFILE says so, else this.
           statements.push(toolStatement(`read ${member.library}/${member.sourceFile}(${member.member})`, [memberRead(member)]));
         }
       }
@@ -520,11 +515,30 @@ export function registerGuarded(
     const who = await identityOf(s, conn, policy);
     const screen = tool === "screen_command";
     const { lookups, answers } = recordLookups(screen ? screenLookups(sqlLookups(conn)) : sqlLookups(conn));
-    // A member in a library the policy denies reading is never fetched, so its text reaches no message.
-    const memberText = async (ref: MemberRef) => (decide([memberRead(ref)], who.identity, policy).effective === "deny" ? undefined : deps.memberText(s, ref));
+    const fetch = async (ref: MemberRef) => {
+      try {
+        return await deps.memberText(s, ref);
+      } catch (e) {
+        throw new Error(`refused: cannot read ${ref.library}/${ref.sourceFile}(${ref.member}) to decide its statements: ${(e as Error).message}`);
+      }
+    };
+    // A member whose read the policy denies is never fetched; one whose read a rule asks to confirm
+    // is fetched only after a yes. Its text reaches no message before then.
+    let deferred: MemberRef | undefined;
+    const memberText = async (ref: MemberRef) => {
+      const read = decide([memberRead(ref)], who.identity, policy).effective;
+      if (read === "deny") return undefined;
+      if (read === "confirm") {
+        deferred = ref;
+        return undefined;
+      }
+      return fetch(ref);
+    };
     const { statements, notes } = await toolStatements(tool, input, policy, lookups, memberText);
-    const planned = statements.map((statement) => ({ statement, decision: decide(statement.operations, who.identity, policy) }));
-    const record = (outcome: (p: (typeof planned)[number]) => string, confirmed?: boolean) =>
+    type Step = { statement: (typeof statements)[number]; decision: Decision; confirmed?: boolean };
+    const planOf = (list: typeof statements): Step[] => list.map((statement) => ({ statement, decision: decide(statement.operations, who.identity, policy) }));
+    const planned = planOf(statements);
+    const record = (outcome: (p: Step) => string) =>
       runLog.record({
         server: s,
         tool,
@@ -533,26 +547,44 @@ export function registerGuarded(
         lookups: answers,
         notes: [...who.notes, ...notes],
         secret: conn.profile.password,
-        statements: planned.map((p) => ({ ...p, outcome: outcome(p), ...(confirmed !== undefined && p.decision.effective === "confirm" ? { confirmed } : {}) })),
+        statements: planned.map((p) => ({ ...p, outcome: outcome(p) })),
       });
 
-    const denied = planned.filter((p) => p.decision.effective === "deny");
-    if (denied.length) {
-      record((p) => (p.decision.effective === "deny" ? `denied: ${why(p, who.identity)}` : "not sent: another operation was denied"));
-      throw new Error([`Denied, ${tool} did nothing:`, ...denied.map((p) => `  ${p.statement.display.split("\n")[0]}: ${why(p, who.identity)}`), ASK, LIMITS].join("\n"));
-    }
-    const needs = planned.filter((p) => p.decision.effective === "confirm");
-    if (needs.length) {
-      const no = await confirm(s, who.identity, needs.map((p, i) => ({ label: `${tool}${needs.length > 1 ? ` ${i + 1}` : ""}`, decision: p.decision, display: p.statement.display })));
-      // The SQL job's current library says nothing about the 5250 job's.
-      const stop = no ?? (screen ? undefined : await curlibMoved(conn, answers));
-      if (stop) {
-        record(() => `not sent: ${stop}`, no === undefined);
-        throw new Error(`Denied, ${tool} did nothing: ${stop}.\n${ASK}\n${LIMITS}`);
+    // Deny refuses, confirm asks, for these steps; every step is logged on a refusal.
+    let asked = false;
+    const gate = async (steps: Step[]) => {
+      const denied = steps.filter((p) => p.decision.effective === "deny");
+      if (denied.length) {
+        record((p) => (p.decision.effective === "deny" ? `denied: ${why(p, who.identity)}` : "not sent: another operation was denied"));
+        throw new Error([`Denied, ${tool} did nothing:`, ...denied.map((p) => `  ${p.statement.display.split("\n")[0]}: ${why(p, who.identity)}`), ASK, LIMITS].join("\n"));
       }
+      const needs = steps.filter((p) => p.decision.effective === "confirm");
+      if (!needs.length) return;
+      asked = true;
+      const no = await confirm(s, who.identity, needs.map((p, i) => ({ label: `${tool}${needs.length > 1 ? ` ${i + 1}` : ""}`, decision: p.decision, display: p.statement.display })));
+      for (const p of needs) p.confirmed = no === undefined;
+      if (no) {
+        record(() => `not sent: ${no}`);
+        throw new Error(`Denied, ${tool} did nothing: ${no}.\n${ASK}\n${LIMITS}`);
+      }
+    };
+    // A deferred member read is in this first prompt (its read line, or RUNSQLSTM's read of SRCFILE).
+    await gate(planned);
+    if (deferred) {
+      const c = await classify(await fetch(deferred), { lookups, commands: policy.commands, rdbs: policy.rdbs });
+      notes.push(...c.notes);
+      const more = planOf(c.statements);
+      planned.push(...more);
+      await gate(more);
+    }
+    // The SQL job's current library says nothing about the 5250 job's.
+    const moved = asked && !screen ? await curlibMoved(conn, answers) : undefined;
+    if (moved) {
+      record(() => `not sent: ${moved}`);
+      throw new Error(`Denied, ${tool} did nothing: ${moved}.\n${ASK}\n${LIMITS}`);
     }
     // Allowed: logged once the engine says how the call ended.
-    return (outcome) => record(() => outcome, needs.length ? true : undefined);
+    return (outcome) => record(() => outcome);
   }
 
   const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");

@@ -59,6 +59,10 @@ at decision time. A denied call SHALL fail without the action reaching the IBM i
 - **WHEN** `read_source_member` targets a library in an environment the rules deny for `read`
 - **THEN** it fails and nothing is downloaded
 
+#### Scenario: SQL member read to confirm
+- **WHEN** `compile_member` compiles an SQL member whose read a rule asks to confirm
+- **THEN** the user is asked to confirm the read before the member is fetched, the prompt shows none of its lines, and a declined read fetches nothing and is logged not sent
+
 ### Requirement: 5250 command lines are decided when sent
 Before the screen engine sends an AID key while the cursor's screen has a command line holding
 text, that text SHALL be decided as a CL command, so retrieved (F9) and edited commands are
