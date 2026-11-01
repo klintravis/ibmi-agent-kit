@@ -58,6 +58,9 @@ export interface Statement {
 
 export interface ClassifiedStatement extends Statement {
   operations: Operation[];
+  // A CL command given a parameter its table entry does not name; omitted when none. Informs the
+  // table author only: no decision reads it.
+  warnings?: string[];
 }
 
 export interface Classification {

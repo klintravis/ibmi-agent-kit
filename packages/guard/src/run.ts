@@ -9,6 +9,9 @@ export interface ScriptState {
   rdb?: string; // after CONNECT TO / SET CONNECTION to a mapped database
   partition?: string;
   local: Map<string, ObjectRef[]>; // "LIB.NAME" of an alias or view created earlier → its bases
+  // Notes the classifier makes about the statement being classified (undeclared CL parameters).
+  // Drained into the statement after it; never read by decide().
+  warnings: string[];
 }
 
 export interface Run {

@@ -203,7 +203,22 @@ export function classifyClText(text: string, run: Run): Operation[] {
       if (op.object) op.object.rdb = remote.rdb;
     }
   }
+  // Informs the table author only: operations (and so every decision) are already built.
+  const known = new Set([...specs.keys(), ...order, ...(entry.class_by_param ? [entry.class_by_param.param] : []), ...(entry.nested_sql ? [entry.nested_sql] : [])]);
+  for (const [kw, value] of parsed.params) {
+    // The value is never in the text: it could be a password.
+    if (!known.has(kw) && holdsName(value)) run.state.warnings.push(`${name} ${kw}(): the command table does not declare this parameter, so a library or object it names is not decided`);
+  }
   return ops;
+}
+
+// Does a parameter value hold a name: an element (as nameElements walks them) that is not quoted,
+// not a number and not a `*` special value. `*LIBL/OBJ` names an object, so `*` with a `/` counts.
+function holdsName(value: string): boolean {
+  return splitTop(value).items.some((el) => {
+    const first = el.startsWith("(") ? splitTop(el.slice(1, -1)).items[0] : el;
+    return !!first && !quoted(first) && !/^[+-]?\d/.test(first) && !(first.startsWith("*") && !first.includes("/"));
+  });
 }
 
 // One named element of a parameter as an operation, or null when it names nothing (*NONE).

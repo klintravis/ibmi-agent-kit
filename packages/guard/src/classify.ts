@@ -155,7 +155,7 @@ async function resolve(statements: ClassifiedStatement[], ctx: ClassifyContext, 
 }
 
 async function classifyStatements(statements: SplitStatement[], ctx: ClassifyContext): Promise<Classification> {
-  const state: ScriptState = { local: new Map() };
+  const state: ScriptState = { local: new Map(), warnings: [] };
   const r = newRun(ctx, state, []);
   const out: ClassifiedStatement[] = [];
   for (const s of statements) {
@@ -167,9 +167,10 @@ async function classifyStatements(statements: SplitStatement[], ctx: ClassifyCon
     }
     const c: ClassifiedStatement = { kind: s.kind, text: s.text, display: s.display, operations };
     if (s.error) c.error = s.error;
+    if (state.warnings.length) c.warnings = state.warnings.splice(0);
     out.push(c);
   }
-  const notes: string[] = [];
+  const notes: string[] = out.flatMap((s) => s.warnings ?? []);
   await resolve(out, ctx, r, notes);
   return { statements: out, operations: out.flatMap((s) => s.operations), notes };
 }

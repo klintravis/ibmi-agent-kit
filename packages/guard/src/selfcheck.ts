@@ -2065,3 +2065,77 @@ test("replay: a call the profile password was scrubbed from is skipped with that
   assert.deepEqual([r.statements, r.changes.length], [0, 0]);
   assert.match(r.skipped[0], /profile password was taken out of it/);
 });
+
+// --- undeclared CL parameters are flagged (statement-classification; policy-param-warn 1.4) ---
+
+const XYZ: CommandTable = { XYZCPY: { class: "write", positional: ["FROMOBJ"], params: { FROMOBJ: "object" } } };
+const xyzCtx = (table: CommandTable = XYZ): ClassifyContext => ({ lookups: lookups(), commands: mergeCommands(builtinCommands(), table) });
+const WARN = /^XYZCPY TOLIB\(\): the command table does not declare this parameter, so a library or object it names is not decided$/;
+
+test("param warning: an undeclared keyword that names a library warns, naming command and keyword only", async () => {
+  const c = await classify("CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)", xyzCtx());
+  assert.equal(c.statements[0].warnings?.length, 1);
+  assert.match(c.statements[0].warnings![0], WARN);
+  assert.ok(!c.statements[0].warnings![0].includes("PRODLIB"), "the value never reaches the warning");
+  assert.deepEqual(c.notes, c.statements[0].warnings, "the run log gets it as a note");
+});
+
+test("param warning: *LIBL/OUT still names an object, so it warns", async () => {
+  const c = await classify("CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(*LIBL/OUT)", xyzCtx());
+  assert.match(c.statements[0].warnings?.[0] ?? "", WARN);
+});
+
+test("param warning: declared keywords and values that name nothing stay silent", async () => {
+  for (const script of [
+    "CL: DSPOBJD OBJ(A/*ALL) OBJTYPE(*FILE) OUTPUT(*OUTFILE) OUTFILE(B/OUT)",
+    "CL: CRTBNDRPG PGM(APPLIB/ORD) SRCFILE(APPLIB/QRPGLESRC) DBGVIEW(*SOURCE) TEXT('Orders')",
+    "CL: XYZCPY FROMOBJ(APPLIB/ORD) COUNT(5) MODE(*REPLACE) NOTE('x y')",
+    "CL: XYZCPY APPLIB/ORD",
+  ]) {
+    const c = await classify(script, xyzCtx());
+    assert.equal(c.statements[0].warnings, undefined, script);
+    assert.deepEqual(c.notes, [], script);
+  }
+});
+
+test("param warning: class_by_param and nested_sql keywords count as declared", async () => {
+  const ctx = xyzCtx({ ...CM, XYZSQL: { class: "read", nested_sql: "STMT" } });
+  assert.equal((await classify("CL: CMPRM REQ(1234) LEVEL(QA)", ctx)).statements[0].warnings, undefined);
+  assert.equal((await classify("CL: XYZSQL STMT('SELECT * FROM A.T')", ctx)).statements[0].warnings, undefined);
+  assert.match((await classify("CL: CMPRM REQ(1234) LEVEL(QA) TOLIB(PRODLIB)", ctx)).statements[0].warnings?.[0] ?? "", /^CMPRM TOLIB\(\):/);
+});
+
+test("param warning: the warning never changes an operation or a decision", async () => {
+  const withKw = await classify("CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)", xyzCtx());
+  const without = await classify("CL: XYZCPY FROMOBJ(APPLIB/ORD)", xyzCtx());
+  assert.equal(withKw.statements[0].warnings?.length, 1);
+  assert.equal(without.statements[0].warnings, undefined);
+  assert.deepEqual(withKw.operations, without.operations);
+  assert.deepEqual(sorted(withKw.operations), ["write APPLIB.ORD"]);
+  for (const who of ["dev", "qa", "contractor"]) {
+    assert.deepEqual(decide(withKw.operations, as(who, "dev"), D4), decide(without.operations, as(who, "dev"), D4), who);
+  }
+});
+
+test("param warning: a table that declares the keyword silences it, and the library is decided", async () => {
+  const declared: CommandTable = { XYZCPY: { ...XYZ.XYZCPY, params: { FROMOBJ: "object", TOLIB: "library" } } };
+  const c = await classify("CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)", xyzCtx(declared));
+  assert.equal(c.statements[0].warnings, undefined);
+  assert.deepEqual(sorted(c.operations), ["write APPLIB.ORD", "write lib PRODLIB"]);
+});
+
+test("param warning: CL inside QCMDEXC warns on the SQL statement; each statement keeps its own", async () => {
+  const c = await classify("VALUES QSYS2.QCMDEXC('XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)');\nCL: XYZCPY FROMOBJ(APPLIB/ORD)\nCL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)", xyzCtx());
+  assert.deepEqual(c.statements.map((s) => s.warnings?.length ?? 0), [1, 0, 1]);
+  assert.match(c.statements[0].warnings![0], WARN);
+  assert.equal(c.notes.length, 2);
+});
+
+test("param warning: an unknown command and a danger command never warn", async () => {
+  for (const script of ["CL: FROBCMD X TOLIB(PRODLIB)", "CL: PWRDWNSYS OPTION(*IMMED) TOLIB(PRODLIB)"]) {
+    const c = await classify(script, xyzCtx());
+    assert.equal(c.statements[0].operations[0].class, "danger", script);
+    assert.equal(c.statements[0].warnings, undefined, script);
+    assert.deepEqual(c.notes, [], script);
+  }
+});
