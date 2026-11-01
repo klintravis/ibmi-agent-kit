@@ -248,10 +248,13 @@ test("policy test: both demo policies pass their showcase tests, verbs load with
   }
 });
 
-test("showcase: the upload into MYLIB/SEEDSRC and the session on MYLIB/SEEDLST are allowed for the owner", async () => {
+// The sign-on screen's Program field takes 10 characters and no library, so the session opens on
+// MYLIB and screen_do calls SEEDLST from the command line (screen_command is that line's guard call).
+test("showcase: the upload into MYLIB/SEEDSRC, the session on MYLIB and its CALL of SEEDLST are allowed for the owner", async () => {
   const calls: [string, Record<string, unknown>][] = [
     ["upload_source_member", { library: "MYLIB", sourceFile: "SEEDSRC", member: "SEEDLST", create: true }],
-    ["session_open", { program: "MYLIB/SEEDLST", library: "MYLIB" }],
+    ["session_open", { library: "MYLIB" }],
+    ["screen_command", { commands: ["CALL MYLIB/SEEDLST"] }],
   ];
   for (const p of ["observe", "enforce"]) {
     const policy = loadPolicy(join(EXAMPLES, `demo/policy-${p}.yaml`));

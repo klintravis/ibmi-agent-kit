@@ -125,16 +125,20 @@ Failed: <names>`, so a failed assertion fails the `CALL` step and stops `SEED-BU
 
 `examples/showcase/screen-tests/01-list.md` and `02-detail.md` start on the list screen and end on
 it, type no command and name no library. The guided part opens the session with
-`session_open(program: "MYLIB/SEEDLST", library: "MYLIB")` (qualified, so the guard allows it) and
+`session_open(library: "MYLIB")`, no program: the standard sign-on screen's Program/procedure
+field takes 10 characters and no library, so `MYLIB/SEEDLST` cannot go there. `screen_do` then
+types `CALL MYLIB/SEEDLST` on the command line and presses Enter (the path the reference proved
+live; the guard decides the line before it is sent, qualified, so it is allowed). F3 ends the
+program and returns to that command line, so `session_close` signs off normally. The guided part
 runs `run_tests` with the absolute path of the folder and `session` set, before the live insert,
-so `8 seeds.` holds. Alternative: tests that sign on and `CALL MYLIB/SEEDLST` from the menu, as
-the reference did; they would bake a library into shipped files and could not run as is.
+so `8 seeds.` holds. Alternative: tests that type the `CALL` themselves, as the reference did;
+they would bake a library into shipped files and could not run as is.
 
 ### D6. Policy cases in two new test files beside the demo policies
 
 `examples/demo/showcase-observe.tests.yaml` and `showcase-enforce.tests.yaml`: one verb case per
 showcase verb (`verb: SEED-BUILD, args: { lib: MYLIB }`) and script cases for what the part sends
-outside verbs (`CL: CALL PGM(MYLIB/SEEDLST)`, the session's program). Observe expects `allow`;
+outside verbs (`CL: CALL PGM(MYLIB/SEEDLST)`, the session's command-line call). Observe expects `allow`;
 enforce gives the per-statement array, so the confirm steps (CRTSRCPF, CRTPF, each DLT*) are
 pinned and the part can say exactly what asks. New files, rather than new cases in
 `observe.tests.yaml` / `enforce.tests.yaml`, keep Setup step 1's `5 cases passed` true and keep
@@ -163,12 +167,12 @@ is not needed for it. It covers, with an Expected line each:
 5. `verb_run SEED-BUILD`. Expected: passes; the CALL step shows `SEEDTST: 9 passed, 0 failed`
    (enforce: one question for CRTPF). A compile failure names the member; `compile_member` on that
    member shows the compiler's messages.
-6. `session_open` as in D5; open the `Live view:` URL in a browser.
+6. `session_open` and the command-line `CALL` as in D5; open the `Live view:` URL in a browser.
 7. `screen_do` / `screen_snapshot`: the list with 8 rows, option 5 on Tomato (`In stock`), F12,
    option 5 on Basil and Kale, Enter through both details.
 8. `run_tests` on `<kit>/examples/showcase/screen-tests` with the session. Expected: 2 passed.
 9. `verb_run SEED-ADDROW`, then F5 in the session. Expected: Marigold appears, `9 seeds.`.
-10. F3, `session_close`.
+10. F3 (back to the command line), `session_close` (signs off cleanly).
 11. `verb_run SEED-CLEAN` (enforce: one question for all DLT*). Expected: passes, ending on the
     empty check. If BUILD stopped halfway, CLEAN stops at the first missing object: list the
     remaining names with the PREP query (`run_sql`) and delete those with the matching lines of

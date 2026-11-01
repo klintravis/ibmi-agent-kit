@@ -174,7 +174,8 @@ unless `IBMI_KIT_CONFIG_DIR` is set (`setup` prints the path).
 Builds a small RPG app in your library, runs its unit tests, then drives its subfile screen while
 you watch in the browser. The app is a seed-stock list: a physical file of 8 seeds, a display file,
 a service program with the status rule, the list program and a unit-test program. Part E needs
-only Setup and part A, so you can run it right after A, before B, C and D. It works under either
+only Setup and part A, so you can run it right after A, before B, C and D. Run it in the demo
+folder's session, not in part D's folder. It works under either
 demo policy and has its own clean-up (step 11): the Clean up section above is not needed for it.
 
 Everything part E sends to the box is in the kit's files: four verbs in
@@ -218,8 +219,10 @@ an unexpected error.
    member: compile_member on that member shows the compiler's messages. CHGCURLIB leaves the SQL
    job's current library set for the rest of the server's life; it changes no guard decision,
    since unqualified names are denied anyway.
-6. session_open with program MYLIB/SEEDLST and library MYLIB. Expected: a line
-   "Live view: <url>  <- open this to watch" and the Seed Stock List screen. Show me the URL.
+6. session_open with library MYLIB (no program). Expected: a line
+   "Live view: <url>  <- open this to watch" and the screen your user signs on to. Show me the URL.
+   Then screen_do: type CALL MYLIB/SEEDLST on the command line and press Enter. Expected: the
+   Seed Stock List screen.
 7. screen_snapshot, then screen_do one step at a time. Expected: the list shows 8 rows, Sunflower
    to Kale, with a Status column, Bottom, and 8 seeds. at the foot. Option 5 on Tomato (type 9,3: 5
    and Enter) shows Seed Detail with In stock; F12 returns to the list. Option 5 on Basil (8,3) and
@@ -229,10 +232,9 @@ an unexpected error.
    all 2 test(s) passed.
 9. verb_run SEED-ADDROW, then screen_do key F5. Expected: Marigold appears as row 9 (In stock)
    and the foot reads 9 seeds.
-10. screen_do key F3, then session_close. Expected: F3 ends SEEDLST, the job's sign-on program, so
-   the job ends and the sign-on screen comes back; session_close reports Session "default" closed.
-   Signed off cleanly. If it says no sign off was possible instead, the job already ended with
-   the program: go on.
+10. screen_do key F3, then session_close. Expected: F3 ends SEEDLST and the command line from
+   step 6 comes back; session_close reports Session "default" closed. Signed off cleanly, the
+   device is released.
 11. verb_run SEED-CLEAN. Expected: passes, ending on the empty check: no SEED object is left in
    MYLIB. If SEED-BUILD stopped halfway, SEED-CLEAN stops at the first missing object: run_sql the
    check query from SEED-PREP.yaml to list the names left, delete those with the matching lines of

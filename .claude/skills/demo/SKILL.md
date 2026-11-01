@@ -129,15 +129,17 @@ The statements live in the verb files; never type them yourself.
    `create: true`.
 6. `verb_run` SEED-BUILD. On a compile failure, `compile_member` on the member it names shows why;
    stop there and show it.
-7. `session_open` with program `<library>/SEEDLST` and the library. Open the `Live view:` URL from
+7. `session_open` with the library only, no program (the sign-on screen's Program field takes 10
+   characters and no library). Open the `Live view:` URL from
    its result in the user's browser with the platform's opener: `start "" "<url>"` on Windows,
-   `open "<url>"` on macOS, `xdg-open "<url>"` on Linux. If that fails, show the URL.
+   `open "<url>"` on macOS, `xdg-open "<url>"` on Linux. If that fails, show the URL. Then
+   `screen_do` types `CALL <library>/SEEDLST` on the command line and presses Enter: the list shows.
 8. Drive the list with `screen_do` and look with `screen_snapshot`, as Part E step 7 lists. Pause
    so the user can watch each screen.
 9. `run_tests` with the absolute path `<kit>/examples/showcase/screen-tests` and `session` set to
    the open session, before the next step: the tests expect 8 rows.
 10. `verb_run` SEED-ADDROW, then F5 with `screen_do`: the new row shows in the open list.
-11. F3 with `screen_do`, then `session_close`. F3 ends the job with its sign-on program, so a
-    "no sign off was possible" note here is expected; go on to the next step.
+11. F3 with `screen_do` (back to the command line), then `session_close`, which signs off from
+    there.
 12. `verb_run` SEED-CLEAN. In enforce mode the user answers its question. If it stops at a missing
     object, follow Part E step 11's recovery with `run_sql` and `run_script`, one step at a time.

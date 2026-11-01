@@ -59,7 +59,7 @@ them is left.
 ### Requirement: Showcase policy cases
 `examples/demo/showcase-observe.tests.yaml` and `examples/demo/showcase-enforce.tests.yaml` SHALL
 decide every SQL statement and CL command the guided part sends: one verb case per showcase verb
-and a script case for the session's program call. In the enforce file each verb case SHALL give one
+and a script case for the program call the session types on its command line. In the enforce file each verb case SHALL give one
 decision per statement.
 
 #### Scenario: Showcase cases pass
@@ -71,12 +71,12 @@ decision per statement.
 - **THEN** the physical-file create is `confirm` and every compile, the library-list change, the inserts, the checks and the test call are `allow`
 
 ### Requirement: Showcase tool calls are allowed for the owner
-The selfcheck SHALL decide the guided part's `upload_source_member` and `session_open` calls under
-both demo policies and expect `allow`.
+The selfcheck SHALL decide the guided part's `upload_source_member`, `session_open` and
+command-line `CALL` under both demo policies and expect `allow`.
 
 #### Scenario: Upload and session decided
-- **WHEN** the selfcheck decides an `upload_source_member` into `MYLIB/SEEDSRC` and a `session_open` of `MYLIB/SEEDLST` with library `MYLIB` for `MYUSER`
-- **THEN** both demo policies decide `allow`
+- **WHEN** the selfcheck decides an `upload_source_member` into `MYLIB/SEEDSRC`, a `session_open` with library `MYLIB` and no program, and the command line `CALL MYLIB/SEEDLST` for `MYUSER`
+- **THEN** both demo policies decide `allow` for each
 
 ### Requirement: Showcase screen tests
 The kit SHALL ship Markdown screen tests in the `run_tests` format under
