@@ -1357,14 +1357,24 @@ test("verbs: typed values are validated, and what is not one is refused", () => 
 
 test("verbs: a name parameter is an upper cased object name; anything else is refused naming it", () => {
   const p = { address: "proj:X", params: { v: { type: "name" } as VerbParam } };
-  for (const [v, want] of [["ordval", "ORDVAL"], ["$A#b@_.1", "$A#B@_.1"], ["ABCDEFGHIJ", "ABCDEFGHIJ"]] as const) assert.deepEqual(bindArgs(p, { v }), { v: want }, v);
-  for (const v of ["A'B", "A B", "A(B)", "A&B", "A,B", "A/B", "A*B", "", "1AB", "ABCDEFGHIJK", 7, true]) assert.throws(() => bindArgs(p, { v }), /^Error: proj:X: v: .+ is not an object name/, String(v));
+  for (const [v, want] of [["ordval", "ORDVAL"], ["$A#b@_1", "$A#B@_1"], ["ABCDEFGHIJ", "ABCDEFGHIJ"]] as const) assert.deepEqual(bindArgs(p, { v }), { v: want }, v);
+  for (const v of ["A'B", "A B", "A(B)", "A&B", "A,B", "A/B", "A*B", "A.B", "A.", "", "1AB", "ABCDEFGHIJK", 7, true]) assert.throws(() => bindArgs(p, { v }), /^Error: proj:X: v: .+ is not an object name/, String(v));
   // allowed values are validated as names and compared upper cased
   const ok = { address: "proj:X", params: { v: { type: "name", allowed: ["ordhdr"] } as VerbParam } };
   assert.deepEqual(bindArgs(ok, { v: "OrdHdr" }), { v: "ORDHDR" });
   assert.throws(() => bindArgs(ok, { v: "other" }), /not one of/);
   const bad = loadVerbs(verbRoot({ [P + "x.yaml"]: "name: X\ndescription: d\nparams:\n  v: { type: name, allowed: [\"A B\"] }\nsteps:\n  - sql: VALUES :v\n" }).src);
   assert.match(bad.errors.join("\n"), /params\.v\.allowed\.0: "A B" is not an object name/);
+});
+
+test("verbs: in SQL outside quotes a name substitutes as an identifier or keyword, never a qualified name", () => {
+  const params = { u: { type: "name" } as VerbParam };
+  const p = { address: "proj:X", params };
+  const sql = (t: string, u: string) => substitute(t, "sql", params, bindArgs(p, { u })).text;
+  assert.equal(sql("GRANT SELECT ON ORDLIB.ORDHDR TO ${u}", "public"), "GRANT SELECT ON ORDLIB.ORDHDR TO PUBLIC"); // a keyword, not a user: use :u or '${u}' for values
+  assert.equal(sql("SET SCHEMA ${u}", "user"), "SET SCHEMA USER");
+  assert.equal(sql("SELECT * FROM QTEMP.${u}", "t1"), "SELECT * FROM QTEMP.T1");
+  for (const u of ["A.B", "A."]) assert.throws(() => sql("SELECT * FROM QTEMP.${u}", u), /is not an object name/, u); // no three-part name, no unclosed CL comment
 });
 
 test("verbs: ${member} of type name loads in CL, inside or outside quotes; a string without allowed is still refused", () => {

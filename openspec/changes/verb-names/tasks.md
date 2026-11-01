@@ -1,7 +1,7 @@
 ## 1. Name parameter type
 
 - [x] 1.1 `packages/guard/src/verbs.ts`: add `name` to the zod enum, `typed` and `EXPECTED`; exempt it from the free-text refusal
-- [x] 1.2 Selfchecks: accepted and upper cased; quote, blank, paren, `&`, comma, 11 chars refused; `${member}` in CL loads; string without `allowed` still refused; `allowed` with `name`; env rule denies a production library through `${lib}`
+- [x] 1.2 Selfchecks: accepted and upper cased; quote, blank, paren, `&`, comma, `.`, `/`, 11 chars refused; in SQL outside quotes a name substitutes as an identifier (`public` -> `PUBLIC`); `${member}` in CL loads; string without `allowed` still refused; `allowed` with `name`; env rule denies a production library through `${lib}`
 
 ## 2. policy test
 

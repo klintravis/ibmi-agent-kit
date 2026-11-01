@@ -108,7 +108,7 @@ export type Values = Record<string, Value>;
 
 // --- parameter values ---
 
-const EXPECTED = { string: "a string", name: "an object name (up to 10 characters: letters, digits, $ # @ _ .)", integer: "an integer", decimal: "a decimal number", date: "a date (YYYY-MM-DD)", boolean: "true or false" };
+const EXPECTED = { string: "a string", name: "an object name (up to 10 characters: letters, digits, $ # @ _)", integer: "an integer", decimal: "a decimal number", date: "a date (YYYY-MM-DD)", boolean: "true or false" };
 const show = (v: unknown) => (typeof v === "string" ? JSON.stringify(v) : String(v));
 
 // `v` as a value of `type`, normalised (decimals stay strings, so no digit is lost); undefined if
@@ -117,8 +117,8 @@ function typed(type: VerbParam["type"], v: unknown): Value | undefined {
   switch (type) {
     case "string":
       return typeof v === "string" ? v : undefined;
-    case "name": // no quote, blank, parenthesis, comma or &: safe in CL text, in or out of quotes
-      return typeof v === "string" && /^[A-Za-z$#@][A-Za-z0-9$#@_.]{0,9}$/.test(v) ? v.toUpperCase() : undefined;
+    case "name": // no quote, blank, parenthesis, comma, &, . or /: in CL it only picks an object; in SQL outside quotes it is an identifier or keyword (PUBLIC, USER)
+      return typeof v === "string" && /^[A-Za-z$#@][A-Za-z0-9$#@_]{0,9}$/.test(v) ? v.toUpperCase() : undefined;
     case "boolean":
       return typeof v === "boolean" ? v : undefined;
     case "integer": {

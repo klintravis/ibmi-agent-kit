@@ -8,15 +8,18 @@ verbs only when a test case names one, so a verb file the server would refuse at
 
 ## What Changes
 
-- `verbs`: a new parameter type `name`, an IBM i object name (`^[A-Za-z$#@][A-Za-z0-9$#@_.]{0,9}$`,
+- `verbs`: a new parameter type `name`, an IBM i object name (`^[A-Za-z$#@][A-Za-z0-9$#@_]{0,9}$`,
   upper cased, anything else refused naming the parameter). It can hold no quote, blank,
-  parenthesis, comma or `&`, so `${p}` may be used with it in CL and SQL, inside or outside quotes,
-  as with `integer`. `:p` in SQL binds it as a string. `allowed` still works (values validated as
-  names). The guard still decides the substituted statement, so a name that is a production library
-  in a command's library slot resolves to its environment like a literal.
+  parenthesis, comma, `&`, `.` or `/`, so `${p}` may be used with it in CL and SQL, inside or
+  outside quotes. In CL a name only picks which object the command acts on; in SQL outside quotes
+  it is an identifier or keyword (`PUBLIC`, `USER`, `NULL`, `DEFAULT`), so values use `:p` or
+  `'${p}'` and `allowed` limits which names are accepted. `:p` in SQL binds it as a string.
+  `allowed` still works (values validated as names). The guard still decides the substituted
+  statement, so a name that is a production library in a command's library slot resolves to its
+  environment like a literal.
 - `policy-testing`: `ibmi-agent-kit policy test` always loads the policy's verbs, prints each
-  refusal and exits 1 when any verb file is refused, whether or not a case names a verb. A policy
-  with no verb folders behaves as before.
+  refusal and exits 1 when any verb file is refused, whether or not a case names a verb (2 when a
+  case names the refused verb, as before). A policy with no verb folders behaves as before.
 - No MCP tool added or changed (all existing tools keep their read-only or destructive
   annotations): `verb_list` and `policy_check` show and accept the new type value only.
 

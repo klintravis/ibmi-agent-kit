@@ -64,14 +64,16 @@ other verbs still load. One SQL statement per entry: no `;` between statements.
 | Type | Accepts | In `${p}` |
 |---|---|---|
 | `string` | any text | only with `allowed` |
-| `name` | an IBM i object name: a letter, `$`, `#` or `@`, then up to 9 of letters, digits, `$ # @ _ .`; upper cased | yes, inside or outside quotes |
+| `name` | an IBM i object name: a letter, `$`, `#` or `@`, then up to 9 of letters, digits, `$ # @ _`; upper cased | yes, inside or outside quotes |
 | `integer`, `decimal` | a number | yes |
 | `date` | `YYYY-MM-DD` | yes, inside quotes in SQL |
 | `boolean` | `true` or `false` | SQL only |
 
 `name` is how a CL step takes a member, file or library name, since CL has no bound values. A name
-holds no quote, blank, parenthesis, comma or `&`, so it cannot change the shape of the command;
-anything else fails the call naming the parameter. The guard still decides the finished
+holds no quote, blank, parenthesis, comma, `&`, `.` or `/`; anything else fails the call naming the
+parameter. In CL a name only picks which object the command acts on. In SQL outside quotes a name
+is an identifier or keyword, so `PUBLIC`, `USER`, `NULL` or `DEFAULT` all pass: use `:p` or `'${p}'`
+for values, and `allowed` to limit which names are accepted. The guard still decides the finished
 statement, so a `name` that is a production library is denied like the same name typed into the file.
 There is no pattern of your own; for other text use `allowed`. Example, a change-management checkout:
 
@@ -79,7 +81,7 @@ There is no pattern of your own; for other text use `allowed`. Example, a change
 name: CHECKOUT
 description: Check a member out for a task
 params:
-  task:   { type: name }
+  task:   { type: integer }
   file:   { type: name, default: QRPGLESRC }
   member: { type: name }
 steps:
@@ -185,8 +187,8 @@ and reports passed, failed and skipped counts with each verb's statements.
   that writes shows as `deny`.
 - `policy test` cases can name a verb instead of a script; see
   [Test a policy](policy.md#test-a-policy). `policy test` also loads the project and policy
-  verbs on every run, prints each file the server would refuse and exits 1, so a broken verb file
-  fails CI even when no case names a verb.
+  verbs on every run, prints each file the server would refuse and exits 1 (2 when a case names the
+  refused verb), so a broken verb file fails CI even when no case names a verb.
 
 ## Limits
 

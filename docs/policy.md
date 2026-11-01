@@ -178,7 +178,7 @@ node <repo>/packages/server/dist/index.js policy test examples/three-partitions.
   expect: [allow, deny]   # one decision per statement, or one for the script
 ```
 
-`lookups` is optional: `schemas` maps a long schema name to its system name, and `bases` maps an alias or view to its base tables (`LIB.NAME`). `as` takes `user`, `groups`, `authlists`, `partition` and `curlib`. `expect` is the policy's decision, so an observe-mode deny is still tested as deny. Exit 0 all cases passed, 1 a case failed, 2 a bad file. In a team, run it in CI.
+`lookups` is optional: `schemas` maps a long schema name to its system name, and `bases` maps an alias or view to its base tables (`LIB.NAME`). `as` takes `user`, `groups`, `authlists`, `partition` and `curlib`. `expect` is the policy's decision, so an observe-mode deny is still tested as deny. Exit 0 all cases passed, 1 a case failed or a verb file is refused (2 when a case names the refused verb), 2 a bad file. In a team, run it in CI.
 
 A case can test a verb instead of a script: give `verb` (a name, or `proj:NAME` / `org:NAME`) and optional `args` in place of `script`.
 

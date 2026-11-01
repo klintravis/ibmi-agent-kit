@@ -121,8 +121,8 @@ verbs/smoke.yaml
    8. `.mcp.json`: the block in `templates/company-repo/README.md` (Get started), exactly. It
       replaces the `.mcp.json` this session started with (same server name), so the committed file
       holds no path of the admin's machine.
-6. **Test.** `ibmi-agent-kit policy test policy.yaml policy.tests.yaml` must print `N cases passed`
-   with no `warning:` line. On a failure, fix the policy or the case with the admin and run again.
+6. **Test.** `ibmi-agent-kit policy test policy.yaml policy.tests.yaml` must exit 0 and print
+   `N cases passed`, with no `warning:` or `error:` line. On a failure, fix the policy or the case with the admin and run again.
 7. **Check per role.** For each role, call `policy_check` with `script` (one read and one write in
    that role's environment), `as` (the role's test user, groups and partition) and `policy` (the
    absolute path to the new `policy.yaml`), and show the decisions beside the tests.

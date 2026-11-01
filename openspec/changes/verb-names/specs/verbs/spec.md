@@ -20,8 +20,12 @@ breaks this rule SHALL refuse the verb at load.
 - **THEN** the verb loads, and `verb_run` with `member: ordval` sends `MBR(ORDVAL)`
 
 #### Scenario: Name is an object name
-- **WHEN** a `name` argument is `A'B`, `A B`, `A(B)`, `A&B`, `A,B`, an empty string, a name starting with a digit or one of 11 characters
+- **WHEN** a `name` argument is `A'B`, `A B`, `A(B)`, `A&B`, `A,B`, `A/B`, `A.B`, `A.`, an empty string, a name starting with a digit or one of 11 characters
 - **THEN** the call fails before anything is sent, naming the parameter
+
+#### Scenario: Name outside quotes in SQL
+- **WHEN** a verb's SQL step is `GRANT SELECT ON ORDLIB.ORDHDR TO ${u}` and `u` has type `name` and the call passes `public`
+- **THEN** the statement sent is `... TO PUBLIC`, because outside quotes a name is an identifier or keyword; `:u` or `'${u}'` is how a value is passed
 
 #### Scenario: Name with allowed
 - **WHEN** a `name` parameter has `allowed: [ordhdr]`
