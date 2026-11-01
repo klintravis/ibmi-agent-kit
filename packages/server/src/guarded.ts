@@ -217,7 +217,7 @@ const objectText = (o: NonNullable<ClassifiedStatement["operations"][number]["ob
 
 // Per statement: the operations with object, partition, environment and class, the rule, the
 // decision, and why it does or does not run.
-function report(p: { statement: { kind?: string; display: string }; decision: Decision; refused?: string }, i: number) {
+function report(p: { statement: { kind?: string; display: string; warnings?: string[] }; decision: Decision; refused?: string }, i: number) {
   const d = p.decision;
   const r: Record<string, unknown> = {
     index: i + 1,
@@ -235,6 +235,7 @@ function report(p: { statement: { kind?: string; display: string }; decision: De
       return op;
     }),
   };
+  if (p.statement.warnings?.length) r.warnings = p.statement.warnings;
   if (d.reason) r.reason = d.reason;
   if (p.refused) r.refused = p.refused;
   return r;
@@ -737,7 +738,7 @@ export function registerGuarded(
           const input = verb !== undefined ? { verb, ...(args ? { args } : {}) } : { script };
           const [t] = await runPolicyTests(used, [{ name: "policy_check", as, ...input, expect: "allow" }], verb !== undefined ? deps.verbs(key(server)) : undefined);
           head = { policy: used.source, as, offline: true };
-          statements = t.statements.map((x, i) => report({ statement: { display: x.text }, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i));
+          statements = t.statements.map((x, i) => report({ statement: { display: x.text, ...(x.warnings ? { warnings: x.warnings } : {}) }, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i));
         } else {
           if (candidate) throw new Error("a candidate `policy` is decided offline: state the identity in `as` too");
           let identity: Identity;
@@ -761,8 +762,9 @@ export function registerGuarded(
           if (identity.conflict) head.conflict = identity.conflict;
         }
         const lines = statements.map((r) => {
+          const warns = ((r.warnings as string[] | undefined) ?? []).map((w) => `    ! ${w}`);
           const ops = (r.operations as { message: string }[]).map((o) => `    - ${o.message}`);
-          return [`statement ${r.index}${r.where ? ` (${r.verb} ${r.where})` : ""}: ${r.effective}${r.effective !== r.decision && !r.refused ? ` (policy: ${r.decision}, not enforced)` : ""}${r.refused ? ` (${r.refused})` : ""}`, `    ${String(r.text).split("\n")[0]}`, ...ops].join("\n");
+          return [`statement ${r.index}${r.where ? ` (${r.verb} ${r.where})` : ""}: ${r.effective}${r.effective !== r.decision && !r.refused ? ` (policy: ${r.decision}, not enforced)` : ""}${r.refused ? ` (${r.refused})` : ""}`, `    ${String(r.text).split("\n")[0]}`, ...warns, ...ops].join("\n");
         });
         return result({ ...head, statements, limits: LIMITS }, `${lines.join("\n")}\n\n${LIMITS}`);
       } catch (e) {

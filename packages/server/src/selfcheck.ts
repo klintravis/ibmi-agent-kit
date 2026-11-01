@@ -244,7 +244,8 @@ test("policy test: both demo policies pass their showcase tests, verbs load with
   for (const p of ["observe", "enforce"]) {
     const r = await runBin(["policy", "test", join(EXAMPLES, `demo/policy-${p}.yaml`), join(EXAMPLES, `demo/showcase-${p}.tests.yaml`)]);
     assert.equal(r.code, 0, p + "\n" + r.stdout + r.stderr);
-    assert.doesNotMatch(r.stderr, /warning:/, p);
+    // Undeclared-parameter warnings (policy-param-warn) are shipped-table gaps, not load warnings.
+    assert.doesNotMatch(r.stderr.replace(/^warning: .*does not declare this parameter.*$/gm, ""), /warning:/, p);
   }
 });
 
@@ -467,6 +468,78 @@ test("policy test: usage and load errors exit 2", async () => {
   const err: string[] = [];
   assert.equal(await policyCli(["test", join(EXAMPLES, "nope.yaml"), join(EXAMPLES, "three-partitions.tests.yaml")], () => {}, (t) => err.push(t)), 2);
   assert.match(err.join("\n"), /policy file not found/);
+});
+
+// --- undeclared CL parameters (policy-param-warn 3.x): invented command, so no shipped entry is involved ---
+const XYZ_POLICY_TEXT = "version: 1\nmode: enforce\ncommands:\n  XYZCPY: { class: write, positional: [FROMOBJ], params: { FROMOBJ: object } }\nrules:\n  - { decision: allow }\n";
+const XYZ_POLICY = parsePolicy(XYZ_POLICY_TEXT, "xyz.yaml");
+const XYZ_WARN = "XYZCPY TOLIB(): the command table does not declare this parameter, so a library or object it names is not decided";
+const XYZ_AS = { user: "JDOE", groups: ["GRPDEV"] };
+
+test("policy test: a passing suite with an undeclared keyword exits 0, warns on stderr only", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "kit-warn-"));
+  try {
+    writeFileSync(join(dir, "policy.yaml"), XYZ_POLICY_TEXT);
+    const t = (script: string) => `- name: copy\n  as: { user: JDOE, groups: [GRPDEV] }\n  script: "CL: ${script}"\n  expect: allow\n`;
+    writeFileSync(join(dir, "plain.tests.yaml"), t("XYZCPY FROMOBJ(APPLIB/ORD)"));
+    writeFileSync(join(dir, "warn.tests.yaml"), t("XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)"));
+    const run = async (tests: string) => {
+      const out: string[] = [];
+      const err: string[] = [];
+      const code = await policyCli(["test", join(dir, "policy.yaml"), join(dir, tests)], (x) => out.push(x), (x) => err.push(x));
+      return { code, out, err };
+    };
+    const plain = await run("plain.tests.yaml");
+    const warn = await run("warn.tests.yaml");
+    assert.equal(warn.code, 0);
+    assert.deepEqual(warn.err, [`warning: copy: ${XYZ_WARN}`]);
+    assert.deepEqual(warn.out, plain.out, "stdout is the same report with or without the warning");
+    assert.deepEqual(plain.err, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("policy_check: live script and offline as show warnings and a text line, decision unchanged; declared-only has none", async () => {
+  const k = await guardedKit({ policy: XYZ_POLICY });
+  try {
+    const bare = await k.call("policy_check", { script: "CL: XYZCPY FROMOBJ(APPLIB/ORD)" });
+    assert.ok(!("warnings" in bare.s.statements[0]), "no warnings key without a warning");
+    assert.doesNotMatch(bare.text, /^ {4}! /m);
+    const live = await k.call("policy_check", { script: "CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)" });
+    assert.deepEqual(live.s.statements[0].warnings, [XYZ_WARN]);
+    assert.equal(live.s.statements[0].decision, bare.s.statements[0].decision);
+    assert.deepEqual(live.s.statements[0].operations, bare.s.statements[0].operations);
+    const lines = live.text.split("\n");
+    const w = lines.findIndex((l) => l === `    ! ${XYZ_WARN}`);
+    assert.ok(w > 0 && lines[w + 1].startsWith("    - "), live.text);
+    const dir = mkdtempSync(join(tmpdir(), "kit-warn-"));
+    try {
+      writeFileSync(join(dir, "policy.yaml"), XYZ_POLICY_TEXT);
+      const off = await k.call("policy_check", { script: "CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)", policy: join(dir, "policy.yaml"), as: XYZ_AS });
+      assert.deepEqual(off.s.statements[0].warnings, [XYZ_WARN]);
+      assert.match(off.text, new RegExp(`    ! ${XYZ_WARN.replace(/[()]/g, "\\$&")}\\n    - `));
+      const offBare = await k.call("policy_check", { script: "CL: XYZCPY FROMOBJ(APPLIB/ORD)", policy: join(dir, "policy.yaml"), as: XYZ_AS });
+      assert.ok(!("warnings" in offBare.s.statements[0]));
+      assert.equal(off.s.statements[0].decision, offBare.s.statements[0].decision);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  } finally {
+    await k.close();
+  }
+});
+
+test("run log: run_script records the undeclared-parameter warning in the first line's notes", async () => {
+  const k = await guardedKit({ policy: XYZ_POLICY });
+  try {
+    const r = await k.call("run_script", { script: "CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)" });
+    assert.equal(r.error, false, r.text);
+    const [line] = k.log();
+    assert.ok(line.notes.includes(XYZ_WARN), JSON.stringify(line.notes));
+  } finally {
+    await k.close();
+  }
 });
 
 test("policy replay: lists what a candidate changes in the run log; --since leaves older days out", async () => {

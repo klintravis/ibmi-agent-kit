@@ -63,6 +63,7 @@ export async function policyCli(args: string[], out: Write = (t) => console.log(
       const results = await runPolicyTests(policy, cases, verbs);
       const failed = results.filter((r) => !r.ok);
       for (const r of failed) out(describeFailure(r));
+      for (const r of results) for (const s of r.statements) for (const w of s.warnings ?? []) err(`warning: ${r.name}: ${w}`);
       out(failed.length ? `${failed.length} of ${results.length} cases failed` : `${results.length} cases passed`);
       if (verbs.errors.length) out(`${verbs.errors.length} verb file problem(s)`);
       return failed.length || verbs.errors.length ? 1 : 0;

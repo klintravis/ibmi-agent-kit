@@ -19,7 +19,7 @@ The other tools come from the engines; see the Tools table in the [root README](
 |---|---|---|
 | `list_servers` | Lists the configured servers (the `.env.<name>` files), the open 5250 sessions on each, and the profile folders searched. | read-only |
 | `run_script` | Runs SQL statements (`;` separated) and CL commands (lines starting `CL:`) in order. Every statement is classified and decided, and every confirmation asked, before the first is sent: one denied statement or a declined confirmation sends nothing. Stops at the first failure. Returns per statement the decision, outcome, rows affected, rows (up to `maxRows`, default 100, at most 1000) and messages. | changes data; runs code |
-| `policy_check` | Decides a `script`, or every statement a `verb` (with `args`) would send, without running it: per statement the operations with library, partition, environment and class, the matching rule and the decision. Sends only the catalog lookups needed. With `as` (an identity) and optionally `policy` (a candidate file) it decides offline and sends nothing. | read-only |
+| `policy_check` | Decides a `script`, or every statement a `verb` (with `args`) would send, without running it: per statement the operations with library, partition, environment and class, the matching rule and the decision, plus `warnings` for a CL command given a parameter its command-table entry does not name (the decision is unchanged). Sends only the catalog lookups needed. With `as` (an identity) and optionally `policy` (a candidate file) it decides offline and sends nothing. | read-only |
 | `verb_list` | Lists the verbs by layer (`user`, `proj`, `org`) with description, tags and parameters, marks those a closer layer overrides, and names files refused at load. | read-only |
 | `verb_run` | Runs one `verb` with `args`, or with `tag` every verb carrying that tag (each with its defaults, in address order). Returns per verb passed, failed or skipped, with each statement's decision and outcome. | changes data; runs code |
 
@@ -50,7 +50,7 @@ node <repo>/packages/server/dist/index.js policy test <policy> <tests>
 node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--since <days>]
 ```
 
-`npm link -w packages/server` puts `ibmi-agent-kit` on PATH so you can shorten the command. Offline, no IBM i, output on stdout. `policy test` also loads the project and policy verbs and exits 1 when any verb file would be refused, even if no case names a verb (2 when a case names the refused verb). Details in the [guard README](../guard/README.md#offline-policy-test-and-policy-replay).
+`npm link -w packages/server` puts `ibmi-agent-kit` on PATH so you can shorten the command. Offline, no IBM i, output on stdout. `policy test` prints `warning: <case>: <warning>` on stderr for each CL command given a parameter its command-table entry does not name; warnings never change the exit code. `policy test` also loads the project and policy verbs and exits 1 when any verb file would be refused, even if no case names a verb (2 when a case names the refused verb). Details in the [guard README](../guard/README.md#offline-policy-test-and-policy-replay).
 
 ## `setup` command
 

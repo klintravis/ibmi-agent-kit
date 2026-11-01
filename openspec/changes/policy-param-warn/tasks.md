@@ -14,10 +14,10 @@
 
 ## 3. Server: policy_check and policy test output
 
-- [ ] 3.1 `guarded.ts` `policy_check`: `report()` adds `warnings` when the statement has any, for the live script (`p.statement`), live verb (`checkVerb` statement) and offline (`TestResult` statement) paths; the text adds one `    ! <warning>` line per warning before the operation lines. Annotation stays `readOnlyHint: true`. Verify with `packages/server/src/selfcheck.ts` cases: live script and offline `as` with an undeclared keyword show `warnings` and the text line, decision unchanged; declared-only scripts have no `warnings` key.
-- [ ] 3.2 `policy-cli.ts` `test`: for every result print `warning: <case>: <warning>` on stderr; exit code logic untouched. Verify with a server selfcheck case: a passing suite with an undeclared keyword exits 0, stderr has the warning, stdout unchanged.
-- [ ] 3.3 Run log: verify with a server selfcheck case that `run_script` on a stub transport records the warning in the first line's `notes` (no `runlog.ts` change expected).
-- [ ] 3.4 `packages/server/README.md`: `policy_check` row mentions per-statement `warnings`; the `policy test` paragraph mentions the stderr warnings. Verify the wording matches 3.1 and 3.2.
+- [x] 3.1 `guarded.ts` `policy_check`: `report()` adds `warnings` when the statement has any, for the live script (`p.statement`), live verb (`checkVerb` statement) and offline (`TestResult` statement) paths; the text adds one `    ! <warning>` line per warning before the operation lines. Annotation stays `readOnlyHint: true`. Verify with `packages/server/src/selfcheck.ts` cases: live script and offline `as` with an undeclared keyword show `warnings` and the text line, decision unchanged; declared-only scripts have no `warnings` key.
+- [x] 3.2 `policy-cli.ts` `test`: for every result print `warning: <case>: <warning>` on stderr; exit code logic untouched. Verify with a server selfcheck case: a passing suite with an undeclared keyword exits 0, stderr has the warning, stdout unchanged.
+- [x] 3.3 Run log: verify with a server selfcheck case that `run_script` on a stub transport records the warning in the first line's `notes` (no `runlog.ts` change expected).
+- [x] 3.4 `packages/server/README.md`: `policy_check` row mentions per-statement `warnings`; the `policy test` paragraph mentions the stderr warnings. Verify the wording matches 3.1 and 3.2.
 
 ## 4. Docs
 
