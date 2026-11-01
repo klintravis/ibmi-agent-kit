@@ -168,3 +168,78 @@ Expected: none of `T`, `DEMOT`, `DEMOT2`, `SMOKESAMPLE` from this demo. **Human*
 folder copies (they hold your library and user names). If you don't want the policy to stay on,
 delete the `IBMI_KIT_POLICY` line from the profile file, which is `~/.ibmi-agent-kit/.env.demo`
 unless `IBMI_KIT_CONFIG_DIR` is set (`setup` prints the path).
+
+## E. Build and watch (about 10 minutes)
+
+Builds a small RPG app in your library, runs its unit tests, then drives its subfile screen while
+you watch in the browser. The app is a seed-stock list: a physical file of 8 seeds, a display file,
+a service program with the status rule, the list program and a unit-test program. Part E needs
+only Setup and part A, so you can run it right after A, before B, C and D. It works under either
+demo policy and has its own clean-up (step 11): the Clean up section above is not needed for it.
+
+Everything part E sends to the box is in the kit's files: four verbs in
+[`examples/demo/verbs/`](../examples/demo/verbs/) (SEED-PREP, SEED-BUILD, SEED-ADDROW, SEED-CLEAN),
+six source members in [`examples/showcase/src/`](../examples/showcase/src/) and two screen tests in
+[`examples/showcase/screen-tests/`](../examples/showcase/screen-tests/). It makes objects only in
+your library, and only these: `SEEDSRC`, `SEEDS`, `SEEDDSPF`, `SEEDSRV`, `SEEDLST`, `SEEDTST`.
+SEED-CLEAN deletes exactly those and fails if any is left.
+
+**Human**, before the prompt:
+
+1. Viewer: if you left it out in Setup step 3, add `"env": { "IBMI_5250_VIEWER": "true" }` next
+   to `"args"` in the demo folder's `.mcp.json`. Never in the profile file. Expected: nothing yet;
+   the `Live view:` line in step 6 shows it took.
+2. Library: Setup step 1 copied the verbs along with the policies. In
+   `<demo folder>/demo/verbs/SEED-*.yaml` replace `MYLIB` with your library, and in
+   `<demo folder>/demo/showcase-observe.tests.yaml` and `showcase-enforce.tests.yaml` replace
+   `MYLIB` and `MYUSER` as in Setup step 1. Optional check:
+   `node <abs path>/packages/server/dist/index.js policy test <demo folder>/demo/policy-observe.yaml <demo folder>/demo/showcase-observe.tests.yaml`
+   prints `5 cases passed` (the enforce pair too). Then restart the server once: `/mcp`, restart
+   `ibmi-agent-kit`. The server reads its verbs once and caches them, and reads the viewer setting
+   at start, so both edits need this one restart. Expected: the server is connected again.
+
+Paste, with `demo`, `MYLIB` and `<kit>` (the kit checkout's absolute path) replaced:
+
+```text
+Use the ibmi-agent-kit tools on server demo (MYLIB only, never QGPL, one connection, no retries).
+A refusal or failure marked Expected is a result, not a failure: report it and go on. Stop only on
+an unexpected error.
+3. verb_run SEED-PREP. Expected: passes; the check finds no SEED object in MYLIB, then CRTSRCPF
+   makes MYLIB/SEEDSRC. If the check fails, an earlier run left objects behind: run step 11, then
+   this step again.
+4. upload_source_member six times, one per file in <kit>/examples/showcase/src/ (SEEDS.pf,
+   SEEDDSPF.dspf, SEEDPR.rpgle, SEEDSRV.rpgle, SEEDLST.rpgle, SEEDTST.rpgle): library MYLIB,
+   sourceFile SEEDSRC, member = the file name without its extension, localPath = the file,
+   create: true. Expected: six members, typed PF, DSPF and RPGLE from the extensions.
+5. verb_run SEED-BUILD. Expected: passes. CHGCURLIB makes MYLIB the current library, CRTPF and
+   the 8 rows, the display file, three modules, the service program SEEDSRV, the programs SEEDLST
+   and SEEDTST, and last CALL PGM(MYLIB/SEEDTST), the unit-test line: SEEDTST: 9 passed, 0 failed.
+   A failed assertion fails that step with "Failed:" and the names. A compile failure names the
+   member: compile_member on that member shows the compiler's messages. CHGCURLIB leaves the SQL
+   job's current library set for the rest of the server's life; it changes no guard decision,
+   since unqualified names are denied anyway.
+6. session_open with program MYLIB/SEEDLST and library MYLIB. Expected: a line
+   "Live view: <url>  <- open this to watch" and the Seed Stock List screen. Show me the URL.
+7. screen_snapshot, then screen_do one step at a time. Expected: the list shows 8 rows, Sunflower
+   to Kale, with a Status column, Bottom, and 8 seeds. at the foot. Option 5 on Tomato (type 9,3: 5
+   and Enter) shows Seed Detail with In stock; F12 returns to the list. Option 5 on Basil (8,3) and
+   Kale (14,3) in one Enter shows Basil's detail (Low), Enter shows Kale's (Overstock), Enter
+   returns to the list.
+8. run_tests with path <kit>/examples/showcase/screen-tests and session default. Expected:
+   all 2 test(s) passed.
+9. verb_run SEED-ADDROW, then screen_do key F5. Expected: Marigold appears as row 9 (In stock)
+   and the foot reads 9 seeds.
+10. screen_do key F3, then session_close. Expected: F3 ends SEEDLST, the job's sign-on program, so
+   the job ends; session_close reports Session "default" closed.
+11. verb_run SEED-CLEAN. Expected: passes, ending on the empty check: no SEED object is left in
+   MYLIB. If SEED-BUILD stopped halfway, SEED-CLEAN stops at the first missing object: run_sql the
+   check query from SEED-PREP.yaml to list the names left, delete those with the matching lines of
+   SEED-CLEAN.yaml through run_script, then run_sql the check again (no rows).
+```
+
+**Human**: open the `Live view:` URL in your browser at step 6 and watch steps 7 to 10. In enforce
+mode steps 3, 5 and 11 each ask one question (CRTSRCPF; CRTPF; all nine deletes at once): answer
+yes. Under observe nothing asks.
+
+The SEED verbs stay in the demo folder's `demo/verbs/` (the org layer, beside the policy), so part
+C's `verb_list` shows them next to SMOKE-SAMPLE.

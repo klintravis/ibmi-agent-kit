@@ -106,3 +106,37 @@ next to setup's OK line and stop.
 ## 4. Clean up and summary
 
 Run docs/demo.md "Clean up". Summarize in a few lines: what passed, what differed from Expected.
+
+## 5. Part E: build and watch
+
+docs/demo.md Part E builds a small RPG app in the user's library and drives its screen while the
+user watches. It needs only sections 1 and 2 and section 3 through Part A, so offer it right after
+Part A, before Parts B, C and D; it works
+under either policy and cleans up after itself. Take each step and its Expected line from Part E.
+The statements live in the verb files; never type them yourself.
+
+1. Viewer: the user's `.mcp.json` needs `"env": { "IBMI_5250_VIEWER": "true" }` (Part E step 1).
+   It goes in `.mcp.json` only, never in a profile file. If it is missing, the user adds it.
+2. Library: in the demo folder's copies, `<demo folder>/demo/verbs/SEED-*.yaml` and the two
+   showcase test files beside the policies, put the library and user from section 3 in place of
+   `MYLIB` and `MYUSER` (the originals are in `<kit>/examples/demo/verbs/` and
+   `<kit>/examples/demo/`). The user may run the showcase `policy test` from Part E step 2.
+3. Restart: the server caches its verbs and reads the viewer setting at start, so the user restarts
+   it once (`/mcp`, restart `ibmi-agent-kit`). Wait.
+4. `verb_run` SEED-PREP. In enforce mode the user answers its question.
+5. `upload_source_member` once for each file in `<kit>/examples/showcase/src/`, into the user's
+   library and source file SEEDSRC, member = file name without extension, `localPath` the file,
+   `create: true`.
+6. `verb_run` SEED-BUILD. On a compile failure, `compile_member` on the member it names shows why;
+   stop there and show it.
+7. `session_open` with program `<library>/SEEDLST` and the library. Open the `Live view:` URL from
+   its result in the user's browser with the platform's opener: `start "" "<url>"` on Windows,
+   `open "<url>"` on macOS, `xdg-open "<url>"` on Linux. If that fails, show the URL.
+8. Drive the list with `screen_do` and look with `screen_snapshot`, as Part E step 7 lists. Pause
+   so the user can watch each screen.
+9. `run_tests` with the absolute path `<kit>/examples/showcase/screen-tests` and `session` set to
+   the open session, before the next step: the tests expect 8 rows.
+10. `verb_run` SEED-ADDROW, then F5 with `screen_do`: the new row shows in the open list.
+11. F3 with `screen_do`, then `session_close`.
+12. `verb_run` SEED-CLEAN. In enforce mode the user answers its question. If it stops at a missing
+    object, follow Part E step 11's recovery with `run_sql` and `run_script`, one step at a time.
