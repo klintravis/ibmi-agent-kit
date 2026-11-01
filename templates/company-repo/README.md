@@ -60,8 +60,8 @@ person whose credentials a policy guards can point a profile at it.
 ```
 
 `IBMI_5250_VIEWER=true` turns on the live view: opening a 5250 session starts a small page on your
-own machine, and the agent returns its URL, so you can watch the screen as it works. Delete that
-line to turn it off for everyone.
+own machine, and the agent returns its URL, so you can watch the screen as it works. Set it to
+`"false"` to turn it off for everyone.
 
 ## Profiles
 

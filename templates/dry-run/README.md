@@ -48,8 +48,8 @@ person whose credentials a policy guards can point a profile at it.
 
 `.mcp.json` starts the kit from `IBMI_KIT_HOME`, so it holds no path of anyone's machine.
 `IBMI_5250_VIEWER=true` in it turns on the live view: opening a 5250 session starts a small page on
-your own machine, and the agent returns its URL, so you can watch the screen as it works. Delete
-that line to turn it off for everyone.
+your own machine, and the agent returns its URL, so you can watch the screen as it works. Set it
+to `"false"` to turn it off for everyone.
 
 ## Profiles
 
