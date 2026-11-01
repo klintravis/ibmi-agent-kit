@@ -140,6 +140,7 @@ every role whose sources match, or `default_role` if none match or the lookup fa
 - **WHEN** the identity lookup itself fails, as on a 5250-only profile
 - **THEN** the profile's user is decided with `default_role`, the run log records that the lookup
   failed, and `danger` and `unqualified` are still denied
+- **AND** the next call tries the lookup again; the fallback is not kept
 
 ### Requirement: Ordered rules decide each operation, defaulting to deny
 Each operation SHALL be decided by the first rule whose `roles` (any held role), `partition`,

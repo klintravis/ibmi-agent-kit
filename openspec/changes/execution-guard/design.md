@@ -107,13 +107,16 @@ library patterns, which validation tells the user to quote.
 SQL connection: `CURRENT SERVER`; `QSYS2.USER_INFO` (group, supplemental groups) and
 `QSYS2.AUTHORIZATION_LIST_USER_INFO` for `CURRENT USER` (internal, not decided). 5250 session: the
 sign-on screen's `System . . . :` field. `systems:` matches the System name, `rdbs:` the RDB name;
-both and any `IBMI_PARTITION` must map to one partition. Cached per server.
+both and any `IBMI_PARTITION` must map to one partition. Cached per server once all three lookups
+answer (USER_INFO with no row is an answer).
 - *Identity lookup fails (owner ruling, 2026-10-31):* e.g. a 5250-only profile with no working SQL
   connection. The profile's user decides with no groups or authorization lists, so with
   `default_role` unless a `users:` role names them; the run-log line's `notes` say the lookup
   failed, and decisions go on as usual (danger and unqualified stay denied everywhere). Shared by
-  source, 5250 and `run_script`. The fallback is kept for a minute before the lookup is tried
-  again, so a dead SQL port does not cost a connect timeout on every key press.
+  source, 5250 and `run_script`. The fallback decides that call only and is not cached (owner
+  ruling, 2026-10-31): the next call tries the lookup again, so a SQL failure changes rights only
+  for the call it happened on. The same holds when the group or authorization-list query throws. The
+  cost: with a dead SQL port, every decided call (each guarded key press) waits for the lookup.
 - *5250 command lines run in the 5250 job,* whose current library and QTEMP the SQL job cannot see:
   `screen_command` classifies with no current library (`*CURLIB` is unqualified) and a QTEMP
   alias/view lookup that fails (a write through it is danger). Restricted mode and

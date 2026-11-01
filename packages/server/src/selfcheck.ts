@@ -374,14 +374,17 @@ type Row = Record<string, unknown>;
 // A box: answers the guard's own queries, records every script statement that reaches it. Like the
 // backend, a send checks the job generation after connecting and before sending.
 function stubConn(
-  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string; member?: string[]; identityThrows?: boolean } = {},
+  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string; member?: string[]; identityFails?: number; userInfoFails?: number } = {},
 ) {
   const sent: string[] = [];
   const queries: string[] = [];
   let curlibAsked = 0;
+  let identityFails = o.identityFails ?? 0; // the first N identity / USER_INFO queries throw (Infinity: all)
+  let userInfoFails = o.userInfoFails ?? 0;
   const own = (sql: string): Row[] | undefined => {
-    if (sql.startsWith("SELECT CURRENT SERVER") && o.identityThrows) throw new Error("connect ECONNREFUSED box:8076");
+    if (sql.startsWith("SELECT CURRENT SERVER") && identityFails-- > 0) throw new Error("connect ECONNREFUSED box:8076");
     if (sql.startsWith("SELECT CURRENT SERVER")) return [{ RDB: o.rdb ?? "DEVRDB", USR: o.user ?? "JDOE" }];
+    if (sql.includes("QSYS2.USER_INFO") && userInfoFails-- > 0) throw new Error("SQL0551 not authorized to USER_INFO");
     if (sql.includes("QSYS2.USER_INFO")) return o.userInfo === null ? [] : [o.userInfo ?? { G: "GRPDEV", S: "" }];
     if (sql.includes("AUTHORIZATION_LIST_USER_INFO")) return (o.authlists ?? []).map((a) => ({ A: a }));
     if (sql.includes("QSYS2.SYSVIEWDEP") && o.viewdepThrows) throw new Error("SQL0551 not authorized to SYSVIEWDEP");
@@ -1113,9 +1116,9 @@ test("6.2: a 5250 command line is decided against the 5250 job: *CURLIB is unqua
   }
 });
 
-test("6.2: a failed identity lookup decides as the profile's user with default_role, logged, and is not asked again on every key", async () => {
+test("6.3: a failed identity lookup decides as the profile's user with default_role, logged, and is asked again on the next key", async () => {
   const host = fakeScreen();
-  const k = await guardedKit({ policy: d4With("DEVBOX"), stub: stubConn({ identityThrows: true }), screen: () => host.s });
+  const k = await guardedKit({ policy: d4With("DEVBOX"), stub: stubConn({ identityFails: Infinity }), screen: () => host.s });
   try {
     assert.equal((await k.call("session_open", {})).error, false);
     const ok = await k.call("screen_do", { actions: ["type f1: DSPLIBL", "key: Enter"] });
@@ -1129,8 +1132,31 @@ test("6.2: a failed identity lookup decides as the profile's user with default_r
       [["analyst"], "default_lookup_failed", "deny"],
     ]);
     assert.match(lines[0].notes.join("\n"), /identity lookup failed, so JDOE from the profile decides with default_role: connect ECONNREFUSED/);
-    assert.equal(k.stub.queries.filter((q) => q.startsWith("SELECT CURRENT SERVER")).length, 1);
+    assert.equal(k.stub.queries.filter((q) => q.startsWith("SELECT CURRENT SERVER")).length, 2, "one lookup per guarded call: the fallback is not kept");
   } finally {
     await k.close();
   }
 });
+
+// Three run_script calls where the first lookup throws: the first decides with default_role, the
+// second asks again and holds the group's role, the third uses the cached success.
+async function retriedLookup(stub: ReturnType<typeof stubConn>, failed: RegExp, asked: string) {
+  const k = await guardedKit({ policy: D4, stub });
+  try {
+    for (const t of ["T", "U", "V"]) await k.call("run_script", { script: `SELECT * FROM LVORD.${t}` });
+    const lines = k.log();
+    assert.deepEqual(lines.map((l) => l.roles), [["analyst"], ["dev"], ["dev"]]);
+    assert.equal(lines[0].roleSource, "default_lookup_failed");
+    assert.match(lines[0].notes.join("\n"), failed);
+    assert.ok(!lines.slice(1).some((l) => l.notes?.length), "no failure note once the lookup works");
+    assert.equal(k.stub.queries.filter((q) => q.includes(asked)).length, 2, "asked again after the failure, then cached");
+  } finally {
+    await k.close();
+  }
+}
+
+test("6.3: an identity lookup that fails once is asked again on the next call, which holds the group role", () =>
+  retriedLookup(stubConn({ identityFails: 1 }), /identity lookup failed, so JDOE from the profile decides with default_role/, "SELECT CURRENT SERVER"));
+
+test("6.3: a group lookup that throws once is not cached: the next call reads the groups", () =>
+  retriedLookup(stubConn({ userInfoFails: 1 }), /group lookup for JDOE failed: SQL0551/, "QSYS2.USER_INFO"));

@@ -125,12 +125,8 @@ interface Box {
   groups?: string[]; // absent: USER_INFO had no row or failed, so roles fall back to default_role
   authlists?: string[];
   notes: string[];
-  failed?: boolean; // the identity lookup failed: asked again after IDENTITY_RETRY_MS
+  failed?: boolean; // a lookup threw: this call decides with what was read, the next one asks again
 }
-
-// A failed identity lookup is not asked again on every key press: a dead SQL port can cost a
-// connect timeout each time.
-const IDENTITY_RETRY_MS = 60_000;
 
 // SUPPLEMENTAL_GROUP_LIST: ten-character slots (a full name runs into the next, the last may be
 // trimmed), read as slots only when every padded slot is one name; otherwise blank-separated
@@ -142,7 +138,8 @@ export function supplementalGroups(list: string): string[] {
 
 // These lookups are the kit's own and are not decided. When the first fails (a 5250-only profile
 // with no working SQL connection, say), the profile's user decides with default_role (owner ruling
-// 2026-10-31) and `failed` is set; danger and unqualified are denied in every mode regardless.
+// 2026-10-31); danger and unqualified are denied in every mode regardless. Any of the three
+// throwing sets `failed`, so the box is not cached; USER_INFO with no row is an answer.
 async function readBox(conn: Conn): Promise<Box> {
   let me: Record<string, unknown> | undefined;
   try {
@@ -158,12 +155,14 @@ async function readBox(conn: Conn): Promise<Box> {
     if (u) box.groups = [str(u.G), ...supplementalGroups(String(u.S ?? ""))].map((g) => g.toUpperCase()).filter((g) => g && g !== "*NONE");
     else box.notes.push(`QSYS2.USER_INFO has no row for ${box.user}: groups unknown`);
   } catch (e) {
+    box.failed = true;
     box.notes.push(`group lookup for ${box.user} failed: ${(e as Error).message}`);
   }
   try {
     const rows = (await conn.query("SELECT AUTHORIZATION_LIST AS A FROM QSYS2.AUTHORIZATION_LIST_USER_INFO WHERE AUTHORIZATION_NAME = ?", [box.user])).rows;
     box.authlists = rows.map((r) => str(r.A).toUpperCase()).filter(Boolean);
   } catch (e) {
+    box.failed = true;
     box.notes.push(`authorization list lookup for ${box.user} failed: ${(e as Error).message}`);
   }
   return box;
@@ -397,7 +396,7 @@ export function registerGuarded(
       const read = (p = readBox(conn));
       boxes.set(server, read);
       const drop = () => boxes.get(server) === read && boxes.delete(server);
-      void read.then((b) => b.failed && setTimeout(drop, IDENTITY_RETRY_MS).unref(), drop); // a throw is asked again next call
+      void read.then((b) => b.failed && drop(), drop); // only a successful lookup is kept: a failed one is asked again next call
     }
     const box = await p;
     const names: PartitionNames = {};

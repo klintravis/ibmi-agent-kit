@@ -152,7 +152,7 @@ unqualified and a write through an alias or view in `QTEMP` is denied. A menu op
 typed on a `===>` line is not decided; any other text there that is not a command is denied. Each
 decision reads the user's identity over SQL; when that lookup fails (a profile with no working SQL
 connection, say), the profile's user decides with `default_role`, the run log says the lookup
-failed, and it is tried again after a minute.
+failed, and the next decision tries the lookup again.
 These decisions, and those of `run_script` and `verb_run`, go to a local run log. Read [packages/guard/README.md](packages/guard/README.md) for how it works and
 [docs/policy.md](docs/policy.md) for the policy file, and [docs/verbs.md](docs/verbs.md) for verbs.
 
@@ -233,9 +233,9 @@ rules:                                    # first match wins; omitted key or `an
   guard reads these over SQL as the signed-on user.
 - **When the identity lookup fails** (a 5250-only profile with no working SQL connection, say), the
   guard decides as the profile's user with `default_role`, and the run log says so. User-name roles
-  still match, and `danger` operations and unqualified changes stay denied. A failed lookup is
-  retried after about 60 seconds and decides with `default_role` until then, so keep `default_role`
-  your narrowest role.
+  still match, and `danger` operations and unqualified changes stay denied. Only a successful
+  lookup is kept: after a failure the next call tries again. Keep `default_role` your narrowest
+  role.
 - **`confirm`** asks the user once through MCP elicitation, naming each operation. Only an accepted
   form with `confirm: true` runs; a client without elicitation, a decline, a cancel and the 120 second
   timeout all deny.

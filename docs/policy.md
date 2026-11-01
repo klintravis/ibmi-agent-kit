@@ -80,7 +80,7 @@ roles:
 default_role: analyst
 ```
 
-A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match. If the identity lookup itself fails (a profile with no working SQL connection, as a 5250-only one may be), the profile's user is decided the same way with no groups, so usually as `default_role`; the run log notes the failure, it is tried again after about 60 seconds, and `danger` operations and unqualified changes stay denied in every mode.
+A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match. If the identity lookup itself fails (a profile with no working SQL connection, as a 5250-only one may be), the profile's user is decided the same way with no groups, so usually as `default_role`; the run log notes the failure, and `danger` operations and unqualified changes stay denied in every mode. Only a successful lookup is kept: after either failure the next call looks the user up again. Keep `default_role` your narrowest role.
 
 ### Rules
 
