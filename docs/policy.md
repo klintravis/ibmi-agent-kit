@@ -210,13 +210,16 @@ See [Run log in the guard README](../packages/guard/README.md#run-log). It is a 
 {"time":"2026-03-02T14:05:11.482Z","call":"6f1c2d9e-7a40-4b0e-9c1d-3a5b8e2f1d77","index":0,"server":"dev",
  "tool":"run_script","identity":{"user":"JDOE","groups":["GRPDEV"],"authlists":[],"partition":"dev"},
  "roles":["dev"],"roleSource":"matched","partition":"dev","mode":"observe","policy":"9b2e...41c7",
- "kind":"sql","text":"SELECT * FROM CMPRD.ORDHDR WHERE ORDNO = 1042",
- "operations":[{"class":"read","object":{"lib":"CMPRD","name":"ORDHDR"},"env":"devlibs","partition":"dev",
-   "decision":"allow","enforced":false,"reason":"rule","rule":5,"message":"allowed by rule 5"}],
- "rule":5,"decision":"allow","effective":"allow","enforced":false,"outcome":"ok"}
+ "kind":"sql","text":"SELECT * FROM DVLIB.ORDHDR WHERE ORDNO = 1042",
+ "operations":[{"class":"read","object":{"lib":"DVLIB","name":"ORDHDR"},"env":"devlibs","partition":"dev",
+   "decision":"allow","enforced":false,"reason":"rule","rule":5,
+   "message":"rule 5 allows read DVLIB.ORDHDR (environment devlibs, partition dev)"}],
+ "lookups":{},"rule":5,"decision":"allow","effective":"allow","enforced":false,"outcome":"1 row(s)"}
 ```
 
-`decision` is what the policy says, `effective` what happened (in observe mode a deny still runs, with `enforced: false`).
+`lookups` is on a call's first line only, and is empty here because no catalog lookup was needed. `policy_check` never writes the run log.
+
+`decision` is what the policy says, `effective` what happened (in observe mode a rule's deny still runs, with `enforced: false`).
 
 ## Limits
 

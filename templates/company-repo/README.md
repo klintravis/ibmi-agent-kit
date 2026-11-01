@@ -97,7 +97,7 @@ What the agent used to do by habit now goes through a kit tool, so the guard dec
 |---|---|
 | Typed CL on a 5250 command line, ad-hoc SQL | `run_script`, `run_sql`, or a named procedure with `verb_run` |
 | Read, edit and compile source | `read_source_member`, `upload_source_member`, `compile_member`, `search_source` |
-| `ADDLIBL` / `ADDLIBLE` | `manage_library_list` |
+| `ADDLIBLE` | `manage_library_list` |
 
 In a skill, tell Claude to pass `server` (a name from `list_servers`) on every call, and to call
 `policy_check` with the `verb` and its `args` before `verb_run`. Skeleton:
@@ -133,15 +133,17 @@ List a change-management or cross-reference product's commands in `commands.yaml
 - Read-only lookups and refresh or write commands are different classes. Give the lookups
   `class: read` and the refreshes and checkouts `class: write` (or your own class), so a rule can
   allow one and not the other.
-- Give every rule for a vendor command's class an `env:`. A rule with only `classes:` matches the
-  command in any library.
-- Add an environment for the product libraries and allow `liblist` and `read` there, so the
-  product's commands can be reached and read:
+- The guard decides a vendor command per library or object its `params` name, so a rule's `env:`
+  matches those, not the command's own `library:`. A command with no such parameter (a lookup by
+  request number) has no environment: give it a class of its own (`cm_lookup`) and a rule without
+  `env:`. A rule with `env:` never matches it, and it is denied. `CMCHKOUT` below is decided
+  against the libraries in `OBJ` and `SRCLIB`, so the write rule names the environment of the
+  libraries people check out of.
 
 ```yaml
 # commands.yaml (invented product)
 commands:
-  WRKCMREQ: { class: read, library: CMPRD, positional: [REQ] }
+  WRKCMREQ: { class: cm_lookup, library: CMPRD, positional: [REQ] }
   CMCHKOUT: { class: write, library: CMPRD, positional: [REQ, OBJ, SRCLIB], params: { OBJ: object, SRCLIB: library } }
   XRFREFRSH: { class: write, library: XREF, positional: [LIB], params: { LIB: library } }
 ```
@@ -150,20 +152,34 @@ commands:
 # policy.yaml
 environments:
   - { name: products, libraries: [CMPRD, XREF] }
+  - { name: devlibs, match: ["DV*"] }
+roles:
+  - { name: dev, groups: [GRPDEV] }
 rules:
+  - { classes: [cm_lookup], decision: allow }
   - { env: products, classes: [liblist, read], decision: allow }
-  - { roles: [dev], env: products, classes: [write], decision: confirm }
+  - { roles: [dev], env: [devlibs, products], classes: [write], decision: confirm }
+```
+
+Cases for `policy.tests.yaml` that prove it (each `as` is `{ user: JDOE, groups: [GRPDEV] }`):
+
+```yaml
+- { name: lookup, as: { user: JDOE, groups: [GRPDEV] }, script: "CL: CMPRD/WRKCMREQ 123", expect: allow }
+- { name: checkout asks, as: { user: JDOE, groups: [GRPDEV] }, script: "CL: CMPRD/CMCHKOUT REQ(1) OBJ(DVLIB/PGM1) SRCLIB(DVLIB)", expect: confirm }
+- { name: unqualified refused, as: { user: JDOE, groups: [GRPDEV] }, script: "CL: CMCHKOUT REQ(1) OBJ(DVLIB/PGM1)", expect: deny }
 ```
 
 ## Denied even in observe mode
 
-`mode: observe` lets a denied statement run, except these, which are denied in every mode:
+`mode: observe` lets a denied statement run, except `danger` operations, unqualified changes and a
+partition conflict, which are denied in every mode; see [docs/policy.md](../../docs/policy.md#rules).
+The cases a vendor setup meets most:
 
 - `SBMJOB` wrapping a command: the job runs elsewhere, unseen. Call the command directly, or wrap the work in a verb.
 - `QSH` and `STRQSH` (Qshell): opaque to the guard. Use the CL or SQL it would run, or a verb.
 - A CL variable (`&VAR`) in a parameter: its value is known only at run time. Write the value, or pass it as a verb argument.
 - An unqualified vendor command whose entry has a `library:`. Qualify it to its product library (`CMPRD/CMCHKOUT`).
-- A command not in the table, qualified to a product library. Add it to `commands.yaml`, or call it from a verb once it is classified.
+- A qualified command not in the table. Add it to `commands.yaml`, or call it from a verb once it is classified.
 
 ## Policy and tests
 
