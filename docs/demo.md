@@ -67,10 +67,14 @@ and go on. Stop only on an unexpected error.
    - SELECT AUTHORIZATION_LIST AS A FROM QSYS2.AUTHORIZATION_LIST_USER_INFO WHERE AUTHORIZATION_NAME = CURRENT USER
    - SELECT BASE_TABLE_SCHEMA AS L, BASE_TABLE_NAME AS N FROM QSYS2.SYSTABLES WHERE TABLE_TYPE = 'A' AND SYSTEM_TABLE_SCHEMA = 'MYLIB'
    - SELECT OBJECT_SCHEMA AS L, OBJECT_NAME AS N FROM QSYS2.SYSVIEWDEP WHERE SYSTEM_VIEW_SCHEMA = 'MYLIB'
+   - SELECT SYSTEM_SCHEMA_NAME AS S FROM QSYS2.SYSSCHEMAS WHERE SCHEMA_NAME = 'MYLIB'
    - SELECT SYSTEM_SCHEMA_NAME AS S FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT'
    Expected: each returns (possibly zero) rows. If one is refused, say which. What it means:
-   USER_INFO or AUTHORIZATION_LIST_USER_INFO refused: the guard decides with the profile's user and
-   default_role. SYSTABLES or SYSVIEWDEP refused: the guard denies writes through a view or alias.
+   SYSDUMMY1 refused: the profile's user decides with default_role. USER_INFO or
+   AUTHORIZATION_LIST_USER_INFO refused: roles from groups and authorization lists are dropped;
+   roles by user name still match, otherwise default_role. SYSTABLES or SYSVIEWDEP refused: the
+   guard denies writes through a view or alias. SYSSCHEMAS refused: a long SQL schema name is not
+   mapped to its system name. LIBRARY_LIST_INFO refused: changes to `*CURLIB` objects are refused as unqualified.
 ```
 
 **Human**, in a terminal: `node <abs path>/packages/server/dist/index.js policy replay <demo folder>/demo/policy-observe.yaml --since 1`.
