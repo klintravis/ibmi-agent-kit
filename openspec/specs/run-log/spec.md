@@ -43,3 +43,13 @@ Documentation SHALL describe the log as a local run log the user can edit, not a
 #### Scenario: README wording
 - **WHEN** the README describes the log
 - **THEN** it calls it a run log and says it is not tamper-proof
+
+### Requirement: Undeclared parameter warnings are logged
+The run log SHALL record each undeclared-parameter warning of a guarded call in that call's notes
+(on its first line, as other notes are), so a team reviewing the log sees commands whose libraries
+were not decided. The line format SHALL NOT change.
+
+#### Scenario: Run with an undeclared keyword
+- **WHEN** `run_script` decides `CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)` and the `XYZCPY`
+  entry does not name `TOLIB`
+- **THEN** the call's first run log line has a note naming `XYZCPY` and `TOLIB`
