@@ -374,18 +374,20 @@ type Row = Record<string, unknown>;
 // A box: answers the guard's own queries, records every script statement that reaches it. Like the
 // backend, a send checks the job generation after connecting and before sending.
 function stubConn(
-  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string; member?: string[]; identityFails?: number; userInfoFails?: number } = {},
+  o: { rdb?: string; user?: string; userInfo?: Row | null; authlists?: string[]; readOnly?: boolean; blockedTables?: string[]; failOn?: string; resetOn?: string; curlib?: string[]; viewdepThrows?: boolean; hangOn?: string; member?: string[]; identityFails?: number; userInfoFails?: number; authlistFails?: number } = {},
 ) {
   const sent: string[] = [];
   const queries: string[] = [];
   let curlibAsked = 0;
   let identityFails = o.identityFails ?? 0; // the first N identity / USER_INFO queries throw (Infinity: all)
   let userInfoFails = o.userInfoFails ?? 0;
+  let authlistFails = o.authlistFails ?? 0;
   const own = (sql: string): Row[] | undefined => {
     if (sql.startsWith("SELECT CURRENT SERVER") && identityFails-- > 0) throw new Error("connect ECONNREFUSED box:8076");
     if (sql.startsWith("SELECT CURRENT SERVER")) return [{ RDB: o.rdb ?? "DEVRDB", USR: o.user ?? "JDOE" }];
     if (sql.includes("QSYS2.USER_INFO") && userInfoFails-- > 0) throw new Error("SQL0551 not authorized to USER_INFO");
     if (sql.includes("QSYS2.USER_INFO")) return o.userInfo === null ? [] : [o.userInfo ?? { G: "GRPDEV", S: "" }];
+    if (sql.includes("AUTHORIZATION_LIST_USER_INFO") && authlistFails-- > 0) throw new Error("SQL0551 not authorized to AUTHORIZATION_LIST_USER_INFO");
     if (sql.includes("AUTHORIZATION_LIST_USER_INFO")) return (o.authlists ?? []).map((a) => ({ A: a }));
     if (sql.includes("QSYS2.SYSVIEWDEP") && o.viewdepThrows) throw new Error("SQL0551 not authorized to SYSVIEWDEP");
     if (sql.includes("QSYS2.LIBRARY_LIST_INFO")) {
@@ -1139,13 +1141,13 @@ test("6.3: a failed identity lookup decides as the profile's user with default_r
 });
 
 // Three run_script calls where the first lookup throws: the first decides with default_role, the
-// second asks again and holds the group's role, the third uses the cached success.
-async function retriedLookup(stub: ReturnType<typeof stubConn>, failed: RegExp, asked: string) {
+// second asks again and holds the role it grants, the third uses the cached success.
+async function retriedLookup(stub: ReturnType<typeof stubConn>, failed: RegExp, asked: string, role = "dev") {
   const k = await guardedKit({ policy: D4, stub });
   try {
     for (const t of ["T", "U", "V"]) await k.call("run_script", { script: `SELECT * FROM LVORD.${t}` });
     const lines = k.log();
-    assert.deepEqual(lines.map((l) => l.roles), [["analyst"], ["dev"], ["dev"]]);
+    assert.deepEqual(lines.map((l) => l.roles), [["analyst"], [role], [role]]);
     assert.equal(lines[0].roleSource, "default_lookup_failed");
     assert.match(lines[0].notes.join("\n"), failed);
     assert.ok(!lines.slice(1).some((l) => l.notes?.length), "no failure note once the lookup works");
@@ -1160,3 +1162,6 @@ test("6.3: an identity lookup that fails once is asked again on the next call, w
 
 test("6.3: a group lookup that throws once is not cached: the next call reads the groups", () =>
   retriedLookup(stubConn({ userInfoFails: 1 }), /group lookup for JDOE failed: SQL0551/, "QSYS2.USER_INFO"));
+
+test("6.3: an authorization-list lookup that throws once is not cached: the next call holds the list's role", () =>
+  retriedLookup(stubConn({ userInfo: { G: "*NONE", S: "" }, authlists: ["AUTLQA"], authlistFails: 1 }), /authorization list lookup for JDOE failed: SQL0551/, "AUTHORIZATION_LIST_USER_INFO", "qa"));

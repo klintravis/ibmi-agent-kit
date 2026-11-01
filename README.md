@@ -234,8 +234,9 @@ rules:                                    # first match wins; omitted key or `an
 - **When the identity lookup fails** (a 5250-only profile with no working SQL connection, say), the
   guard decides as the profile's user with `default_role`, and the run log says so. User-name roles
   still match, and `danger` operations and unqualified changes stay denied. Only a successful
-  lookup is kept: after a failure the next call tries again. Keep `default_role` your narrowest
-  role.
+  lookup is kept: after a failure the next call tries again. With a SQL connection configured but
+  not reachable, every guarded call, including each 5250 key that sends a command line, waits for
+  the lookup to fail (up to the connect time limit). Keep `default_role` your narrowest role.
 - **`confirm`** asks the user once through MCP elicitation, naming each operation. Only an accepted
   form with `confirm: true` runs; a client without elicitation, a decline, a cancel and the 120 second
   timeout all deny.
