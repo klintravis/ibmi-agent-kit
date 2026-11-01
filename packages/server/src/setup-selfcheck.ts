@@ -106,6 +106,8 @@ test("setup: an update keeps other lines and comments, Enter keeps values, the p
     const r = await run(["prod"], ["\r", "newuser\r", "\r", relative(process.cwd(), policy) + "\r"]);
     assert.equal(r.code, 0, r.out + r.err);
     assert.match(r.out, /\[old\.example\.com\]/, "current values are offered");
+    assert.match(r.out, /password \(Enter keeps the current one\): /, "same host keeps the password");
+    assert.doesNotMatch(r.out, /is replaced by/);
     const text = readFileSync(join(dir, ".env.prod"), "utf8");
     for (const keep of ["# prod box, ask ops before changing", "IBMI_SSH_PORT=2222 # jump host", "# trailing note"]) assert.ok(text.includes(keep), text);
     const env = resolveProfileEnv("prod");
@@ -340,6 +342,31 @@ test("setup in a company repo: the IBMI_KIT_HOME hint only when .mcp.json uses i
     assert.equal(c.code, 0, c.out + c.err);
     assert.match(c.out, /IBM i host: h/);
     assert.doesNotMatch(c.out, /company config repo/);
+  }));
+
+test("setup: a profile on another host never keeps its password", () =>
+  isolated(async (dir) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".env.prod"), `IBMI_HOST=old.example.com\nIBMI_USER=bob\nIBMI_PASSWORD=${OLDPW}\n`);
+    seen.length = 0;
+    // host, user kept, Enter at the password rejected, password, policy left
+    const r = await run(["prod"], ["new.example.com\r", "\r", "\r", "plainpw\r", "\r"]);
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.match(r.out, /IBMI_HOST old\.example\.com is replaced by new\.example\.com\n/);
+    assert.match(r.out, /\npassword: \npassword: \n/, "Enter does not keep the old host's password");
+    assert.doesNotMatch(r.out, /Enter keeps the current one/);
+    assert.ok(seen.every((e) => e.IBMI_PASSWORD !== OLDPW), "the old host's password was sent");
+    assert.ok(!readFileSync(join(dir, ".env.prod"), "utf8").includes(OLDPW));
+    const env = resolveProfileEnv("prod");
+    assert.deepEqual([env.IBMI_HOST, env.IBMI_USER, env.IBMI_PASSWORD], ["new.example.com", "bob", "plainpw"]);
+    // a profile with a password but no host never offers it either
+    writeFileSync(join(dir, ".env.nohost"), `IBMI_USER=bob\nIBMI_PASSWORD=${OLDPW}\n`);
+    seen.length = 0;
+    const n = await run(["nohost"], ["h.example.com\r", "\r", "\r", "plainpw\r", "\r"]);
+    assert.equal(n.code, 0, n.out + n.err);
+    assert.doesNotMatch(n.out, /Enter keeps the current one|is replaced by/);
+    assert.ok(seen.every((e) => e.IBMI_PASSWORD !== OLDPW), "the old password was sent");
+    assert.ok(!readFileSync(join(dir, ".env.nohost"), "utf8").includes(OLDPW));
   }));
 
 test("setup: no password ever reaches stdout or stderr", () => {

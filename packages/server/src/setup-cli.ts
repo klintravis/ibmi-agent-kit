@@ -235,10 +235,6 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   let keep: string | undefined = cur.IBMI_PASSWORD;
   if (repo) {
     out(`partition ${skeleton.IBMI_PARTITION} on host ${skeleton.IBMI_HOST}\n`);
-    if (cur.IBMI_HOST !== skeleton.IBMI_HOST) {
-      keep = undefined;
-      if (cur.IBMI_HOST) out(`IBMI_HOST ${cur.IBMI_HOST} is replaced by ${skeleton.IBMI_HOST}\n`);
-    }
   }
 
   let password = "";
@@ -253,6 +249,12 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
     // In a company repo the skeleton's settings (host, partition, transport, ports, guards) are the company's.
     if (repo) values.push(...Object.entries(skeleton).filter(([k]) => !OWN.has(k)));
     else values.push(["IBMI_HOST", await required("IBM i host", cur.IBMI_HOST)]);
+    // Both modes: a host other than the stored one (or none stored) never keeps the stored password.
+    const host = values.find(([k]) => k === "IBMI_HOST")![1];
+    if (host !== cur.IBMI_HOST) {
+      keep = undefined;
+      if (cur.IBMI_HOST) out(`IBMI_HOST ${cur.IBMI_HOST} is replaced by ${host}\n`);
+    }
     values.push(["IBMI_USER", await required("IBM i user", cur.IBMI_USER)]);
     while (!password) password = (await ask(keep ? "password (Enter keeps the current one): " : "password: ", true)) || keep || "";
     values.push(["IBMI_PASSWORD", password]);
