@@ -161,9 +161,25 @@ test("setup: a failed connection prints one line without the password; the file 
     assert.match(r.out, /\nfailed: login failed for .*\*\*\*/);
     assert.ok(closed, "the connection is closed");
     assert.ok(existsSync(join(dir, ".env.dev")));
+    const before = readFileSync(join(dir, ".env.dev"), "utf8");
     const p = await run(["dev"], ["\r", "\r", "\r", join(dir, "missing.yaml") + "\r"]);
-    assert.equal(p.code, 1);
-    assert.match(p.out, /failed: policy file not found/);
+    assert.equal(p.code, 2);
+    assert.match(p.err, /IBMI_KIT_POLICY .*policy file not found.*Nothing was written/);
+    assert.equal(readFileSync(join(dir, ".env.dev"), "utf8"), before, "a bad policy answer is not saved");
+    assert.equal(resolveProfileEnv("dev").IBMI_KIT_POLICY, undefined);
+  }));
+
+test("setup: a quoted policy path and a ~ path are cleaned before they are saved", () =>
+  isolated(async (dir) => {
+    const home = process.env.HOME!;
+    copyFileSync(POLICY, join(home, "pol.yaml"));
+    const q = await run(["dev"], ["h\r", "u\r", "plainpw\r", `"${join(home, "pol.yaml")}"\r`]);
+    assert.equal(q.code, 0, q.out + q.err);
+    assert.equal(resolveProfileEnv("dev").IBMI_KIT_POLICY, join(home, "pol.yaml"));
+    const t = await run(["dev"], ["\r", "\r", "\r", "~/pol.yaml\r"]);
+    assert.equal(t.code, 0, t.out + t.err);
+    assert.equal(resolveProfileEnv("dev").IBMI_KIT_POLICY, join(home, "pol.yaml"));
+    assert.ok(existsSync(dir));
   }));
 
 test("setup: no password ever reaches stdout or stderr", () => {

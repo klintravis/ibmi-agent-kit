@@ -243,6 +243,11 @@ test("demo skill: frontmatter, tool names, repo paths and the connection SELECT 
   const root = join(EXAMPLES, "..");
   const md = readFileSync(join(root, ".claude/skills/demo/SKILL.md"), "utf8");
   assert.match(md, /^---\nname: demo\n/);
+  for (const s of ["dist/index.js setup <name>", "claude mcp get ibmi-agent-kit", "reset-project-choices", "disabledMcpjsonServers"]) assert.ok(md.includes(s), `SKILL.md lacks ${s}`);
+  const guide = readFileSync(join(root, "docs/demo.md"), "utf8");
+  for (const s of ["IBMI_5250_VIEWER", "IBMI_5250_VIEWER_PORT"]) assert.ok(guide.includes(s), `docs/demo.md lacks ${s}`);
+  const refuse = readFileSync(join(root, ".claude/skills/ibmi-kit-config/SKILL.md"), "utf8");
+  for (const s of ["`package.json`", "`packages/`"]) assert.ok(refuse.includes(s), `ibmi-kit-config lacks ${s}`);
   const desc = md.match(/^description: (.*)$/m)![1];
   for (const p of ["demo", "quick start", "try the kit", "set up my connection"]) assert.ok(desc.includes(`"${p}"`), p);
   const { kit, client } = await connected();

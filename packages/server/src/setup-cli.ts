@@ -2,9 +2,10 @@
 // by reading the file back and connecting. Returns the exit code: 0 OK, 1 the test failed (the file
 // stays written), 2 a usage error or refusal (nothing written), 130 cancelled (nothing written).
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
-import { CONFIG_DIRS, listServers, parseProfile, resolveProfileEnv, serverName } from "@ibmi-agent-kit/core";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { CONFIG_DIRS, parseProfile, resolveProfileEnv, serverName } from "@ibmi-agent-kit/core";
 import { loadPolicy } from "@ibmi-agent-kit/guard";
 import { loadProfile, MapepireBackend } from "@ibmi-agent-kit/source/tools";
 
@@ -143,7 +144,7 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   const cur = parseProfile(old);
   out(`${old ? "updating" : "creating"} ${path}\n`);
   const shadowed = later.map((d) => join(d, file)).find((p) => existsSync(p));
-  if (shadowed) out(`note: ${shadowed} also defines "${name}"; the file above takes precedence and nothing is copied from it\n`);
+  if (shadowed) out(`note: ${shadowed} also defines "${name}"; the file above takes precedence and nothing is copied from it, so its other settings, guards like IBMI_READ_ONLY, IBMI_KIT_POLICY and IBMI_BLOCKED_CL included, stop applying to "${name}". Ctrl-C now to stop.\n`);
 
   let password = "";
   const values: [string, string][] = [];
@@ -159,12 +160,24 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
     values.push(["IBMI_USER", await required("IBM i user", cur.IBMI_USER)]);
     while (!password) password = (await ask(cur.IBMI_PASSWORD ? "password (Enter keeps the current one): " : "password: ", true)) || cur.IBMI_PASSWORD || "";
     values.push(["IBMI_PASSWORD", password]);
-    const policy = (await ask(`policy file, absolute or relative to here (Enter leaves it ${cur.IBMI_KIT_POLICY ? `as ${cur.IBMI_KIT_POLICY}` : "unset"}): `)).trim();
-    if (policy) values.push(["IBMI_KIT_POLICY", resolve(policy)]);
+    // One pair of surrounding quotes (Windows "Copy as path") is dropped and a leading ~ expands.
+    const policy = (await ask(`policy file, absolute or relative to here (Enter leaves it ${cur.IBMI_KIT_POLICY ? `as ${cur.IBMI_KIT_POLICY}` : "unset"}): `)).trim().replace(/^(["'])(.*)\1$/, "$2");
+    if (policy) values.push(["IBMI_KIT_POLICY", resolve(/^~(?=[\\/]|$)/.test(policy) ? homedir() + policy.slice(1) : policy)]);
   } catch (e) {
     if (!(e instanceof Cancelled)) throw e;
     err("cancelled, nothing written\n");
     return 130;
+  }
+
+  // A bad policy stops the server for every profile at startup, so it is checked before the write.
+  const policyPath = values.find(([k]) => k === "IBMI_KIT_POLICY")?.[1];
+  if (policyPath) {
+    try {
+      loadPolicy(policyPath);
+    } catch (e) {
+      err(`IBMI_KIT_POLICY ${policyPath}: ${message(e)}. Nothing was written.\n`);
+      return 2;
+    }
   }
 
   // Prove the new text reads back as meant, every other setting included, before it touches the disk.
@@ -183,10 +196,12 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   }
 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const tmp = join(dir, `setup-${process.pid}-${randomBytes(4).toString("hex")}.tmp`); // never `.env.*`, so never listed
+  // A symlinked profile is written through, so the link survives the rename.
+  const target = existsSync(path) ? realpathSync(path) : path;
+  const tmp = join(dirname(target), `setup-${process.pid}-${randomBytes(4).toString("hex")}.tmp`); // never `.env.*`, so never listed
   try {
     writeFileSync(tmp, next, { flag: "wx", mode: 0o600 });
-    renameSync(tmp, path);
+    renameSync(tmp, target);
   } catch (e) {
     rmSync(tmp, { force: true });
     err(`cannot write ${path}: ${message(e)}\n`);
@@ -199,11 +214,10 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   let probe: Probe | undefined;
   try {
     const env = resolveProfileEnv(name);
-    if (!listServers().includes(name)) throw new Error(`"${name}" is not among the listed servers`);
     const policy = env.IBMI_KIT_POLICY?.trim();
     if (policy) {
       if (!isAbsolute(policy)) throw new Error(`IBMI_KIT_POLICY must be an absolute path, not ${policy}`);
-      loadPolicy(policy); // a bad policy would stop the server at startup
+      loadPolicy(policy); // a policy kept from the old file may be bad; it would stop the server at startup
     }
     probe = deps.connect(env);
     const [row] = (await probe.query(SETUP_SQL)).rows;

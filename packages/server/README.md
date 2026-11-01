@@ -62,9 +62,9 @@ Writes or updates one profile and tests it. No name means `default`, so the file
 
 1. It asks for the host and the user. If the file already exists, its values are shown in brackets and Enter keeps them.
 2. It asks for the password without showing it. Enter keeps the current one. Backspace edits, and Ctrl-C quits without writing anything.
-3. It asks for a policy file. A relative path is stored as an absolute `IBMI_KIT_POLICY`. Enter leaves the setting as it is.
+3. It asks for a policy file. One pair of surrounding quotes is dropped, a leading `~` expands to your home folder and a relative path is stored as an absolute `IBMI_KIT_POLICY`. The policy is loaded before anything is saved: if it is missing or invalid, `setup` prints the reason, writes nothing and exits 2. Enter leaves the setting as it is.
 4. It saves the file. It replaces only those settings and keeps every other line and comment. The write goes through a temp file and a rename, so you never get a half-written profile. On macOS and Linux the file gets mode `600`.
-5. It reads the profile back from the file, checks the name is in `list_servers` and loads the policy. It then connects the way the server does and runs `SELECT CURRENT USER, CURRENT SERVER FROM SYSIBM.SYSDUMMY1`. It prints one line: `OK: <name> signs on as <user> to <rdb>`, or `failed:` with the reason. A failed test keeps the file and exits 1.
+5. It reads the profile back from the file, and, if the file already held a policy, loads that. It then connects the way the server does and runs `SELECT CURRENT USER, CURRENT SERVER FROM SYSIBM.SYSDUMMY1`. It prints one line: `OK: <name> signs on as <user> to <rdb>`, or `failed:` with the reason. A failed test keeps the file and exits 1.
 
 Notes:
 

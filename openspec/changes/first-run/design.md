@@ -51,9 +51,11 @@ or edit by hand on the first run.
   listed) with `wx` and 0600, rename over the target, unlink the temp on failure.
 - **Empty answers.** Host and user: Enter keeps the current value, and is asked again when there is
   none. Password: Enter keeps the existing one on an update. Policy: Enter leaves it as is.
-- **Test reads the file, not memory.** `resolveProfileEnv(name)` then `listServers()`; if the profile
-  sets `IBMI_KIT_POLICY`, `loadPolicy` must accept it (a bad policy stops the server at startup);
-  then the SELECT. The result line names user and RDB on success, or the reason on failure, with the
+- **Test reads the file, not memory.** A policy answer (surrounding quotes dropped, leading `~`
+  expanded) goes through `loadPolicy` before the write; a bad one prints the reason, writes nothing
+  and exits 2, because a bad `IBMI_KIT_POLICY` stops the server for every profile. Then
+  `resolveProfileEnv(name)` reads the file back (a policy kept from the old file is loaded too), then
+  the SELECT. The result line names user and RDB on success, or the reason on failure, with the
   password (raw, JSON-escaped, URI-encoded) removed. Exit 0 or 1; usage errors and refusals exit 2;
   Ctrl-C exits 130.
 - **A later folder with the same name.** When `~/.ibm-i-servers` (or another later folder) also holds
