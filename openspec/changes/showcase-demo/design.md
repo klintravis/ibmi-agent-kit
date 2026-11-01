@@ -151,9 +151,11 @@ B, C, D), works in either policy mode, and has its own clean-up step, so the doc
 is not needed for it. It covers, with an Expected line each:
 
 1. Viewer: if Setup step 3 left out `"env": { "IBMI_5250_VIEWER": "true" }`, add it to the demo
-   folder's `.mcp.json` and restart the server (`/mcp`). Never in the profile.
+   folder's `.mcp.json`. Never in the profile.
 2. Library: replace `MYLIB` and `MYUSER` in the copied `demo/verbs/SEED-*.yaml` and the two
-   showcase test files; optional `policy test` check of the showcase files.
+   showcase test files; optional `policy test` check of the showcase files. Then restart the
+   server once (`/mcp`): it reads a server's verbs once and caches them, and the viewer setting is
+   read at start too.
 3. `verb_run SEED-PREP` (enforce: one question for CRTSRCPF).
 4. `upload_source_member` six times, `create: true`, `localPath` `<kit>/examples/showcase/src/...`.
 5. `verb_run SEED-BUILD`. Expected: passes; the CALL step shows `SEEDTST: 9 passed, 0 failed`
