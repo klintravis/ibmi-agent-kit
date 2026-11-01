@@ -202,7 +202,7 @@ It prints each logged statement whose decision changes, and a count. It reads th
 
 To check one script or verb without a connection from an agent, call `policy_check` with `script` or `verb` (and `args`), `as` and, optionally, `policy`.
 
-Both warn, without changing a decision or the exit code, when a command is given a parameter its table entry does not name and the value looks like a library or object name: `policy test` prints `warning: <case>: <warning>` on stderr, `policy_check` returns a `warnings` list per statement. Add the parameter to the entry's `params` (or `positional`) to decide it.
+Both warn, without changing a decision or the exit code, when a command is given a parameter its table entry does not name and the value looks like a library or object name: `policy test` prints `warning: <case>: <warning>` on stderr, `policy_check` returns a `warnings` list per statement. Add the parameter to the entry's `params` to decide it; listing it only in `positional` silences the warning without deciding it.
 
 ## Run log
 

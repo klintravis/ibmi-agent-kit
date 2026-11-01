@@ -217,7 +217,7 @@ const objectText = (o: NonNullable<ClassifiedStatement["operations"][number]["ob
 
 // Per statement: the operations with object, partition, environment and class, the rule, the
 // decision, and why it does or does not run.
-function report(p: { statement: { kind?: string; display: string; warnings?: string[] }; decision: Decision; refused?: string }, i: number) {
+function report(p: { statement: { kind?: string; display: string }; decision: Decision; refused?: string }, i: number) {
   const d = p.decision;
   const r: Record<string, unknown> = {
     index: i + 1,
@@ -235,11 +235,13 @@ function report(p: { statement: { kind?: string; display: string; warnings?: str
       return op;
     }),
   };
-  if (p.statement.warnings?.length) r.warnings = p.statement.warnings;
   if (d.reason) r.reason = d.reason;
   if (p.refused) r.refused = p.refused;
   return r;
 }
+
+// Warnings ride on policy_check replies only, not on run_script's.
+const warn = (w?: string[]) => (w?.length ? { warnings: w } : {});
 
 const stopping = (p: Planned) => p.refused !== undefined || p.decision.effective === "deny";
 // A statement with no operations (COMMIT) is denied only at statement level, by a partition conflict.
@@ -738,7 +740,7 @@ export function registerGuarded(
           const input = verb !== undefined ? { verb, ...(args ? { args } : {}) } : { script };
           const [t] = await runPolicyTests(used, [{ name: "policy_check", as, ...input, expect: "allow" }], verb !== undefined ? deps.verbs(key(server)) : undefined);
           head = { policy: used.source, as, offline: true };
-          statements = t.statements.map((x, i) => report({ statement: { display: x.text, ...(x.warnings ? { warnings: x.warnings } : {}) }, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i));
+          statements = t.statements.map((x, i) => ({ ...report({ statement: { display: x.text }, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i), ...warn(x.warnings) }));
         } else {
           if (candidate) throw new Error("a candidate `policy` is decided offline: state the identity in `as` too");
           let identity: Identity;
@@ -749,13 +751,13 @@ export function registerGuarded(
             identity = ctx.identity;
             roles = r.statements[0]?.decision.roles ?? [];
             // A verb's read-only rule for requires_absent and expect refuses like a profile guard: deny.
-            statements = r.statements.map((x, i) => ({ ...report({ statement: x.statement, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i), verb: x.planned.verb, where: x.planned.where }));
+            statements = r.statements.map((x, i) => ({ ...report({ statement: x.statement, decision: x.decision, ...(x.refused ? { refused: x.refused } : {}) }, i), ...warn(x.statement.warnings), verb: x.planned.verb, where: x.planned.where }));
             head = { verb: r.verb, file: r.file };
           } else {
             const { plan: p } = await plan(key(server), script as string);
             identity = p.identity;
             roles = p.statements[0]?.decision.roles ?? [];
-            statements = p.statements.map(report);
+            statements = p.statements.map((s, i) => ({ ...report(s, i), ...warn(s.statement.warnings) }));
             head = {};
           }
           head = { server: key(server), partition: identity.partition, roles, user: identity.user, ...head };

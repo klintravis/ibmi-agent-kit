@@ -535,6 +535,7 @@ test("run log: run_script records the undeclared-parameter warning in the first 
   try {
     const r = await k.call("run_script", { script: "CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)" });
     assert.equal(r.error, false, r.text);
+    assert.ok(!r.text.includes("warnings"), "run_script reply carries no warnings key");
     const [line] = k.log();
     assert.ok(line.notes.includes(XYZ_WARN), JSON.stringify(line.notes));
   } finally {
