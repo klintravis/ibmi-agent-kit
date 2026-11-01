@@ -1,5 +1,5 @@
 // `ibmi-agent-kit policy test|replay` (design D9): offline, no IBM i and no MCP. Returns the exit
-// code: 0 done (replay lists changes and still exits 0), 1 a test case failed, 2 a usage or load error.
+// code: 0 done (replay lists changes and still exits 0), 1 a test case failed or a verb file is refused, 2 a usage or load error.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIRS } from "@ibmi-agent-kit/core";
@@ -56,15 +56,16 @@ export async function policyCli(args: string[], out: Write = (t) => console.log(
       const policy = loadPolicy(rest[0]);
       for (const w of policy.warnings) err(`warning: ${w}`);
       const cases = loadPolicyTests(rest[1]);
-      // Verb cases find verbs in the project and beside the policy; never a person's own, so CI
-      // decides the same everywhere.
-      const verbs = cases.some((c) => c.verb !== undefined) ? loadVerbs({ cwd: process.cwd(), policyFile: rest[0] }) : undefined;
-      for (const e of verbs?.errors ?? []) err(`warning: ${e}`);
+      // Verbs come from the project and beside the policy; never a person's own, so CI decides the
+      // same everywhere. Always loaded: a verb file the server would refuse must fail CI too.
+      const verbs = loadVerbs({ cwd: process.cwd(), policyFile: rest[0] });
+      for (const e of verbs.errors) err(`error: ${e}`);
       const results = await runPolicyTests(policy, cases, verbs);
       const failed = results.filter((r) => !r.ok);
       for (const r of failed) out(describeFailure(r));
       out(failed.length ? `${failed.length} of ${results.length} cases failed` : `${results.length} cases passed`);
-      return failed.length ? 1 : 0;
+      if (verbs.errors.length) out(`${verbs.errors.length} verb file problem(s)`);
+      return failed.length || verbs.errors.length ? 1 : 0;
     }
     if (cmd === "replay" && (rest.length === 1 || (rest.length === 3 && rest[1] === "--since"))) {
       const since = rest[2] === undefined ? undefined : Number(rest[2]);

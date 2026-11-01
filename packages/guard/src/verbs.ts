@@ -21,7 +21,7 @@ const text = z.string().min(1);
 
 const paramSchema = z
   .object({
-    type: z.enum(["string", "integer", "decimal", "date", "boolean"]),
+    type: z.enum(["string", "name", "integer", "decimal", "date", "boolean"]),
     required: z.boolean().optional(),
     default: scalar.optional(),
     allowed: z.array(scalar).min(1).optional(),
@@ -108,7 +108,7 @@ export type Values = Record<string, Value>;
 
 // --- parameter values ---
 
-const EXPECTED = { string: "a string", integer: "an integer", decimal: "a decimal number", date: "a date (YYYY-MM-DD)", boolean: "true or false" };
+const EXPECTED = { string: "a string", name: "an object name (up to 10 characters: letters, digits, $ # @ _ .)", integer: "an integer", decimal: "a decimal number", date: "a date (YYYY-MM-DD)", boolean: "true or false" };
 const show = (v: unknown) => (typeof v === "string" ? JSON.stringify(v) : String(v));
 
 // `v` as a value of `type`, normalised (decimals stay strings, so no digit is lost); undefined if
@@ -117,6 +117,8 @@ function typed(type: VerbParam["type"], v: unknown): Value | undefined {
   switch (type) {
     case "string":
       return typeof v === "string" ? v : undefined;
+    case "name": // no quote, blank, parenthesis, comma or &: safe in CL text, in or out of quotes
+      return typeof v === "string" && /^[A-Za-z$#@][A-Za-z0-9$#@_.]{0,9}$/.test(v) ? v.toUpperCase() : undefined;
     case "boolean":
       return typeof v === "boolean" ? v : undefined;
     case "integer": {
@@ -258,7 +260,7 @@ function templateErrors(t: string, kind: TemplateKind, params: Record<string, Ve
     else if (!p) errors.push(`${ref} is not a parameter`);
     else if (r.ctx === "comment") errors.push(`${ref} is inside a comment`);
     else if (kind === "cl" && p.type === "boolean") errors.push(`${ref}: a boolean has no CL form; use a string parameter with allowed: ['*YES', '*NO']`);
-    else if (p.type === "string" && !p.allowed) errors.push(`${ref}: parameter ${r.name} is a string with no allowed list, so it would be free text${kind === "sql" ? `; use :${r.name}` : ""}`);
+    else if (p.type === "string" && !p.allowed) errors.push(`${ref}: parameter ${r.name} is a string with no allowed list, so it would be free text${kind === "sql" ? `; use :${r.name}` : ""}${kind === "cl" ? "; for an object name give it type name" : ""}`);
     else if (kind === "sql" && r.ctx === "code" && p.type === "date") errors.push(`${ref} is a date outside quotes, which SQL reads as arithmetic; write '${ref}'`);
     else if (kind !== "arg" && r.ctx === "code" && p.allowed?.some((a) => /['"]/.test(String(a)))) errors.push(`${ref} is outside quotes and an allowed value holds a quote`);
   }

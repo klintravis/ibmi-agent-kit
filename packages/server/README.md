@@ -50,7 +50,7 @@ node <repo>/packages/server/dist/index.js policy test <policy> <tests>
 node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--since <days>]
 ```
 
-`npm link -w packages/server` puts `ibmi-agent-kit` on PATH so you can shorten the command. Offline, no IBM i, output on stdout. Details in the [guard README](../guard/README.md#offline-policy-test-and-policy-replay).
+`npm link -w packages/server` puts `ibmi-agent-kit` on PATH so you can shorten the command. Offline, no IBM i, output on stdout. `policy test` also loads the project and policy verbs and exits 1 when any verb file would be refused, even if no case names a verb. Details in the [guard README](../guard/README.md#offline-policy-test-and-policy-replay).
 
 ## `setup` command
 

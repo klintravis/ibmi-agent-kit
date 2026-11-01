@@ -1355,6 +1355,39 @@ test("verbs: typed values are validated, and what is not one is refused", () => 
   assert.equal(substitute("VALUES ${b}", "sql", { b: { type: "boolean" } }, { b: true }).text, "VALUES TRUE");
 });
 
+test("verbs: a name parameter is an upper cased object name; anything else is refused naming it", () => {
+  const p = { address: "proj:X", params: { v: { type: "name" } as VerbParam } };
+  for (const [v, want] of [["ordval", "ORDVAL"], ["$A#b@_.1", "$A#B@_.1"], ["ABCDEFGHIJ", "ABCDEFGHIJ"]] as const) assert.deepEqual(bindArgs(p, { v }), { v: want }, v);
+  for (const v of ["A'B", "A B", "A(B)", "A&B", "A,B", "A/B", "A*B", "", "1AB", "ABCDEFGHIJK", 7, true]) assert.throws(() => bindArgs(p, { v }), /^Error: proj:X: v: .+ is not an object name/, String(v));
+  // allowed values are validated as names and compared upper cased
+  const ok = { address: "proj:X", params: { v: { type: "name", allowed: ["ordhdr"] } as VerbParam } };
+  assert.deepEqual(bindArgs(ok, { v: "OrdHdr" }), { v: "ORDHDR" });
+  assert.throws(() => bindArgs(ok, { v: "other" }), /not one of/);
+  const bad = loadVerbs(verbRoot({ [P + "x.yaml"]: "name: X\ndescription: d\nparams:\n  v: { type: name, allowed: [\"A B\"] }\nsteps:\n  - sql: VALUES :v\n" }).src);
+  assert.match(bad.errors.join("\n"), /params\.v\.allowed\.0: "A B" is not an object name/);
+});
+
+test("verbs: ${member} of type name loads in CL, inside or outside quotes; a string without allowed is still refused", () => {
+  const verb = (type: string, step: string) => `name: X\ndescription: d\nparams:\n  member: { type: ${type} }\nsteps:\n  - cl: ${step}\n`;
+  const loads = (type: string, step: string) => loadVerbs(verbRoot({ [P + "x.yaml"]: verb(type, step) }).src);
+  for (const step of ["\"CMPRD/CMCHKOUT TASK(T1) MBR(${member})\"", "\"CMPRD/CMCHKOUT TASK(T1) MBR('${member}')\""]) {
+    const set = loads("name", step);
+    assert.deepEqual(set.errors, [], step);
+    assert.equal(substitute(resolveVerb(set, "X").steps[0].cl!, "cl", resolveVerb(set, "X").params, bindArgs(resolveVerb(set, "X"), { member: "ordval" })).text, step.slice(1, -1).replace("${member}", "ORDVAL"));
+  }
+  assert.match(loads("string", "\"CMPRD/CMCHKOUT MBR(${member})\"").errors.join("\n"), /\$\{member\}: parameter member is a string with no allowed list, so it would be free text; for an object name give it type name/);
+});
+
+test("verbs: a name parameter in a command's library slot is decided by its environment like a literal", async () => {
+  const set = loadVerbs(verbRoot({ [P + "x.yaml"]: "name: X\ndescription: d\nparams:\n  lib: { type: name }\nsteps:\n  - cl: CLRPFM FILE(${lib}/ORD)\n" }).src);
+  assert.deepEqual(set.errors, []);
+  const run = async (lib: string, who: Identity) => (await decideVerb(planVerb(set, "X", { lib }), who, D4, lookups())).statements[0].decision.decision; // observe mode would still run a deny, so look at the decision
+  assert.equal(await run("inord", as("dev", "dev")), "allow");
+  assert.equal(await run("lvord", as("dev", "dev")), "deny"); // live env: no rule allows it
+  assert.equal(await run("paylib", as("dev", "dev")), "deny"); // blocked env
+  assert.equal(await run("inord", as("analyst", "prod")), "deny");
+});
+
 test("verbs: templates are refused at load where substitution would be unsafe or wrong", () => {
   const cases: [string, string, RegExp][] = [
     ["n: { type: integer }", 'sql: "VALUES 1 -- ${n}"', /steps\.0\.sql: \$\{n\} is inside a comment/],

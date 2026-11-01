@@ -620,3 +620,22 @@ test("policy test: a verb case finds its verb beside the policy and decides each
   assert.equal(await policyCli(["test", join(root, "policy.yaml"), join(root, "bad.yaml")], (t) => out.push(t), (t) => out.push(t)), 1);
   assert.match(out[0], /^FAIL analyst on prod: expected allow, got deny\n  statement 1: org:FIX-ORDERS steps\.0: UPDATE LVORD\.ORDHDR/);
 });
+
+test("policy test: a verb file the server would refuse fails the run even when no case names a verb", async () => {
+  const root = mkdtempSync(join(tmpdir(), "kit-verbs-cli-"));
+  copyFileSync(join(EXAMPLES, "three-partitions.yaml"), join(root, "policy.yaml"));
+  copyFileSync(join(EXAMPLES, "cm-product.yaml"), join(root, "cm-product.yaml"));
+  writeFileSync(join(root, "plain.yaml"), "- name: analyst reads\n  as: { user: ANL01, groups: [GRPANL], partition: prod }\n  script: SELECT 1 FROM LVORD.ORDHDR\n  expect: allow\n");
+  const run = async () => {
+    const out: string[] = [];
+    const code = await policyCli(["test", join(root, "policy.yaml"), join(root, "plain.yaml")], (t) => out.push(t), (t) => out.push(t));
+    return { code, text: out.join("\n") };
+  };
+  assert.deepEqual(await run(), { code: 0, text: "1 cases passed" }); // no verb folders: as before
+  mkdirSync(join(root, "verbs"));
+  writeFileSync(join(root, "verbs", "bad.yaml"), "name: BAD\ndescription: d\nparams:\n  m: { type: string }\nsteps:\n  - cl: CMPRD/CMCHKOUT MBR(${m})\n");
+  const r = await run();
+  assert.equal(r.code, 1, r.text);
+  assert.match(r.text, /error: .*bad\.yaml.*free text/);
+  assert.match(r.text, /1 cases passed\n1 verb file problem\(s\)/);
+});

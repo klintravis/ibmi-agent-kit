@@ -37,7 +37,7 @@ node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--si
 
 `npm link -w packages/server` makes `ibmi-agent-kit` available on PATH, so `ibmi-agent-kit policy test …` works too.
 
-- `policy test` decides each case in a YAML test file for a stated identity and lookup answers, and compares with `expect`. A case may name a `verb` and `args` instead of a `script`: every statement the verb would send is decided (see [Test a policy](../../docs/policy.md#test-a-policy)). Exit 0 all passed, 1 a case failed, 2 usage or load error. See [examples/three-partitions.tests.yaml](../../examples/three-partitions.tests.yaml).
+- `policy test` decides each case in a YAML test file for a stated identity and lookup answers, and compares with `expect`. A case may name a `verb` and `args` instead of a `script`: every statement the verb would send is decided (see [Test a policy](../../docs/policy.md#test-a-policy)). Verb files are always loaded: one the server would refuse is printed and fails the run. Exit 0 all passed, 1 a case failed or a verb file is refused, 2 usage or load error. See [examples/three-partitions.tests.yaml](../../examples/three-partitions.tests.yaml).
 - `policy replay` re-decides the statements in the run log under a candidate policy and lists those whose decision changes. Run it before switching a partition from observe to enforce. It always exits 0 unless the arguments or files are bad.
 
 ## Exports
@@ -53,7 +53,7 @@ A policy file named by `IBMI_KIT_POLICY` in a profile (absolute path). Reference
 A verb is a named, parameterised SQL/CL procedure in one YAML file, run by `verb_run` through the same guard as `run_script`. Full reference: [docs/verbs.md](../../docs/verbs.md).
 
 - **Layers.** `user` (`~/.ibmi-agent-kit/verbs`), `proj` (`.ibmi-kit/verbs` and `IBMI_KIT_VERBS`), `org` (`verbs/` beside the policy file). `proj:NAME` addresses one; a bare `NAME` takes the closest layer (`user`, `proj`, `org`) and `verb_list` marks the hidden ones as overridden.
-- **`:p` vs `${p}`.** `:p` is sent as a bound value, never spliced into the text. `${p}` is text substitution for names and is allowed only for a parameter with an `allowed` list or of type integer, decimal, date or boolean; anything else refuses the verb at load.
+- **`:p` vs `${p}`.** `:p` is sent as a bound value, never spliced into the text. `${p}` is text substitution for names and is allowed only for a parameter with an `allowed` list or of type name (an IBM i object name, upper cased), integer, decimal, date or boolean; anything else refuses the verb at load.
 - **`requires_absent`.** A query run just before its setup statement; a returned row fails the verb there, so existing data is never overwritten or cleaned up.
 - **Cleanup.** An entry runs only if the setup `id` it `undoes` succeeded, even when a step failed, unless the connection was reset; then nothing more is sent and the result lists the cleanup to run by hand.
 - **Check first.** `policy_check` with `verb` and `args` shows every statement's decision and runs nothing.

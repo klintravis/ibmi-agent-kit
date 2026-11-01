@@ -41,7 +41,7 @@ cleanup:
 | `name` | Letters, digits, `_` and `-`; matched in any case. |
 | `description` | One line, shown by `verb_list`. |
 | `tags` | Optional; `verb_run` with `tag` runs every verb carrying it. |
-| `params` | Optional; each has a `type` (`string`, `integer`, `decimal`, `date` as `YYYY-MM-DD`, `boolean`) and may have `default`, `allowed` and `required`. Every parameter needs a value, from the call or its default. |
+| `params` | Optional; each has a `type` (`string`, `name`, `integer`, `decimal`, `date` as `YYYY-MM-DD`, `boolean`; see [Parameters](#parameters-p-and-p)) and may have `default`, `allowed` and `required`. Every parameter needs a value, from the call or its default. |
 | `setup` | Statements that create test data: one `sql` or `cl` each, an optional `id`, and an optional `requires_absent` query. |
 | `steps` | At least one: `sql`, `cl`, `expect`, or `verb` (another verb, with `args`). |
 | `cleanup` | Each entry names the setup `id` it `undoes` and gives one `sql` or `cl`. |
@@ -54,12 +54,37 @@ other verbs still load. One SQL statement per entry: no `;` between statements.
 - `:p` in SQL becomes a `?` marker and the value is sent bound, never spliced into the text. Use it
   for any value, including free text.
 - `${p}` is text substitution, for names such as a library suffix. It is allowed only for a
-  parameter with an `allowed` list or of type `integer`, `decimal`, `date` or `boolean`, and the
+  parameter with an `allowed` list or of type `name`, `integer`, `decimal`, `date` or `boolean`, and the
   value is checked before it is put in. A string parameter without `allowed` in `${p}` refuses the
   verb at load, as does `${p}` inside a comment; a bare `?` marker is refused too (write `:name`).
   Inside a quoted literal, quotes in the value are doubled. CL has no bound values, so CL uses
   `'${p}'`.
 - A value outside `allowed`, or not of the parameter's type, fails the call before anything is sent.
+
+| Type | Accepts | In `${p}` |
+|---|---|---|
+| `string` | any text | only with `allowed` |
+| `name` | an IBM i object name: a letter, `$`, `#` or `@`, then up to 9 of letters, digits, `$ # @ _ .`; upper cased | yes, inside or outside quotes |
+| `integer`, `decimal` | a number | yes |
+| `date` | `YYYY-MM-DD` | yes, inside quotes in SQL |
+| `boolean` | `true` or `false` | SQL only |
+
+`name` is how a CL step takes a member, file or library name, since CL has no bound values. A name
+holds no quote, blank, parenthesis, comma or `&`, so it cannot change the shape of the command;
+anything else fails the call naming the parameter. The guard still decides the finished
+statement, so a `name` that is a production library is denied like the same name typed into the file.
+There is no pattern of your own; for other text use `allowed`. Example, a change-management checkout:
+
+```yaml
+name: CHECKOUT
+description: Check a member out for a task
+params:
+  task:   { type: name }
+  file:   { type: name, default: QRPGLESRC }
+  member: { type: name }
+steps:
+  - cl: CMPRD/CMCHKOUT TASK(${task}) MBR(${member}) FILE(${file})
+```
 
 ## Layers
 
@@ -159,7 +184,9 @@ and reports passed, failed and skipped counts with each verb's statements.
   optionally `policy`) it decides offline and sends nothing. A `requires_absent` or `expect` query
   that writes shows as `deny`.
 - `policy test` cases can name a verb instead of a script; see
-  [Test a policy](policy.md#test-a-policy).
+  [Test a policy](policy.md#test-a-policy). `policy test` also loads the project and policy
+  verbs on every run, prints each file the server would refuse and exits 1, so a broken verb file
+  fails CI even when no case names a verb.
 
 ## Limits
 
