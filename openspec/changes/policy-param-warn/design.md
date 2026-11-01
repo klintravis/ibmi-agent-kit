@@ -43,9 +43,10 @@ from `positional`, so they are known.
 
 A keyword warns only when its value has at least one element (the same walk `nameElements` does:
 top-level `splitTop` items, first item of a parenthesised group) that is not quoted, not numeric
-and not a `*` special value. `TEXT('Orders')`, `DBGVIEW(*SOURCE)`, `REPLACE(*YES)`,
-`FMTOPT(*MAP *DROP)` stay silent; `TOLIB(PRODLIB)`, `X(LIB/OBJ)` and `BNDSRVPGM((LIB/SRV *DEFER))`
-warn. Alternative (warn on every unknown keyword) rejected: every compile in a company CI would
+and not a special value (starts with `*` and holds no `/`). `TEXT('Orders')`, `DBGVIEW(*SOURCE)`,
+`REPLACE(*YES)`, `FMTOPT(*MAP *DROP)` stay silent; `TOLIB(PRODLIB)`, `X(LIB/OBJ)`,
+`X(*LIBL/OBJ)` and `BNDSRVPGM((LIB/SRV *DEFER))` warn (`*LIBL/OBJ` names an object, so skipping
+every `*` element would hide the very bypass this change shows). Alternative (warn on every unknown keyword) rejected: every compile in a company CI would
 warn on `TEXT` and `DBGVIEW`, and people stop reading warnings. Remaining noise: name-shaped
 values that are not objects (`ACTGRP(QILE)`, `TGTRLS(V7R4M0)`); accepted for a warning (see
 Open Questions).

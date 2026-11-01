@@ -5,7 +5,8 @@
 ### Requirement: Undeclared CL parameters are flagged
 When a CL command from the command table is given, by keyword, a parameter its entry does not name
 (in `params`, `writes`, `positional`, `class_by_param` or `nested_sql`), and that parameter's value
-holds a name (an element that is not quoted, numeric or a `*` special value), classification SHALL
+holds a name (an element that is not quoted, not numeric, and not a special value: one starting
+with `*` and holding no `/`), classification SHALL
 add a warning to that statement naming the command and the keyword. The warning SHALL NOT change
 any operation or decision.
 
@@ -23,9 +24,14 @@ any operation or decision.
 - **WHEN** a script runs `CL: CRTBNDRPG PGM(APPLIB/ORD) SRCFILE(APPLIB/QRPGLESRC) DBGVIEW(*SOURCE) TEXT('Orders')`
 - **THEN** the statement carries no warning
 
+#### Scenario: Library list qualifier still warns
+- **WHEN** a script runs `CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(*LIBL/OUT)`
+- **THEN** the statement carries the warning naming `XYZCPY` and `TOLIB`
+
 #### Scenario: Decision unchanged
-- **WHEN** the `XYZCPY` statement above is decided with and without the warning check
-- **THEN** its operations, matching rules and decision are the same: `write` of `APPLIB/ORD` only
+- **WHEN** `CL: XYZCPY FROMOBJ(APPLIB/ORD) TOLIB(PRODLIB)` and `CL: XYZCPY FROMOBJ(APPLIB/ORD)` are
+  classified and decided for the same identity
+- **THEN** both have the same operations and the same decision: `write` of `APPLIB/ORD` only
 
 #### Scenario: A table that declares the keyword
 - **WHEN** a company command file lists `TOLIB: library` in the `XYZCPY` entry's `params`
