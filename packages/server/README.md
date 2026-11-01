@@ -74,6 +74,19 @@ Notes:
 - dotenv cannot store a value that contains a line break, or that contains `'`, `"` and a backtick all at once. Setup refuses such a value instead of saving it wrong.
 - The test connects like any session would. Over `ssh`, that can mean uploading the Mapepire jar the first time.
 
+### In a company config repo
+
+When the current folder holds both `policy.yaml` and a `profiles/` folder (a company config repo made by the `ibmi-kit-config` skill), `setup` takes the company's settings from the repo and asks only for yours. Folders above the current one are not searched.
+
+- The partitions are the `profiles/.env.<partition>` skeletons, listed by the same rules as profile names. With one skeleton it is taken; with several, setup lists them and asks for a number or a name. A name on the command line must be one of them, else setup exits 2.
+- It copies every setting of the skeleton (host, partition, transport, ports, guards) into your profile, except `IBMI_USER`, `IBMI_PASSWORD` and `IBMI_KIT_POLICY`. A skeleton without `IBMI_HOST` or `IBMI_PARTITION` is refused (exit 2).
+- It asks for your user and your password (hidden), as above. It does not ask for a host or a policy.
+- `IBMI_KIT_POLICY` is set to the repo's `policy.yaml` as an absolute path, after the same policy check. A different policy path already in your profile is replaced, and setup says so.
+- A password in a skeleton is never copied: setup warns you to remove it from the repo and change it.
+- Your password goes only in your profile folder. If that folder, or a profile file linked from it, lies inside the repo, setup refuses before asking anything and writes nothing.
+- Setup reads the repo and never writes to it.
+- If the repo's `.mcp.json` starts the kit from `${IBMI_KIT_HOME}` and that variable is not set, setup prints the kit folder to set it to.
+
 ## Logging and shutdown
 
 - stdout is the JSON-RPC channel. The server redirects `console.log`, `console.info` and `console.debug` to stderr; engines write nothing to stdout.

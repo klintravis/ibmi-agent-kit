@@ -1,10 +1,13 @@
 // `ibmi-agent-kit setup [name]`: writes or updates one profile file from a terminal, then tests it
 // by reading the file back and connecting. Returns the exit code: 0 OK, 1 the test failed (the file
 // stays written), 2 a usage error or refusal (nothing written), 130 cancelled (nothing written).
+// Run in a company config repo (policy.yaml and profiles/ in the current folder), it takes the
+// settings from the chosen profiles/.env.<partition> skeleton and the repo's policy path.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CONFIG_DIRS, parseProfile, resolveProfileEnv, serverName } from "@ibmi-agent-kit/core";
 import { loadPolicy } from "@ibmi-agent-kit/guard";
 import { loadProfile, MapepireBackend } from "@ibmi-agent-kit/source/tools";
@@ -24,12 +27,25 @@ export interface SetupDeps {
   out: Write;
   err: Write;
   connect(env: Record<string, string>): Probe;
+  cwd?: string; // default process.cwd()
 }
 
 const USAGE = "usage: ibmi-agent-kit setup [name]\n";
 export const SETUP_SQL = "SELECT CURRENT USER, CURRENT SERVER FROM SYSIBM.SYSDUMMY1";
 class Cancelled extends Error {}
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const isFile = (p: string) => statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
+// The kit checkout this file runs from: <kit>/packages/server/dist/setup-cli.js.
+const KIT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// A path with its symlinks resolved, through its nearest existing folder when it does not exist yet,
+// so a folder or profile linked into the repo counts as inside it.
+const real = (p: string): string => (existsSync(p) ? realpathSync(p) : dirname(p) === p ? p : join(real(dirname(p)), basename(p)));
+const within = (root: string, p: string) => {
+  const r = relative(root, p);
+  return r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r);
+};
+// Settings a skeleton never supplies: the person's own sign-on and the policy path setup writes.
+const OWN = new Set(["IBMI_USER", "IBMI_PASSWORD", "IBMI_KIT_POLICY"]);
 
 // The file a name is written to: only names core lists as that server, from characters safe in a
 // file name on every OS (Windows drops a trailing dot, so `x.` would never be listed as `x.`).
@@ -54,7 +70,7 @@ function updated(text: string, values: [string, string][]): string {
   const lines = text ? text.split(/\r?\n/) : [];
   if (lines.at(-1) === "") lines.pop();
   for (const [key, v] of values) {
-    const sets = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*[=:]`);
+    const sets = new RegExp(`^\\s*(?:export\\s+)?${key.replace(/\./g, "\\.")}\\s*[=:]`); // a skeleton key may hold a dot
     let found = false;
     for (let i = 0; i < lines.length; i++) if (sets.test(lines[i])) (lines[i] = `${key}=${quote(v)}`), (found = true);
     if (!found) lines.push(`${key}=${quote(v)}`);
@@ -121,19 +137,74 @@ const realDeps = (): SetupDeps => ({
 
 export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Promise<number> {
   const { input, out, err } = deps;
+  const cwd = resolve(deps.cwd ?? process.cwd());
   if (args.length > 1) return err(USAGE), 2;
-  const name = args[0] ?? "default";
-  const file = fileFor(name);
-  if (!file) {
-    err(`"${name}" cannot be a profile name: use letters, digits, ".", "_" and "-", starting with a letter or digit; not "example", no "..", not ending ".bak" or ".orig"\n`);
+  const [dir, ...later] = CONFIG_DIRS();
+
+  // Company-repo mode: policy.yaml and profiles/ in the current folder; folders above are not searched.
+  const skeletons = join(cwd, "profiles");
+  const repo = isFile(join(cwd, "policy.yaml")) && (statSync(skeletons, { throwIfNoEntry: false })?.isDirectory() ?? false);
+  let partitions: string[] = [];
+  if (repo) {
+    partitions = readdirSync(skeletons, { withFileTypes: true })
+      .filter((d) => d.isFile())
+      .map((d) => serverName(d.name))
+      .filter((n): n is string => n !== undefined && fileFor(n) !== undefined)
+      .sort();
+    if (!partitions.length) return err(`the company config repo ${cwd} has no profile skeleton (profiles/.env.<partition>). Nothing was written.\n`), 2;
+    if (args[0] !== undefined && !partitions.includes(args[0])) {
+      return err(`"${args[0]}" is not a partition of the company config repo ${cwd}; its partitions: ${partitions.join(", ")}. Nothing was written.\n`), 2;
+    }
+    // The password goes only in the profile folder, so that folder, or a profile linked elsewhere, must not lie in the repo.
+    const root = real(cwd);
+    const leak = [dir, ...partitions.map((p) => join(dir, fileFor(p)!))].find((p) => within(root, real(p)));
+    if (leak) {
+      return err(`${leak} lies inside the company config repo ${cwd}, so setup would write your password into the repo. Use a profile folder outside it (IBMI_KIT_CONFIG_DIR) and no profile linked into it. Nothing was written.\n`), 2;
+    }
+  }
+  if (args[0] !== undefined && !fileFor(args[0])) {
+    err(`"${args[0]}" cannot be a profile name: use letters, digits, ".", "_" and "-", starting with a letter or digit; not "example", no "..", not ending ".bak" or ".orig"\n`);
     return 2;
   }
+  // "" in a company repo with several partitions: asked below.
+  let name = args[0] ?? (!repo ? "default" : partitions.length === 1 ? partitions[0] : "");
   if (!input.isTTY || !input.setRawMode) {
     err("setup reads the password without showing it, so it needs a real terminal: run it yourself in PowerShell, Windows Terminal, Terminal or a Linux shell, not through Claude, a pipe or Git Bash. Nothing was written.\n");
     return 2;
   }
 
-  const [dir, ...later] = CONFIG_DIRS();
+  const ask = reader(input, out);
+  const cancelled = (e: unknown) => {
+    if (!(e instanceof Cancelled)) throw e;
+    err("cancelled, nothing written\n");
+    return 130;
+  };
+  let skeleton: Record<string, string> = {};
+  if (repo) {
+    out(`company config repo: ${cwd}\n`);
+    const mcp = join(cwd, ".mcp.json");
+    if (!process.env.IBMI_KIT_HOME && isFile(mcp) && readFileSync(mcp, "utf8").includes("${IBMI_KIT_HOME}")) {
+      out(`this repo's .mcp.json starts the kit from IBMI_KIT_HOME, which is not set: set it to ${KIT} for your user, then open a new terminal before you run claude.\n`);
+    }
+    if (!name) {
+      out(partitions.map((p, i) => `  ${i + 1}. ${p}\n`).join(""));
+      try {
+        while (!name) {
+          const a = (await ask("partition (number or name): ")).trim();
+          name = partitions.includes(a) ? a : (partitions[Number(a) - 1] ?? "");
+        }
+      } catch (e) {
+        return cancelled(e);
+      }
+    }
+    const from = join(skeletons, fileFor(name)!);
+    skeleton = parseProfile(readFileSync(from, "utf8"));
+    const missing = ["IBMI_HOST", "IBMI_PARTITION"].filter((k) => !skeleton[k]?.trim());
+    if (missing.length) return err(`${from} sets no ${missing.join(" and no ")}. Nothing was written.\n`), 2;
+    if (skeleton.IBMI_PASSWORD) err(`warning: ${from} holds a password. It is ignored, never copied: remove it from the repo and its git history, and change that password.\n`);
+  }
+
+  const file = fileFor(name)!;
   const path = join(dir, file);
   // On a case-insensitive file system `Prod` would open `.env.prod`, another server's file.
   if (existsSync(path) && !readdirSync(dir).includes(file)) {
@@ -146,27 +217,32 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   const shadowed = later.map((d) => join(d, file)).find((p) => existsSync(p));
   if (shadowed) out(`note: ${shadowed} also defines "${name}"; the file above takes precedence and nothing is copied from it, so its other settings, guards like IBMI_READ_ONLY, IBMI_KIT_POLICY and IBMI_BLOCKED_CL included, stop applying to "${name}". Ctrl-C now to stop.\n`);
 
+  const repoPolicy = repo ? join(cwd, "policy.yaml") : undefined;
+  if (repoPolicy && cur.IBMI_KIT_POLICY && cur.IBMI_KIT_POLICY !== repoPolicy) out(`IBMI_KIT_POLICY ${cur.IBMI_KIT_POLICY} is replaced by ${repoPolicy}\n`);
+
   let password = "";
   const values: [string, string][] = [];
   try {
-    const ask = reader(input, out);
     const required = async (q: string, current?: string) => {
       for (;;) {
         const v = (await ask(current ? `${q} [${current}]: ` : `${q}: `)).trim() || current;
         if (v) return v;
       }
     };
-    values.push(["IBMI_HOST", await required("IBM i host", cur.IBMI_HOST)]);
+    // In a company repo the skeleton's settings (host, partition, transport, ports, guards) are the company's.
+    if (repo) values.push(...Object.entries(skeleton).filter(([k]) => !OWN.has(k)));
+    else values.push(["IBMI_HOST", await required("IBM i host", cur.IBMI_HOST)]);
     values.push(["IBMI_USER", await required("IBM i user", cur.IBMI_USER)]);
     while (!password) password = (await ask(cur.IBMI_PASSWORD ? "password (Enter keeps the current one): " : "password: ", true)) || cur.IBMI_PASSWORD || "";
     values.push(["IBMI_PASSWORD", password]);
-    // One pair of surrounding quotes (Windows "Copy as path") is dropped and a leading ~ expands.
-    const policy = (await ask(`policy file, absolute or relative to here (Enter leaves it ${cur.IBMI_KIT_POLICY ? `as ${cur.IBMI_KIT_POLICY}` : "unset"}): `)).trim().replace(/^(["'])(.*)\1$/, "$2");
-    if (policy) values.push(["IBMI_KIT_POLICY", resolve(/^~(?=[\\/]|$)/.test(policy) ? homedir() + policy.slice(1) : policy)]);
+    if (repoPolicy) values.push(["IBMI_KIT_POLICY", repoPolicy]);
+    else {
+      // One pair of surrounding quotes (Windows "Copy as path") is dropped and a leading ~ expands.
+      const policy = (await ask(`policy file, absolute or relative to here (Enter leaves it ${cur.IBMI_KIT_POLICY ? `as ${cur.IBMI_KIT_POLICY}` : "unset"}): `)).trim().replace(/^(["'])(.*)\1$/, "$2");
+      if (policy) values.push(["IBMI_KIT_POLICY", resolve(cwd, /^~(?=[\\/]|$)/.test(policy) ? homedir() + policy.slice(1) : policy)]);
+    }
   } catch (e) {
-    if (!(e instanceof Cancelled)) throw e;
-    err("cancelled, nothing written\n");
-    return 130;
+    return cancelled(e);
   }
 
   // A bad policy stops the server for every profile at startup, so it is checked before the write.

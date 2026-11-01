@@ -15,9 +15,9 @@ session brought in.
   environment
 
 ### Requirement: Bootstrap README gets a colleague started
-The generated README SHALL hold a "Get started" section listing, in order: clone the repo, run
-`npx ibmi-agent-kit setup` (or the kit's repo-local command until it is published), run `claude`,
-approve the server, and optionally `/demo`. One line SHALL say the policy path lives in each user's
+The generated README SHALL hold a "Get started" section listing, in order: clone the repo, run the
+kit's repo-local `setup` command (with `npx ibmi-agent-kit setup` labelled "once published"), run
+`claude`, approve the server, and optionally `/demo` from the kit checkout. One line SHALL say the policy path lives in each user's
 profile because only the person whose credentials it protects can point at a policy.
 
 #### Scenario: Get started section

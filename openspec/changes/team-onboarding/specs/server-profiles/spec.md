@@ -25,10 +25,16 @@ by the loader's file rules. Folders above the current one SHALL NOT be searched.
 - **THEN** `setup` asks for host, user, password and policy as it does outside a repo
 
 ### Requirement: setup takes the company's settings from the repo
-In company-repo mode `setup` SHALL write `IBMI_HOST` and `IBMI_PARTITION` from the chosen skeleton
-and `IBMI_KIT_POLICY` as the absolute path of the repo's `policy.yaml`, and SHALL ask only the user
-and the hidden password. A skeleton without `IBMI_HOST` or `IBMI_PARTITION`, or a policy that does
-not load, SHALL be refused with nothing written.
+In company-repo mode `setup` SHALL copy every setting of the chosen skeleton into the profile except
+`IBMI_USER`, `IBMI_PASSWORD` and `IBMI_KIT_POLICY`, SHALL write `IBMI_KIT_POLICY` as the absolute
+path of the repo's `policy.yaml`, and SHALL ask only the user and the hidden password. A skeleton
+without `IBMI_HOST` or `IBMI_PARTITION`, or a policy that does not load, SHALL be refused with
+nothing written.
+
+#### Scenario: Other skeleton settings copied
+- **WHEN** `profiles/.env.dev` holds `IBMI_SQL_TRANSPORT=mapepire` and `IBMI_KIT_POLICY=/admin/policy.yaml`
+- **THEN** the profile `dev` holds `IBMI_SQL_TRANSPORT=mapepire`, the connection test uses it, and
+  its `IBMI_KIT_POLICY` is the clone's `policy.yaml`, not the skeleton's path
 
 #### Scenario: Policy path written
 - **WHEN** a colleague runs `setup dev` in a clone at any folder
@@ -45,7 +51,8 @@ not load, SHALL be refused with nothing written.
 
 ### Requirement: setup never puts a password in the company repo
 In company-repo mode `setup` SHALL NOT write any file inside the repo, SHALL refuse to run when the
-first profile folder lies inside the repo, and SHALL ignore a skeleton's `IBMI_PASSWORD` with a
+first profile folder, or a partition's profile file in it, resolves to a path inside the repo
+(symlinks followed), and SHALL ignore a skeleton's `IBMI_PASSWORD` with a
 warning naming the file.
 
 #### Scenario: Repo unchanged

@@ -10,12 +10,14 @@ already holds everything but the person's own user and password.
 ## What Changes
 
 - `ibmi-agent-kit setup [name]` run in a company config repo (the current folder holds
-  `policy.yaml` and a `profiles/` folder) takes host and partition from the chosen
-  `profiles/.env.<partition>` skeleton, writes `IBMI_KIT_POLICY=<absolute path of the repo's
+  `policy.yaml` and a `profiles/` folder) copies every setting of the chosen
+  `profiles/.env.<partition>` skeleton (host, partition, transport, ports, guards) except
+  `IBMI_USER`, `IBMI_PASSWORD` and `IBMI_KIT_POLICY`, writes `IBMI_KIT_POLICY=<absolute path of the repo's
   policy.yaml>` itself, and asks only the user and the hidden password. The profile is named after
   the partition. No name: it offers the partitions found (no question when there is one); a name
   must be one of them. A skeleton's `IBMI_PASSWORD` is ignored with a warning. It refuses to run
-  when the first profile folder lies inside the repo, so a password is never written there. The
+  when the first profile folder, or a profile linked from it, lies inside the repo, so a password
+  is never written there. The
   existing write, read-back and connection test are reused unchanged. Outside a company repo,
   `setup` behaves as today.
 - In company-repo mode, when `IBMI_KIT_HOME` is not set, `setup` prints the kit folder to set it
@@ -24,9 +26,10 @@ already holds everything but the person's own user and password.
   - `.mcp.json` registering the kit server as `"command": "node"`,
     `"args": ["${IBMI_KIT_HOME}/packages/server/dist/index.js"]`,
     with `"env": { "IBMI_5250_VIEWER": "true" }` as the example of a non-protected setting;
-  - a README "Get started" section: clone, `npx ibmi-agent-kit setup` (or the repo-local command
-    until it is published), `claude`, approve the server, `/demo` optional; plus one line saying why
-    the policy path lives in each user's profile.
+  - a README "Get started" section: clone, the repo-local `setup` command (with
+    `npx ibmi-agent-kit setup` labelled "once published"), `claude`, approve the server, `/demo`
+    optional and from the kit checkout; plus one line saying why the policy path lives in each
+    user's profile.
 - Profile skeletons lose the `IBMI_KIT_POLICY` line (it held the admin's path) and their comment
   says to run `setup` in the repo.
 - The dry-run fixture (`templates/dry-run/`) gains `.mcp.json` and `README.md`; selfchecks cover
@@ -41,9 +44,7 @@ None. `setup` is a CLI subcommand; the change adds no tool and changes no annota
 ## Out of scope
 
 - Publishing the kit to npm, and the package name `npx` resolves (T-54). Until then the README
-  names the repo-local command.
-- Copying skeleton settings other than host and partition (transport, ports, guards) into the
-  profile.
+  names the repo-local command; who owns the npm name is an owner question (T-84).
 - Looking for the company repo above the current folder (no git-root walk).
 - Setting `IBMI_KIT_HOME` or any other environment variable for the user, and registering the
   server with `claude mcp add`.
@@ -58,8 +59,8 @@ None.
 
 ### Modified Capabilities
 
-- `server-profiles`: `setup` gains a company-repo mode (skeleton host and partition, automatic
-  policy path, no password in the repo).
+- `server-profiles`: `setup` gains a company-repo mode (the skeleton's settings, automatic policy
+  path, no password in the repo).
 - `config-bootstrap`: the bootstrap generates `.mcp.json` and the README "Get started" section, and
   profile skeletons carry no policy path.
 
@@ -70,5 +71,6 @@ None.
 - `.claude/skills/ibmi-kit-config/SKILL.md`, `templates/company-repo/README.md`,
   `templates/dry-run/` (new `.mcp.json`, `README.md`; `profiles/.env.*` edited).
 - Root `README.md`, `docs/demo.md`.
-- Depends on `first-run` (the `setup` command); archive `first-run` before this change.
+- Depends on `first-run` (the `setup` command, merged); its archive is a separate step, not in this
+  branch.
 - No new dependency.
