@@ -17,7 +17,7 @@ steps:
   - cl: "CRTRPGMOD MODULE(${lib}/SEEDLST) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDLST)"
   - cl: "CRTRPGMOD MODULE(${lib}/SEEDTST) SRCFILE(${lib}/SEEDSRC) SRCMBR(SEEDTST)"
   - cl: "CRTSRVPGM SRVPGM(${lib}/SEEDSRV) MODULE(${lib}/SEEDSRV) EXPORT(*ALL)"
-  - cl: "CRTPGM PGM(${lib}/SEEDLST) MODULE(${lib}/SEEDLST) BNDSRVPGM((${lib}/SEEDSRV))"
-  - cl: "CRTPGM PGM(${lib}/SEEDTST) MODULE(${lib}/SEEDTST) BNDSRVPGM((${lib}/SEEDSRV))"
+  - cl: "CRTPGM PGM(${lib}/SEEDLST) MODULE(${lib}/SEEDLST) BNDSRVPGM((${lib}/SEEDSRV)) ACTGRP(SEEDDEMO)"
+  - cl: "CRTPGM PGM(${lib}/SEEDTST) MODULE(${lib}/SEEDTST) BNDSRVPGM((${lib}/SEEDSRV)) ACTGRP(*NEW)"
   # a failed assertion ends SEEDTST with an escape message, which fails this step
   - cl: "CALL PGM(${lib}/SEEDTST)"

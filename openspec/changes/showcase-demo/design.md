@@ -62,7 +62,9 @@ the work at the end of the same run). One statement per entry.
   one multi-row `INSERT INTO ${lib}.SEEDS ...` of the 8 sample rows, `expect rows: 8`,
   `CRTDSPF`, `CRTRPGMOD` for SEEDSRV, SEEDLST and SEEDTST, `CRTSRVPGM SRVPGM(${lib}/SEEDSRV)
   MODULE(${lib}/SEEDSRV) EXPORT(*ALL)`, `CRTPGM` for SEEDLST and SEEDTST with
-  `BNDSRVPGM((${lib}/SEEDSRV))` (CRTRPGMOD + CRTPGM BNDSRVPGM, as in the reference build), and last
+  `BNDSRVPGM((${lib}/SEEDSRV))`, SEEDLST in `ACTGRP(SEEDDEMO)` and SEEDTST in `ACTGRP(*NEW)` so
+  nothing stays active in the kit's SQL job and SEED-CLEAN can delete it (CRTRPGMOD + CRTPGM
+  BNDSRVPGM, as in the reference build), and last
   `CALL PGM(${lib}/SEEDTST)`. CHGCURLIB (idempotent, unlike ADDLIBLE) puts the library in the job's
   library list, so `/copy SEEDSRC,SEEDPR` and the `dcl-f` names resolve and no source file names a
   library.
