@@ -1,0 +1,5 @@
+name: SMOKE
+description: The partition answers a read
+tags: [smoke]
+steps:
+  - sql: "SELECT CURRENT SERVER FROM SYSIBM.SYSDUMMY1"

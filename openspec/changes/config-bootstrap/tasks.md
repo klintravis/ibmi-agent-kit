@@ -8,9 +8,10 @@
 
 ## 2. The skill (config-bootstrap spec; D1–D5)
 
-- [ ] 2.1 Write `.claude/skills/ibmi-kit-config/SKILL.md` with frontmatter (`name`, trigger-focused `description`) and the bootstrap and maintain procedures, the read-only and no-password rules, observe-mode generation, branch-only output; verify the description names its triggers and the body references only tools the kit provides; the skill generates exactly the paths in `templates/company-repo/README.md`, including the `profiles/` folder
-- [ ] 2.2 Write `references/discovery.md` (D2 queries, grouped, each with its minimum release and what it feeds) and `references/questions.md` (one question per unknown, with recommended defaults); verify every query is a `SELECT`/`VALUES` and every `policy.yaml` key the questions fill exists in the policy schema
-- [ ] 2.3 Dry-run the bootstrap procedure against fixture discovery results (a JSON file of query results for an invented three-partition shop) and verify the generated policy passes its generated tests
+- [x] 2.1 Write `.claude/skills/ibmi-kit-config/SKILL.md` with frontmatter (`name`, trigger-focused `description`) and the bootstrap and maintain procedures, the read-only and no-password rules, observe-mode generation, branch-only output; verify the description names its triggers and the body references only tools the kit provides; the skill generates exactly the paths in `templates/company-repo/README.md`, including the `profiles/` folder
+- [x] 2.2 Write `references/discovery.md` (D2 queries, grouped, each with its minimum release and what it feeds) and `references/questions.md` (one question per unknown, with recommended defaults); verify every query is a `SELECT`/`VALUES` and every `policy.yaml` key the questions fill exists in the policy schema
+- [x] 2.3 Dry-run the bootstrap procedure against fixture discovery results (a JSON file of query results for an invented three-partition shop) and verify the generated policy passes its generated tests
+- [x] 2.4 Docs updated (docs-check passes): `docs/policy.md` points at the skill and the dry-run
 
 ## 3. Packaging
 

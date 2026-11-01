@@ -1,0 +1,88 @@
+{
+  "about": "Dry-run fixture for the ibmi-kit-config skill: an invented shop with three partitions. Every name is invented. servers holds what run_sql returned for each query id in .claude/skills/ibmi-kit-config/references/discovery.md, per profile; answers holds the admin's replies to the question ids in references/questions.md. policy.yaml, policy.tests.yaml and commands.yaml in this folder are what the bootstrap procedure writes from it.",
+  "servers": {
+    "dev": {
+      "S1": [{ "RDB": "KDEV01", "USR": "CFGADM" }],
+      "S2": [{ "OS_VERSION": "7", "OS_RELEASE": "5" }],
+      "S3": [{ "HOST_NAME": "KDEV01", "PARTITION_ID": 1, "NUMBER_OF_PARTITIONS": 3 }],
+      "S5": [],
+      "S6": [
+        { "RDB_NAME": "KDEV01", "REMOTE_LOCATION": "*LOCAL" },
+        { "RDB_NAME": "KQA01", "REMOTE_LOCATION": "kqa01.example.com" },
+        { "RDB_NAME": "KQAIASP", "REMOTE_LOCATION": "kqa01.example.com" },
+        { "RDB_NAME": "KPRD01", "REMOTE_LOCATION": "kprd01.example.com" }
+      ],
+      "L1": [
+        { "PREFIX": "WD", "LIBS": 3 },
+        { "PREFIX": "WI", "LIBS": 3 },
+        { "PREFIX": "XC", "LIBS": 1 }
+      ],
+      "L2": [
+        { "OBJNAME": "WDCUS", "OBJOWNER": "GRPDEV", "OBJTEXT": "Customers - development" },
+        { "OBJNAME": "WDINV", "OBJOWNER": "GRPDEV", "OBJTEXT": "Inventory - development" },
+        { "OBJNAME": "WDORD", "OBJOWNER": "GRPDEV", "OBJTEXT": "Orders - development" },
+        { "OBJNAME": "WICUS", "OBJOWNER": "XCMOWN", "OBJTEXT": "Customers - integration" },
+        { "OBJNAME": "WIINV", "OBJOWNER": "XCMOWN", "OBJTEXT": "Inventory - integration" },
+        { "OBJNAME": "WIORD", "OBJOWNER": "XCMOWN", "OBJTEXT": "Orders - integration" }
+      ],
+      "L3": [],
+      "I1": [
+        { "GROUP_PROFILE_NAME": "GRPDEV", "USERS": 6, "OWN_CURLIB": 6 },
+        { "GROUP_PROFILE_NAME": "GRPQA", "USERS": 3, "OWN_CURLIB": 0 },
+        { "GROUP_PROFILE_NAME": "GRPRPT", "USERS": 4, "OWN_CURLIB": 0 },
+        { "GROUP_PROFILE_NAME": "*NONE", "USERS": 2, "OWN_CURLIB": 0 }
+      ],
+      "I2": [
+        { "GROUP_PROFILE_NAME": "GRPDEV", "MEMBERS": 6 },
+        { "GROUP_PROFILE_NAME": "GRPQA", "MEMBERS": 3 },
+        { "GROUP_PROFILE_NAME": "GRPRPT", "MEMBERS": 5 }
+      ],
+      "I4": [],
+      "A1": {
+        "WD%": [{ "AUTHORIZATION_NAME": "GRPDEV", "OBJECT_AUTHORITY": "*ALL", "LIBS": 3 }, { "AUTHORIZATION_NAME": "*PUBLIC", "OBJECT_AUTHORITY": "*USE", "LIBS": 3 }],
+        "WI%": [{ "AUTHORIZATION_NAME": "GRPDEV", "OBJECT_AUTHORITY": "*CHANGE", "LIBS": 3 }, { "AUTHORIZATION_NAME": "*PUBLIC", "OBJECT_AUTHORITY": "*USE", "LIBS": 3 }]
+      },
+      "C1": [],
+      "C2": [{ "OBJNAME": "XCMLIB", "OBJOWNER": "XCMOWN", "OBJTEXT": "Example CM change management" }],
+      "C3": [
+        { "OBJNAME": "XCPROM", "OBJTEXT": "Promote a request to a level" },
+        { "OBJNAME": "XCSTAT", "OBJTEXT": "Show request status" }
+      ],
+      "C4": [
+        { "COMMAND_NAME": "XCPROM", "TEXT_DESCRIPTION": "Promote a request to a level", "COMMAND_PROCESSING_PROGRAM_LIBRARY": "XCMLIB", "COMMAND_PROCESSING_PROGRAM": "XCPROMC" },
+        { "COMMAND_NAME": "XCSTAT", "TEXT_DESCRIPTION": "Show request status", "COMMAND_PROCESSING_PROGRAM_LIBRARY": "XCMLIB", "COMMAND_PROCESSING_PROGRAM": "XCSTATC" }
+      ]
+    },
+    "qa": {
+      "S1": [{ "RDB": "KQA01", "USR": "CFGADM" }],
+      "S2": [{ "OS_VERSION": "7", "OS_RELEASE": "5" }],
+      "S3": [{ "HOST_NAME": "KQA01", "PARTITION_ID": 2, "NUMBER_OF_PARTITIONS": 3 }],
+      "S5": [{ "ASP_NUMBER": 33, "DEVICE_DESCRIPTION_NAME": "QAIASP", "RDB_NAME": "KQAIASP", "ASP_TYPE": "PRIMARY", "ASP_STATE": "AVAILABLE" }],
+      "L1": [{ "PREFIX": "WQ", "LIBS": 3 }],
+      "A1": {
+        "WQ%": [{ "AUTHORIZATION_NAME": "GRPQA", "OBJECT_AUTHORITY": "*CHANGE", "LIBS": 3 }, { "AUTHORIZATION_NAME": "*PUBLIC", "OBJECT_AUTHORITY": "*USE", "LIBS": 3 }]
+      }
+    },
+    "prod": {
+      "S1": [{ "RDB": "KPRD01", "USR": "CFGADM" }],
+      "S2": [{ "OS_VERSION": "7", "OS_RELEASE": "4" }],
+      "S3": [{ "HOST_NAME": "KPRD01", "PARTITION_ID": 3, "NUMBER_OF_PARTITIONS": 3 }],
+      "S6": { "error": "SQL0204 RDB_ENTRY_INFO in QSYS2 type *FILE not found" },
+      "L1": [{ "PREFIX": "WP", "LIBS": 3 }],
+      "A1": {
+        "WP%": [{ "AUTHORIZATION_NAME": "XCMOWN", "OBJECT_AUTHORITY": "*ALL", "LIBS": 3 }, { "AUTHORIZATION_NAME": "*PUBLIC", "OBJECT_AUTHORITY": "*USE", "LIBS": 3 }]
+      }
+    }
+  },
+  "answers": {
+    "Q1": "partitions dev, qa, prod as the profile names",
+    "Q3": "prod",
+    "Q4": "ladder WD (dev), WI (integ) on dev; WQ (test) on qa; WP (live) on prod",
+    "Q5": "yes: ${USER} on dev",
+    "Q8": "dev = GRPDEV, qa = GRPQA, analyst = GRPRPT",
+    "Q11": "analyst",
+    "Q12": "dev writes personal, dev, integ on dev; qa writes test on qa",
+    "Q14": "XCMLIB/XCPROM REQ(n) TOLVL(INT|QA|PROD), positional REQ TOLVL",
+    "Q15": "dev promotes to INT, qa to QA, nobody to PROD through the agent"
+  }
+}

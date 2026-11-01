@@ -231,6 +231,25 @@ test("policy templates: each loads, is in observe mode and passes its tests", as
   }
 });
 
+// config-bootstrap 2.3: the ibmi-kit-config dry-run's policy carries its fixture's names and passes its own tests.
+test("policy templates: the bootstrap dry-run's policy matches its discovery fixture and passes its tests", async () => {
+  const dir = join(EXAMPLES, "../templates/dry-run/");
+  const { servers } = JSON.parse(readFileSync(join(dir, "discovery.json"), "utf8"));
+  const policy = loadPolicy(join(dir, "policy.yaml"));
+  assert.equal(policy.mode.default, "observe");
+  assert.deepEqual(policy.partitions.map((p) => p.name), Object.keys(servers));
+  for (const p of policy.partitions) {
+    const q = servers[p.name];
+    assert.deepEqual(p.systems, [q.S3[0].HOST_NAME], p.name);
+    assert.deepEqual(p.rdbs, [q.S1[0].RDB, ...(q.S5 ?? []).map((a: { RDB_NAME: string }) => a.RDB_NAME)], p.name);
+  }
+  const groups = servers.dev.I1.map((g: { GROUP_PROFILE_NAME: string }) => g.GROUP_PROFILE_NAME);
+  for (const r of policy.roles) for (const g of r.groups) assert.ok(groups.includes(g), `${r.name}: ${g} not in I1`);
+  const r = await runBin(["policy", "test", join(dir, "policy.yaml"), join(dir, "policy.tests.yaml")]);
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stderr, /warning:/);
+});
+
 test("policy test: a mutated policy names the failing case and the rule, and exits 1", async () => {
   const dir = mkdtempSync(join(tmpdir(), "kit-policy-"));
   try {
