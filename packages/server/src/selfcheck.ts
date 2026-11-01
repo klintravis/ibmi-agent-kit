@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -223,6 +223,33 @@ test("policy test: both demo policies pass their tests", async () => {
     const r = await runBin(["policy", "test", join(EXAMPLES, `demo/policy-${p}.yaml`), join(EXAMPLES, `demo/${p}.tests.yaml`)]);
     assert.equal(r.code, 0, p + "\n" + r.stdout + r.stderr);
   }
+});
+
+// demo-quickstart 3: the /demo skill names only real tools and paths, and its connection query is a read.
+test("demo skill: frontmatter, tool names, repo paths and the connection SELECT are valid", async () => {
+  const root = join(EXAMPLES, "..");
+  const md = readFileSync(join(root, ".claude/skills/demo/SKILL.md"), "utf8");
+  assert.match(md, /^---\nname: demo\n/);
+  const desc = md.match(/^description: (.*)$/m)![1];
+  for (const p of ["demo", "quick start", "try the kit", "set up my connection"]) assert.ok(desc.includes(`"${p}"`), p);
+  const { kit, client } = await connected();
+  try {
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const n of ["list_servers", "run_sql", "run_script", "policy_check", "verb_list", "verb_run"]) assert.ok(names.includes(n), `missing ${n}`);
+    for (const m of md.matchAll(/`([a-z]+_[a-z_]+)`/g)) assert.ok(names.includes(m[1]), `${m[1]} is not a tool`);
+  } finally {
+    await client.close();
+    await shutdownAll(kit.engines);
+  }
+  for (const m of md.matchAll(/`(?:<kit>\/)?((?:docs|packages|examples|templates|\.claude)\/[^`<>~ ]+|README\.md)`/g)) {
+    assert.ok(existsSync(join(root, m[1])), `${m[1]} does not exist`);
+  }
+  const q = md.match(/`(SELECT [^`]+)`/)![1];
+  const { assertSelectOnly } = await import(new URL("../../source/dist/util.js", import.meta.url).href);
+  assert.doesNotThrow(() => assertSelectOnly(q), q);
+  const c = await classify(q, { lookups: statedLookups() });
+  assert.ok(c.operations.length > 0 && c.operations.every((o) => o.class === "read"), q);
+  assert.doesNotMatch(md, /\b(CREATE|DROP|INSERT)\b/);
 });
 
 // config-bootstrap: every shipped template loads and passes its own tests, so none drifts from the format.

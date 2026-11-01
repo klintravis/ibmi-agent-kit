@@ -29,7 +29,7 @@ claude mcp add ibmi-agent-kit -- node <abs path>/packages/server/dist/index.js
 Use the absolute path to this checkout in place of `<abs path>`. Restart Claude Code or run
 `/mcp`. The server speaks MCP on stdio and exits when the client closes it.
 
-Try it: [docs/demo.md](docs/demo.md) is a quick-start demo you can run against your own IBM i.
+Try it: [docs/demo.md](docs/demo.md) is a quick-start demo you can run against your own IBM i (or guided: `/demo`).
 
 ## Tools
 

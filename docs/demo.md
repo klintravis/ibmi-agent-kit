@@ -2,7 +2,8 @@
 
 A 5-minute demo of the guard (observe, then enforce), verbs and the config bootstrap, run against
 your own IBM i: PUB400 or your own box. Every step names its expected result. Steps marked
-**Human** need you; the rest you paste to Claude.
+**Human** need you; the rest you paste to Claude. For a guided version, copy the kit's
+`.claude/skills/demo` into your demo folder's `.claude/skills/` (or `~/.claude/skills/`) and run `/demo`.
 
 ## Prerequisites
 
