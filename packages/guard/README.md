@@ -48,6 +48,42 @@ node <repo>/packages/server/dist/index.js policy replay <candidate-policy> [--si
 
 A policy file named by `IBMI_KIT_POLICY` in a profile (absolute path). Reference: [docs/policy.md](../../docs/policy.md).
 
+## Verbs
+
+A verb is a named, parameterised SQL/CL procedure in one YAML file, run by `verb_run` through the same guard as `run_script`. Full reference: [docs/verbs.md](../../docs/verbs.md).
+
+- **Layers.** `user` (`~/.ibmi-agent-kit/verbs`), `proj` (`.ibmi-kit/verbs` and `IBMI_KIT_VERBS`), `org` (`verbs/` beside the policy file). `proj:NAME` addresses one; a bare `NAME` takes the closest layer (`user`, `proj`, `org`) and `verb_list` marks the hidden ones as overridden.
+- **`:p` vs `${p}`.** `:p` is sent as a bound value, never spliced into the text. `${p}` is text substitution for names and is allowed only for a parameter with an `allowed` list or of type integer, decimal, date or boolean; anything else refuses the verb at load.
+- **`requires_absent`.** A query run just before its setup statement; a returned row fails the verb there, so existing data is never overwritten or cleaned up.
+- **Cleanup.** An entry runs only if the setup `id` it `undoes` succeeded, even when a step failed.
+- **Check first.** `policy_check` with `verb` and `args` shows every statement's decision and runs nothing.
+- **Suites.** `verb_run` with `tag` runs every verb carrying the tag.
+
+Example, [examples/verbs/SMOKE-SAMPLE.yaml](../../examples/verbs/SMOKE-SAMPLE.yaml) (replace `MYLIB` with a library of your own):
+
+```yaml
+name: SMOKE-SAMPLE
+description: Create a scratch table, insert a row, read it back, drop the table
+tags: [smoke]
+params:
+  # your own library; never QGPL. Replace MYLIB with it before running.
+  lib: { type: string, default: MYLIB, allowed: [MYLIB] }
+  id:  { type: integer, default: 1 }
+setup:
+  - id: table
+    requires_absent: "SELECT 1 FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = '${lib}' AND TABLE_NAME = 'SMOKESAMPLE'"
+    sql: "CREATE TABLE ${lib}.SMOKESAMPLE (ID INTEGER, NOTE VARCHAR(20))"
+  - id: row
+    sql: "INSERT INTO ${lib}.SMOKESAMPLE VALUES (:id, 'hello')"
+steps:
+  - expect:
+      sql: "SELECT NOTE FROM ${lib}.SMOKESAMPLE WHERE ID = :id"
+      equals: { NOTE: hello }
+cleanup:
+  - undoes: table
+    sql: "DROP TABLE ${lib}.SMOKESAMPLE"
+```
+
 ## Tests
 
 `src/selfcheck.ts`, run by `npm run check` from the repo root. Stubbed lookups, no IBM i.

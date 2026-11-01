@@ -1105,6 +1105,22 @@ test("verbs: unknown key is refused naming the file and key; other verbs still l
   assert.ok(set.errors[0].split("\n").includes(`${join(root, P, "BAD.yaml")}: (top): Unrecognized key(s) in object: 'step'`), set.errors[0]);
 });
 
+const SAMPLE = fileURLToPath(new URL("../../../examples/verbs/SMOKE-SAMPLE.yaml", import.meta.url));
+
+test("verbs: examples/verbs/SMOKE-SAMPLE.yaml loads through the real loader", () => {
+  const set = loadVerbs({ cwd: join(dirname(SAMPLE), "nowhere"), extra: dirname(SAMPLE) });
+  assert.deepEqual(set.errors, []);
+  assert.deepEqual(addresses(set), ["proj:SMOKE-SAMPLE"]);
+});
+
+test("verbs: the guard README embeds SMOKE-SAMPLE.yaml byte for byte", () => {
+  const lf = (s: string) => s.replace(/\r\n/g, "\n");
+  const readme = lf(readFileSync(fileURLToPath(new URL("../README.md", import.meta.url)), "utf8"));
+  const block = /```yaml\n(name: SMOKE-SAMPLE\n[\s\S]*?)```/.exec(readme);
+  assert.ok(block, "README has the SMOKE-SAMPLE yaml block");
+  assert.equal(block[1], lf(readFileSync(SAMPLE, "utf8")));
+});
+
 test("verbs: project folder found automatically; user, IBMI_KIT_VERBS and org layers load", () => {
   const files = { [P + "SMOKE-ORDERS.yaml"]: verbYaml("SMOKE-ORDERS"), [U + "MINE.yml"]: verbYaml("mine"), "x1/A.yaml": verbYaml("X1"), "x2/B.yaml": verbYaml("X2"), [O + "TEAM.yaml"]: verbYaml("TEAM"), [P + "notes.txt"]: "not a verb" };
   const set = loadVerbs(verbRoot(files, ["x1", "x2"]).src);

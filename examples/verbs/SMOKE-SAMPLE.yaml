@@ -1,0 +1,20 @@
+name: SMOKE-SAMPLE
+description: Create a scratch table, insert a row, read it back, drop the table
+tags: [smoke]
+params:
+  # your own library; never QGPL. Replace MYLIB with it before running.
+  lib: { type: string, default: MYLIB, allowed: [MYLIB] }
+  id:  { type: integer, default: 1 }
+setup:
+  - id: table
+    requires_absent: "SELECT 1 FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = '${lib}' AND TABLE_NAME = 'SMOKESAMPLE'"
+    sql: "CREATE TABLE ${lib}.SMOKESAMPLE (ID INTEGER, NOTE VARCHAR(20))"
+  - id: row
+    sql: "INSERT INTO ${lib}.SMOKESAMPLE VALUES (:id, 'hello')"
+steps:
+  - expect:
+      sql: "SELECT NOTE FROM ${lib}.SMOKESAMPLE WHERE ID = :id"
+      equals: { NOTE: hello }
+cleanup:
+  - undoes: table
+    sql: "DROP TABLE ${lib}.SMOKESAMPLE"
