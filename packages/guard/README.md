@@ -4,7 +4,7 @@ The execution guard's pure half: it classifies SQL statements and CL commands, l
 
 The guard catches mistakes, it is not a security boundary. It classifies only the text it is given. It does not see what called programs, triggers, application menu options or prompted fields do, and options typed on a list screen are not command lines. IBM i object authority stays the real boundary.
 
-Status: the guard decides `run_script`, `verb_run`, `policy_check` and, through the server's hook, the source tools (`run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list` changes, `compile_member`) and the 5250 tools (the command line before `screen_do` and `run_tests` keys, `session_open`'s sign-on program and library). The catalog queries it uses (`USER_INFO`, `AUTHORIZATION_LIST_USER_INFO`, `SYSSCHEMAS`, `SYSVIEWDEP`, `SYSTABLES`, `LIBRARY_LIST_INFO`) ran on PUB400 as a normal user and none was refused, in observe and enforce mode. The format of the supplemental group list is not yet verified: the test user has no groups.
+It decides `run_script`, `verb_run`, `policy_check` and, through the server's hook, the source tools and the 5250 tools; what is unverified on a live system is listed under [Limits](../../docs/policy.md#limits).
 
 ## How a statement is decided
 

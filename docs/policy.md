@@ -1,7 +1,6 @@
 # Policy file reference
 
-The execution policy is one YAML file that tells the [guard](../packages/guard/README.md) what each user may do in which library. It decides `run_script`, `verb_run` and `policy_check`, the source tools, the 5250 command line before each key that sends it, and `session_open`'s sign-on program and library (see [Safety in the root README](../README.md#safety)). Status: its decisions and catalog lookups ran on PUB400 as a normal (non-admin) user, in observe and enforce mode; not exercised there: roles from groups or authorization lists, alias and view resolution with real aliases or views, and the supplemental-group list format (the test user has no groups).
-
+The execution policy is one YAML file that tells the [guard](../packages/guard/README.md) what each user may do in which library. It decides `run_script`, `verb_run` and `policy_check`, the source tools, the 5250 command line before each key that sends it, and `session_open`'s sign-on program and library (see [Safety in the root README](../README.md#safety)).
 The guard catches mistakes. It classifies the text it is given, not what called programs or triggers do. IBM i object authority stays the real boundary.
 
 ## Turn it on
@@ -150,7 +149,7 @@ commands:
 | `class` or `class_by_param` | Exactly one. `class_by_param` picks a class from a parameter's value, with a `default`. |
 | `library` | The product library the command must be qualified to; otherwise `danger`. |
 | `positional` | Keyword order for values written without a keyword. A list given by position is written in parentheses, `CHGLIBL (A B C)`. More positional values than listed is `danger`. |
-| `params` | Parameters that name an `object`, `library` or `rdb`, optionally `{ kind, class, partition }`. |
+| `params` | Parameters that name an `object`, `library` or `rdb`, optionally `{ kind, class, partition }`. List every parameter that names a library or object: a parameter not listed is not interpreted, so a library it names is not decided. |
 | `writes` | Object parameters that are written when given (for example `OUTFILE`). |
 | `nested_sql` | The parameter holding an SQL statement, classified as SQL (`RUNSQL`). |
 | `reason` | Shown with a `danger` class. |
@@ -161,8 +160,7 @@ commands:
 
 ## Example
 
-[examples/three-partitions.yaml](../examples/three-partitions.yaml) is a complete policy with three partitions, environments, four roles and a command file ([cm-product.yaml](../examples/cm-product.yaml)), and [examples/three-partitions.tests.yaml](../examples/three-partitions.tests.yaml) tests it. Every name in it is invented. Starting points for a new company repo (observe mode, with tests) are in [templates/policies](../templates/policies): `single-partition-ladder`, `two-partition`, `three-lpar` and `per-developer-libs`; the repo layout is in [templates/company-repo](../templates/company-repo/README.md). They are not published with the packages. An admin can have Claude Code generate that repo instead: the [ibmi-kit-config skill](../.claude/skills/ibmi-kit-config/SKILL.md) reads the IBM i (`run_sql` selects only), asks what it cannot discover, and writes an observe-mode policy with its tests on a branch; [templates/dry-run](../templates/dry-run/discovery.json) is a worked example for an invented shop, and the kit's checks run its tests. Its bootstrap has run on PUB400 in an empty repo: discovery was not refused, and the generated policy tests passed.
-
+[examples/three-partitions.yaml](../examples/three-partitions.yaml) is a complete policy with three partitions, environments, four roles and a command file ([cm-product.yaml](../examples/cm-product.yaml)), and [examples/three-partitions.tests.yaml](../examples/three-partitions.tests.yaml) tests it. Every name in it is invented. Starting points for a new company repo (observe mode, with tests) are in [templates/policies](../templates/policies): `single-partition-ladder`, `two-partition`, `three-lpar` and `per-developer-libs`; the repo layout is in [templates/company-repo](../templates/company-repo/README.md). They are not published with the packages. An admin can have Claude Code generate that repo instead: the [ibmi-kit-config skill](../.claude/skills/ibmi-kit-config/SKILL.md) reads the IBM i (`run_sql` selects only), asks what it cannot discover, and writes an observe-mode policy with its tests on a branch; [templates/dry-run](../templates/dry-run/discovery.json) is a worked example for an invented shop, and the kit's checks run its tests.
 ## Test a policy
 
 ```sh
@@ -206,12 +204,24 @@ To check one script or verb without a connection from an agent, call `policy_che
 
 ## Run log
 
-See [Run log in the guard README](../packages/guard/README.md#run-log). It is a local, editable record, not an audit trail.
+See [Run log in the guard README](../packages/guard/README.md#run-log). It is a local, editable record, not an audit trail. One line of `runs/YYYY-MM-DD.jsonl` (a single line in the file; wrapped here, with invented names and hash shortened):
+
+```json
+{"time":"2026-03-02T14:05:11.482Z","call":"6f1c2d9e-7a40-4b0e-9c1d-3a5b8e2f1d77","index":0,"server":"dev",
+ "tool":"run_script","identity":{"user":"JDOE","groups":["GRPDEV"],"authlists":[],"partition":"dev"},
+ "roles":["dev"],"roleSource":"matched","partition":"dev","mode":"observe","policy":"9b2e...41c7",
+ "kind":"sql","text":"SELECT * FROM CMPRD.ORDHDR WHERE ORDNO = 1042",
+ "operations":[{"class":"read","object":{"lib":"CMPRD","name":"ORDHDR"},"env":"devlibs","partition":"dev",
+   "decision":"allow","enforced":false,"reason":"rule","rule":5,"message":"allowed by rule 5"}],
+ "rule":5,"decision":"allow","effective":"allow","enforced":false,"outcome":"ok"}
+```
+
+`decision` is what the policy says, `effective` what happened (in observe mode a deny still runs, with `enforced: false`).
 
 ## Limits
 
 - The guard sees the text it is given: not what a called program, trigger, menu option or prompted field does, and not options typed on a list screen.
 - A decision is made against the job as it was when the script was planned; a job lost or reset in between refuses the send.
-- Not yet verified on a live IBM i: the supplemental-group list format (the PUB400 test user has no groups). The catalog lookups ran there as a normal user and none was refused; `AUTHORIZATION_LIST_USER_INFO`, aliases and `SYSVIEWDEP` returned no rows.
+- Not verified on a live system: the supplemental-group list format, roles resolved from groups or authorization lists, alias and view resolution, and the `daemon` transport. Check them with `policy_check` as a normal user before you enforce.
 - 5250: only the command line is decided, when a key that sends field data (not F3, F12, Clear or Attn) is pressed; F4 (prompt) with a command on the line is always denied, like `?`; `session_open`'s `menu` is not decided; the screen engine's restricted mode and `IBMI_BLOCKED_CL` also check what the line holds at the key, so a command brought back with F9 meets both them and the guard. A menu option (digits only) on a `===>` line is not decided; other text there that is not a command is denied. The guard cannot see the 5250 job, so on a command line `*CURLIB` is unqualified and a write through an alias or view in `QTEMP` is denied.
 - `compile_member` with no `targetLibrary` compiles into `*CURLIB`, decided as the job's current library; with none, it is denied as unqualified.

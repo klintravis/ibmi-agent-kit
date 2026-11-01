@@ -121,7 +121,7 @@ All configuration lives in a profile file: `.env` for the default server, `.env.
 2. `~/.ibmi-agent-kit/`
 3. `~/.ibm-i-servers/`
 
-The old `~/.ibm-i-5250-mcp/` folder and the install folder are no longer read. Connection and safety settings (host, user, password, ports, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_5250_TLS_INSECURE`) come from the profile file only, never from the environment. See the root `README.md`.
+Connection and safety settings (host, user, password, ports, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_5250_TLS_INSECURE`) come from the profile file only, never from the environment. See the root `README.md`.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -311,7 +311,6 @@ src/
   types.ts       shared types
   selfcheck.ts   npm run check, the test suite
 scripts/
-  smoke.mjs      live smoke test
   test.mjs       screen tests from a terminal
 test/fixtures/
   signon.bin     a sign on record, for the test suite

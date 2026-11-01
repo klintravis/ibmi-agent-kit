@@ -5,6 +5,10 @@ and CL, all through the signed-on user's own IBM i profile. Each user signs on a
 so IBM i object authority stays the real boundary. An execution guard catches dangerous mistakes
 in `run_script` and `verb_run` before they run; see [Safety](#safety).
 
+The split of work: users sign on as themselves; what a company knows about its system (procedures,
+naming, standards) lives in Claude skills in the company's private repo, and the MCP holds none of
+it; the MCP executes and the guard checks.
+
 ## Packages
 
 | Package | What |
@@ -118,19 +122,6 @@ PUB400 is a free public IBM i for learning. For the kit:
 - Never create objects in `QGPL`; use your own library.
 - Non-commercial use only. Keep sessions few and close them when done.
 
-## Moving from the old servers
-
-The kit replaces `ibm-i-5250-mcp` and `ibm-i-source-mcp`.
-
-- Remove the old registrations and add `ibmi-agent-kit` (above).
-- `~/.ibm-i-5250-mcp`, `~/.ibm-i-source-mcp` and a `.env` in an install folder are no longer
-  read. Move the files into `~/.ibmi-agent-kit` (`~/.ibm-i-servers` is still read).
-- `IBMI_*` connection and safety values set in the MCP registration's `env` are ignored for
-  the protected settings above. Put them in the profile file.
-- For the other `IBMI_*` settings the profile file now wins over the environment: the old servers
-  let a value in the registration's `env` override the file, the kit uses it only when the file
-  omits the setting.
-
 ## Safety
 
 `run_script` runs every SQL statement and CL command through the execution guard: each is
@@ -179,121 +170,23 @@ remains the real boundary. The source tools also use `IBMI_READ_ONLY`, `IBMI_BLO
 `IBMI_BLOCKED_CL` (the last applies only when restricted is off); they ignore `IBMI_READ_ONLY`.
 Those three check text as it is typed into a command line and again, before the guard, on what the
 line holds when the key is pressed, so a command brought back with F9 meets both.
-The guard's catalog lookups ran on PUB400 as a normal (non-admin) user and none was refused; the supplemental-group list format is still unverified, because the test user has no groups.
 
 ## Policy
 
-The guard's rules are one YAML file, set per profile with `IBMI_KIT_POLICY` (an absolute path). Field
-reference, command tables and the test format are in [docs/policy.md](docs/policy.md); this is the
-outline. This example, [examples/three-partitions.yaml](examples/three-partitions.yaml), uses invented
-names and is tested by [examples/three-partitions.tests.yaml](examples/three-partitions.tests.yaml):
-
-```yaml
-version: 1
-mode: { default: observe, prod: enforce }
-partitions:
-  - { name: dev,  systems: [DEVBOX],  rdbs: [DEVRDB] }
-  - { name: qa,   systems: [QABOX],   rdbs: [QARDB, QAIASP1] }   # mirror of prod
-  - { name: prod, systems: [PRODBOX], rdbs: [PRODRDB] }
-unknown_partition: prod
-command_files: [cm-product.yaml]          # e.g. CMPRM with class_by_param LEVEL → promote_qa
-environments:                             # one list, first match wins
-  - { name: scratch,    libraries: [QTEMP] }
-  - { name: personal,   match: ["${USER}", "${USER}_*"], partitions: [dev] }
-  - { name: blocked,    libraries: [PAYLIB] }
-  - { name: test,       match: ["QT*"], partitions: [qa] }      # before system, so Q* does not swallow it
-  - { name: system,     match: ["Q*", "SYS*"] }
-  - { name: devlibs,    match: ["DV*", "CR*"], partitions: [dev] }  # incl. per-ticket libs
-  - { name: integ,      match: ["IN*"], partitions: [dev] }
-  - { name: stage_qa,   match: ["SQ*"], partitions: [dev] }
-  - { name: stage_prod, match: ["SP*"], partitions: [dev] }
-  - { name: live,       match: ["LV*"] }
-roles:                                    # a user holds every role that matches
-  - { name: qa,         groups: [GRPQA], authlists: [AUTLQA] }
-  - { name: dev,        groups: [GRPDEV] }
-  - { name: contractor, users: ["CTR*"] }
-  - { name: analyst,    groups: [GRPANL] }
-default_role: analyst
-rules:                                    # first match wins; omitted key or `any` = anything; unmatched = deny
-  - { classes: [danger], decision: deny }
-  - { env: blocked, decision: deny }
-  - { env: scratch, classes: [read, write, ddl], decision: allow }
-  - { roles: [contractor], classes: [read], env: [personal, devlibs, integ], decision: allow }
-  - { roles: [contractor], decision: deny }
-  - { roles: [dev, qa], partition: dev, env: [personal, devlibs, integ], decision: allow }
-  - { roles: [qa], partition: dev, classes: [promote_qa], decision: allow }
-  - { roles: [qa], partition: qa, env: test, classes: [read, write, call], decision: allow }
-  - { roles: [dev, qa], classes: [liblist], decision: allow }
-  - { classes: [read], decision: allow }
-```
-
-- **Observe first.** `mode: observe` decides and logs and lets a statement run; `enforce` applies the
-  decision. A map (`mode: { default: observe, prod: enforce }`) sets it per partition, so you switch
-  boxes one at a time. A policy file without `mode` enforces. In every mode `danger` operations,
-  unqualified changes (a write with no library) and a partition conflict are denied (except an
-  unqualified command missing from the table in observe mode; see the limits below). With no policy
-  file the built-in policy (observe, one `allow` rule) still denies `danger` operations and
-  unqualified changes and logs everything.
-- **Sections.** `partitions` map a 5250 System name and an SQL RDB name to a named box
-  (`unknown_partition` catches the rest); `environments` group libraries by name or pattern, first
-  match wins; `roles` and `default_role` say who is who; `rules` decide by role, partition,
-  environment and class (`read`, `write`, `ddl`, `compile`, `call`, `liblist`, `promote`, your own),
-  first match wins, no match is deny. A statement takes the most restrictive decision of its parts.
-- **Command files.** The shipped CL command table is `packages/guard/src/commands.yaml`; an unlisted
-  command is `danger` (except an unqualified command missing from the table in observe mode; see the
-  limits below). `command_files` and `commands` add entries, and `class_by_param` classes a
-  command by a parameter's value, so a change-management product's promotion to QA and to production
-  are different classes (`CMPRM ... LEVEL(QA)` is `promote_qa` in the example's `cm-product.yaml`).
-- **Roles.** A user holds every role whose group profile or supplemental group (`groups`),
-  authorization list (`authlists`) or user-name pattern (`users`) matches, else `default_role`. The
-  guard reads these over SQL as the signed-on user.
-- **When the identity lookup fails** (a 5250-only profile with no working SQL connection, say), the
-  guard decides as the profile's user with `default_role`, and the run log says so. User-name roles
-  still match, and `danger` operations and unqualified changes stay denied. Only a successful
-  lookup is kept: after a failure the next call tries again. With a SQL connection configured but
-  not reachable, every guarded call, including each 5250 key that sends a command line, waits for
-  the lookup to fail (up to the connect time limit). Keep `default_role` your narrowest role.
-- **`confirm`** asks the user once through MCP elicitation, naming each operation. Only an accepted
-  form with `confirm: true` runs; a client without elicitation, a decline, a cancel and the 120 second
-  timeout all deny. One exception: after a confirmed read of an SQL member, `compile_member` fetches
-  the member and asks again for any of its statements that need it.
-- **Check before you trust it.** `policy_check` (a tool) reports the decisions for a script or verb
-  without running it; it sends only the catalog lookups needed. With `as` (and optionally `policy`,
-  a candidate file) it decides offline and sends nothing. `ibmi-agent-kit
-  policy test <policy> <tests>` (see [docs/policy.md](docs/policy.md) for the command line) runs a test file offline (exit 0 pass, 1 fail, 2 bad file): run it in
-  your company repo's CI. `ibmi-agent-kit policy replay <candidate> --since 14` replays the run log
-  under a candidate and lists each statement whose decision changes: run it before you enforce.
-- **Run log.** `run_script`, `verb_run`, guarded source tool and 5250 decisions are logged to
-  `runs/YYYY-MM-DD.jsonl` in the first folder in `CONFIG_DIRS()` (`~/.ibmi-agent-kit/runs` unless
-  `IBMI_KIT_CONFIG_DIR` is set); `policy_check` never logs. It is a local file
-  the user can edit, not tamper-proof and not an audit trail.
-- **Keep the agent out of the files.** Add client permission rules that deny the agent edits to the
-  policy file, the profile files and any verb files; otherwise it can loosen its own rules.
-
-Stated limits, beyond those under Safety:
-
-- Library-list shadowing. In observe mode an unqualified command missing from the command table is
-  logged as denied and runs, so after `ADDLIBLE MYLIB` an unqualified unknown `FROBCMD X` runs
-  `MYLIB/FROBCMD`. Commands in `QSYS` cannot be shadowed this way, a qualified unknown command is
-  denied, and so is an unknown command that names a program or command to run (`CMD`, `PGM`, ...).
-- While observing, the command table's `danger` entries are the boundary: an IBM command missing from
-  the table runs. Enforce mode denies it.
+The guard's rules are one YAML file, set per profile with `IBMI_KIT_POLICY` (an absolute path):
+partitions, environments, roles and first-match rules over the classes `read`, `write`, `ddl`,
+`compile`, `call`, `liblist`, `promote` and your own. Start in `mode: observe` (decide and log,
+block nothing extra) and switch partitions to `enforce` one at a time; `policy_check`, `policy test`
+and `policy replay` check a policy before you trust it. A policy lives in your company repo and the
+agent must not be able to edit it. Field reference, command tables, roles, the run log and stated
+limits are in [docs/policy.md](docs/policy.md); a complete example with tests is
+[examples/three-partitions.yaml](examples/three-partitions.yaml).
 
 ## Words
 
 "Statements and commands" means SQL statements and CL commands. A "verb" is a named,
 parameterised procedure (setup, steps, expectations, cleanup) that a person or a project writes
 as a YAML file; see [docs/verbs.md](docs/verbs.md).
-
-## Roadmap
-
-`unified-kit` is done; `execution-guard` is done (the guard decides `run_script`,
-`verb_run`, `policy_check`, the source tools and the 5250 tools, with `policy test` and `policy
-replay`; live-checked on PUB400).
-`project-verbs` is done (`verb_list`, `verb_run` and `policy_check` verb input and an example verb;
-live-checked on PUB400).
-`config-bootstrap` is done (the policy templates and the admin skill `ibmi-kit-config`;
-live-checked on PUB400). See `docs/idea.md`.
 
 ## Built on
 

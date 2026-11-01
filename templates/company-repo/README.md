@@ -10,12 +10,18 @@ Copy a policy from [../policies](../policies) to `policy.yaml` (with its tests),
   policy.yaml                    the execution policy (observe mode first)
   policy.tests.yaml              one allow and one deny per role x environment
   commands.yaml                  optional command file, listed under command_files in policy.yaml
+                                 (vendor commands; see ../../examples/cm-product.yaml)
   profiles/.env.<partition>      profile skeleton per partition: host, user, transport, IBMI_PARTITION
   verbs/smoke.yaml               org-layer verbs, found beside policy.yaml; one smoke verb to start
   .github/workflows/policy.yml   CI: policy test on every push
   .mcp.json                      registers the kit server for everyone who opens Claude Code here
   .claude/settings.json          client permission rules (below)
+  .claude/skills/<name>/SKILL.md your company's knowledge as Claude skills (Bring your existing skills)
 ```
+
+Order of work: run the `ibmi-kit-config` bootstrap first, in an empty repo (it refuses a repo
+that already holds other `.claude` content, a `package.json` or another project's sources), then
+copy your skills in.
 
 ## Get started
 
@@ -70,6 +76,94 @@ Each `profiles/.env.<partition>` holds `IBMI_HOST`, `IBMI_USER` (a placeholder),
 repo**, and no `IBMI_KIT_POLICY` either (its path differs per clone). Don't copy the skeleton: run
 setup (Get started), which copies every setting except the user, the password and the policy path,
 and adds yours.
+
+## Bring your existing skills
+
+A skill lives at `.claude/skills/<name>/SKILL.md` in this repo and loads for everyone who runs
+`claude` here. `.claude/settings.json` protects `verbs/**` from the agent; skills change by a
+reviewed pull request like everything else here, so one user's guess does not become everyone's fact.
+Sort each skill you already have:
+
+| The skill holds | It becomes |
+|---|---|
+| Knowledge: naming conventions, coding standards, how the shop works | Stays a skill. |
+| A repeatable CL or SQL procedure (a checkout, a cross-reference lookup, a compile procedure) | An org verb in `verbs/` ([docs/verbs.md](../../docs/verbs.md)); the skill shrinks to when and why to call `verb_run`. |
+| A vendor command (a change-management product's `CMCHKOUT`, `CMPRM`) | An entry in `commands.yaml` (next section). |
+| A standard a machine can check (no writes to production libraries, promotions only by QA) | A rule in `policy.yaml`, with a case in `policy.tests.yaml`. |
+
+What the agent used to do by habit now goes through a kit tool, so the guard decides it:
+
+| Old habit | Kit tool |
+|---|---|
+| Typed CL on a 5250 command line, ad-hoc SQL | `run_script`, `run_sql`, or a named procedure with `verb_run` |
+| Read, edit and compile source | `read_source_member`, `upload_source_member`, `compile_member`, `search_source` |
+| `ADDLIBL` / `ADDLIBLE` | `manage_library_list` |
+
+In a skill, tell Claude to pass `server` (a name from `list_servers`) on every call, and to call
+`policy_check` with the `verb` and its `args` before `verb_run`. Skeleton:
+
+````markdown
+---
+name: cm-checkout
+description: Check an object out of change management into a request. Use when the user asks to check out, lock or start work on an object in CMPRD.
+---
+
+# Check out an object
+
+## When to use
+The user names an object and a request number and wants to change it.
+
+## How
+1. `list_servers`, then use the partition's `server` name in every call below.
+2. `policy_check` with `verb: cm-checkout` and `args: { req, object }`. Stop and report if any statement is denied.
+3. `verb_run` with the same `verb` and `args`.
+
+## Why
+Checkout locks the object for the request; two people editing one object is the failure this avoids.
+````
+
+## Vendor commands and product libraries
+
+List a change-management or cross-reference product's commands in `commands.yaml` (listed under
+`command_files`); [examples/cm-product.yaml](../../examples/cm-product.yaml) is the shape, and
+[docs/policy.md](../../docs/policy.md#command-tables) has every key.
+
+- List every parameter that names a library or object in `params`. A parameter not listed is not
+  interpreted, so a library it names is not decided.
+- Read-only lookups and refresh or write commands are different classes. Give the lookups
+  `class: read` and the refreshes and checkouts `class: write` (or your own class), so a rule can
+  allow one and not the other.
+- Give every rule for a vendor command's class an `env:`. A rule with only `classes:` matches the
+  command in any library.
+- Add an environment for the product libraries and allow `liblist` and `read` there, so the
+  product's commands can be reached and read:
+
+```yaml
+# commands.yaml (invented product)
+commands:
+  WRKCMREQ: { class: read, library: CMPRD, positional: [REQ] }
+  CMCHKOUT: { class: write, library: CMPRD, positional: [REQ, OBJ, SRCLIB], params: { OBJ: object, SRCLIB: library } }
+  XRFREFRSH: { class: write, library: XREF, positional: [LIB], params: { LIB: library } }
+```
+
+```yaml
+# policy.yaml
+environments:
+  - { name: products, libraries: [CMPRD, XREF] }
+rules:
+  - { env: products, classes: [liblist, read], decision: allow }
+  - { roles: [dev], env: products, classes: [write], decision: confirm }
+```
+
+## Denied even in observe mode
+
+`mode: observe` lets a denied statement run, except these, which are denied in every mode:
+
+- `SBMJOB` wrapping a command: the job runs elsewhere, unseen. Call the command directly, or wrap the work in a verb.
+- `QSH` and `STRQSH` (Qshell): opaque to the guard. Use the CL or SQL it would run, or a verb.
+- A CL variable (`&VAR`) in a parameter: its value is known only at run time. Write the value, or pass it as a verb argument.
+- An unqualified vendor command whose entry has a `library:`. Qualify it to its product library (`CMPRD/CMCHKOUT`).
+- A command not in the table, qualified to a product library. Add it to `commands.yaml`, or call it from a verb once it is classified.
 
 ## Policy and tests
 

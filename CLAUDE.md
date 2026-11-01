@@ -1,7 +1,6 @@
 # ibmi-agent-kit
 
-One MCP server for IBM i (5250 screens, source members, SQL and CL). Intent and roadmap:
-`docs/idea.md`. Setup: `README.md`.
+One MCP server for IBM i (5250 screens, source members, SQL and CL). Setup: `README.md`.
 
 ## Layout
 
