@@ -21,11 +21,11 @@
 
 ## 4. Docs
 
-- [ ] 4.1 `docs/policy.md` command tables `params` row and `templates/company-repo/README.md` `params` bullet: keep the limit sentence and add that `policy_check` and `policy test` warn when a command is given a parameter its entry does not name (and that a keyword listed only in `positional` is treated as considered). `docs/policy.md` Test a policy / `policy_check` section: one line on the warning. Verify the links resolve and `node scripts/check-names.mjs` passes (invented names only).
+- [x] 4.1 `docs/policy.md` command tables `params` row and `templates/company-repo/README.md` `params` bullet: keep the limit sentence and add that `policy_check` and `policy test` warn when a command is given a parameter its entry does not name (and that a keyword listed only in `positional` is treated as considered). `docs/policy.md` Test a policy / `policy_check` section: one line on the warning. Verify the links resolve and `node scripts/check-names.mjs` passes (invented names only).
 
 ## 5. Integration
 
-- [ ] 5.1 Run `node packages/server/dist/index.js policy test examples/three-partitions.yaml examples/three-partitions.tests.yaml`: exit code as before; list any warnings it prints (gaps in the shipped table) in the change's commit message for a follow-up todo, do not fix them here. Then `npm run clean && npm run check` exits 0.
+- [x] 5.1 Run `node packages/server/dist/index.js policy test examples/three-partitions.yaml examples/three-partitions.tests.yaml`: exit code as before; list any warnings it prints (gaps in the shipped table) in the change's commit message for a follow-up todo, do not fix them here. Then `npm run clean && npm run check` exits 0.
 
 ## Workflow follow-up
 

@@ -129,7 +129,9 @@ List a change-management or cross-reference product's commands in `commands.yaml
 [docs/policy.md](../../docs/policy.md#command-tables) has every key.
 
 - List every parameter that names a library or object in `params`. A parameter not listed is not
-  interpreted, so a library it names is not decided.
+  interpreted, so a library it names is not decided. `policy test` (on stderr) and `policy_check`
+  warn when a command is given a parameter its entry does not name; a keyword listed only in
+  `positional` counts as considered.
 - Read-only lookups and refresh or write commands are different classes. Give the lookups
   `class: read` and the refreshes and checkouts `class: write` (or your own class), so a rule can
   allow one and not the other.

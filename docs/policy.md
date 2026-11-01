@@ -149,7 +149,7 @@ commands:
 | `class` or `class_by_param` | Exactly one. `class_by_param` picks a class from a parameter's value, with a `default`. |
 | `library` | The product library the command must be qualified to; otherwise `danger`. |
 | `positional` | Keyword order for values written without a keyword. A list given by position is written in parentheses, `CHGLIBL (A B C)`. More positional values than listed is `danger`. |
-| `params` | Parameters that name an `object`, `library` or `rdb`, optionally `{ kind, class, partition }`. List every parameter that names a library or object: a parameter not listed is not interpreted, so a library it names is not decided. |
+| `params` | Parameters that name an `object`, `library` or `rdb`, optionally `{ kind, class, partition }`. List every parameter that names a library or object: a parameter not listed is not interpreted, so a library it names is not decided. `policy_check` and `policy test` warn when a command is given a parameter this entry does not name (a keyword listed only in `positional` counts as named, so it stays silent even if it names a library). |
 | `writes` | Object parameters that are written when given (for example `OUTFILE`). |
 | `nested_sql` | The parameter holding an SQL statement, classified as SQL (`RUNSQL`). |
 | `reason` | Shown with a `danger` class. |
@@ -201,6 +201,8 @@ node <repo>/packages/server/dist/index.js policy replay candidate.yaml --since 1
 It prints each logged statement whose decision changes, and a count. It reads the run log in the first folder in `CONFIG_DIRS()` (`~/.ibmi-agent-kit/runs` unless `IBMI_KIT_CONFIG_DIR` (or the older `IBMI_MCP_CONFIG_DIR`) is set).
 
 To check one script or verb without a connection from an agent, call `policy_check` with `script` or `verb` (and `args`), `as` and, optionally, `policy`.
+
+Both warn, without changing a decision or the exit code, when a command is given a parameter its table entry does not name and the value looks like a library or object name: `policy test` prints `warning: <case>: <warning>` on stderr, `policy_check` returns a `warnings` list per statement. Add the parameter to the entry's `params` (or `positional`) to decide it.
 
 ## Run log
 
