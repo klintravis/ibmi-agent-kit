@@ -1,0 +1,20 @@
+# Expected decisions for the demo (observe). MYLIB and MYUSER are placeholders; keep them in step
+# with policy-observe.yaml.
+- name: owner works in the own library
+  as: { user: MYUSER, groups: [], partition: demo }
+  script: |
+    SELECT * FROM MYLIB.T;
+    CREATE TABLE MYLIB.T (X INT);
+    INSERT INTO MYLIB.T VALUES (1);
+    DROP TABLE MYLIB.T
+  expect: [allow, allow, allow, allow]
+- name: unqualified change and danger are denied
+  as: { user: MYUSER, groups: [], partition: demo }
+  script: |
+    CL: DLTF FILE(X)
+    CL: PWRDWNSYS
+  expect: [deny, deny]
+- name: another user only reads the owner's library
+  as: { user: OTHER, groups: [], partition: demo }
+  script: SELECT * FROM MYLIB.T; DELETE FROM MYLIB.T
+  expect: [allow, deny]

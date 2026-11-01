@@ -1,0 +1,23 @@
+# Quick-start demo policy (enforce). Same as policy-observe.yaml, plus a confirm rule on DDL in
+# your own library. See docs/demo.md.
+# MYLIB and MYUSER are placeholders: replace them with your own library and user, here and in
+# enforce.tests.yaml.
+version: 1
+mode: { default: enforce }
+partitions:
+  - { name: demo, systems: [PUB400], rdbs: [PUB400] }
+unknown_partition: demo
+environments:
+  - { name: scratch,  libraries: [QTEMP] }
+  - { name: personal, libraries: [MYLIB] }
+  - { name: system,   match: ["Q*", "SYS*"] }
+roles:
+  - { name: owner, users: ["MYUSER"] }
+  - { name: guest, users: ["#NOBODY"] }   # only reached as default_role
+default_role: guest
+rules:
+  - { classes: [danger], decision: deny }
+  - { env: scratch, decision: allow }
+  - { roles: [owner], env: personal, classes: [ddl], decision: confirm }
+  - { roles: [owner], env: personal, decision: allow }
+  - { classes: [read], decision: allow }

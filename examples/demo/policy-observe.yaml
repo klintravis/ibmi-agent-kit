@@ -1,0 +1,21 @@
+# Quick-start demo policy (observe). See docs/demo.md.
+# MYLIB and MYUSER are placeholders: replace them with your own library and user, here and in
+# observe.tests.yaml. One partition; whatever system you connect to maps to it.
+version: 1
+mode: { default: observe }
+partitions:
+  - { name: demo, systems: [PUB400], rdbs: [PUB400] }
+unknown_partition: demo
+environments:                             # first match wins
+  - { name: scratch,  libraries: [QTEMP] }
+  - { name: personal, libraries: [MYLIB] }
+  - { name: system,   match: ["Q*", "SYS*"] }
+roles:
+  - { name: owner, users: ["MYUSER"] }
+  - { name: guest, users: ["#NOBODY"] }   # only reached as default_role
+default_role: guest
+rules:                                    # first match wins; unmatched = deny
+  - { classes: [danger], decision: deny }
+  - { env: scratch, decision: allow }
+  - { roles: [owner], env: personal, decision: allow }
+  - { classes: [read], decision: allow }

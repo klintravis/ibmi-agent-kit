@@ -217,6 +217,14 @@ test("policy test: the example suite passes and exits 0, without starting MCP", 
   assert.doesNotMatch(r.stderr, /MCP server ready/);
 });
 
+// demo-quickstart: the demo policies pass their own tests, so docs/demo.md cannot drift.
+test("policy test: both demo policies pass their tests", async () => {
+  for (const p of ["observe", "enforce"]) {
+    const r = await runBin(["policy", "test", join(EXAMPLES, `demo/policy-${p}.yaml`), join(EXAMPLES, `demo/${p}.tests.yaml`)]);
+    assert.equal(r.code, 0, p + "\n" + r.stdout + r.stderr);
+  }
+});
+
 // config-bootstrap: every shipped template loads and passes its own tests, so none drifts from the format.
 test("policy templates: each loads, is in observe mode and passes its tests", async () => {
   const dir = join(EXAMPLES, "../templates/policies/");
