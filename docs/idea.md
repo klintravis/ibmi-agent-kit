@@ -20,15 +20,22 @@ company's own private repo.
 
 Each step lands as an OpenSpec change under `openspec/changes/`.
 
-1. `unified-kit`: one server, one profile loader, a SQL transport that can execute. *(this change)*
-2. `execution-guard`: check SQL and CL before they run, in observe mode first.
+1. `unified-kit`: one server, one profile loader, a SQL transport that can execute. *(done)*
+2. `execution-guard`: check SQL and CL before they run, in observe mode first. *(built; a live check
+   on PUB400 and the archive are open)* Statements and commands are classified and decided against a
+   policy file (partitions, environments, roles, rules) for `run_script`, `verb_run`, `policy_check`,
+   the source tools and the 5250 command line; `confirm` asks through elicitation; decisions go to a
+   local run log; `policy test` and `policy replay` run offline. Observe mode still denies `danger`
+   and `unqualified` operations, and its limits are stated in the README. See `docs/policy.md`.
 3. `project-verbs`: named, reviewed operations a project defines on top of statements and commands.
 4. `config-bootstrap`: create and validate a user's profiles and settings.
-5. Company pilot, starting in observe mode: log what the guard would block, block nothing.
+5. Company pilot, starting in observe mode: log what the guard would block, and run it apart from
+   what is always denied (`danger`, `unqualified`, a partition conflict).
 
 ## Open questions
 
 - Whether a company's security review approves SSH plus a bundled jar upload, or prefers an
   admin-run Mapepire daemon (the `daemon` transport).
-- Whether the client supports elicitation, so the guard can ask a person to confirm.
+- Whether the client supports elicitation, so the guard can ask a person to confirm. (A client
+  without it gets a deny for every `confirm`.)
 - Whether PUB400's terms allow automated agent sessions, and at what rate.

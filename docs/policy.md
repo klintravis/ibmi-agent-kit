@@ -80,7 +80,7 @@ roles:
 default_role: analyst
 ```
 
-A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match. If the identity lookup itself fails (a profile with no working SQL connection, as a 5250-only one may be), the profile's user is decided the same way with no groups, so usually as `default_role`; the run log notes the failure, it is tried again after a minute, and `danger` and `unqualified` stay denied in every mode.
+A user holds every role whose `groups` (group profile or supplemental group), `authlists` (authorization lists naming the user) or `users` (patterns) match. A user who matches none holds `default_role`, or no role if none is set. If the group lookup fails, user-name roles still match. If the identity lookup itself fails (a profile with no working SQL connection, as a 5250-only one may be), the profile's user is decided the same way with no groups, so usually as `default_role`; the run log notes the failure, it is tried again after about 60 seconds, and `danger` and `unqualified` stay denied in every mode.
 
 ### Rules
 
@@ -127,7 +127,9 @@ Always denied, in every mode: `danger` operations (a qualified command not in th
 mode: { default: observe, prod: enforce }
 ```
 
-While observing, the command table's `danger` entries are the boundary: an IBM command missing from the table runs. Qualified unknown commands (`MYLIB/FROBCMD`) are denied in every mode.
+While observing, the command table's `danger` entries are the boundary: an IBM command missing from the table runs. Qualified unknown commands (`MYLIB/FROBCMD`) are denied in every mode, and so is an unqualified unknown command that names a program or command to run (`CMD`, `PGM`, ...).
+
+Library-list shadowing is a stated limit of observe mode: an unqualified unknown command is logged as denied (reason `unknown_command`, not enforced) and runs, so after `ADDLIBLE MYLIB` an unqualified `FROBCMD X` runs `MYLIB/FROBCMD`. `QSYS` commands cannot be shadowed this way. Enforce mode denies it.
 
 ### Command tables
 

@@ -124,8 +124,9 @@ classified, matched against a policy file (roles, environments, partitions, rule
 confirmed with the user, or denied before anything is sent. `verb_run` does the same for every
 statement of a verb, its nested verbs and its cleanup, and for every verb of a tag suite, decided
 as one script before the first is sent; a verb runs with the signed-on user's rules, so sharing
-one grants nothing. `policy_check` makes the same decisions but only reports them. Without a
-policy file the guard only observes and logs, apart from statements it always denies.
+one grants nothing. `policy_check` makes the same decisions but only reports them. With no
+policy file the built-in policy (observe mode, one `allow` rule) logs every decision and runs
+everything except `danger` and `unqualified` operations, which it still denies (see [Policy](#policy)).
 
 The source tools are decided the same way before they act: `run_sql`, `read_source_member` and
 `search_source` as reads of their table, source file or library; `upload_source_member` as a write
@@ -163,6 +164,95 @@ Those three check text as it is typed into a command line and again, before the 
 line holds when the key is pressed, so a command brought back with F9 meets both.
 The guard's catalog lookups have not yet been verified on a live IBM i.
 
+## Policy
+
+The guard's rules are one YAML file, set per profile with `IBMI_KIT_POLICY` (an absolute path). Field
+reference, command tables and the test format are in [docs/policy.md](docs/policy.md); this is the
+outline. This example, [examples/three-partitions.yaml](examples/three-partitions.yaml), uses invented
+names and is tested by [examples/three-partitions.tests.yaml](examples/three-partitions.tests.yaml):
+
+```yaml
+version: 1
+mode: { default: observe, prod: enforce }
+partitions:
+  - { name: dev,  systems: [DEVBOX],  rdbs: [DEVRDB] }
+  - { name: qa,   systems: [QABOX],   rdbs: [QARDB, QAIASP1] }   # mirror of prod
+  - { name: prod, systems: [PRODBOX], rdbs: [PRODRDB] }
+unknown_partition: prod
+command_files: [cm-product.yaml]          # e.g. CMPRM with class_by_param LEVEL → promote_qa
+environments:                             # one list, first match wins
+  - { name: scratch,    libraries: [QTEMP] }
+  - { name: personal,   match: ["${USER}", "${USER}_*"], partitions: [dev] }
+  - { name: blocked,    libraries: [PAYLIB] }
+  - { name: test,       match: ["QT*"], partitions: [qa] }      # before system, so Q* does not swallow it
+  - { name: system,     match: ["Q*", "SYS*"] }
+  - { name: devlibs,    match: ["DV*", "CR*"], partitions: [dev] }  # incl. per-ticket libs
+  - { name: integ,      match: ["IN*"], partitions: [dev] }
+  - { name: stage_qa,   match: ["SQ*"], partitions: [dev] }
+  - { name: stage_prod, match: ["SP*"], partitions: [dev] }
+  - { name: live,       match: ["LV*"] }
+roles:                                    # a user holds every role that matches
+  - { name: qa,         groups: [GRPQA], authlists: [AUTLQA] }
+  - { name: dev,        groups: [GRPDEV] }
+  - { name: contractor, users: ["CTR*"] }
+  - { name: analyst,    groups: [GRPANL] }
+default_role: analyst
+rules:                                    # first match wins; omitted key or `any` = anything; unmatched = deny
+  - { classes: [danger], decision: deny }
+  - { env: blocked, decision: deny }
+  - { env: scratch, classes: [read, write, ddl], decision: allow }
+  - { roles: [contractor], classes: [read], env: [personal, devlibs, integ], decision: allow }
+  - { roles: [contractor], decision: deny }
+  - { roles: [dev, qa], partition: dev, env: [personal, devlibs, integ], decision: allow }
+  - { roles: [qa], partition: dev, classes: [promote_qa], decision: allow }
+  - { roles: [qa], partition: qa, env: test, classes: [read, write, call], decision: allow }
+  - { roles: [dev, qa], classes: [liblist], decision: allow }
+  - { classes: [read], decision: allow }
+```
+
+- **Observe first.** `mode: observe` decides and logs and lets a statement run; `enforce` applies the
+  decision. A map (`mode: { default: observe, prod: enforce }`) sets it per partition, so you switch
+  boxes one at a time. In every mode `danger`, `unqualified` and a partition conflict are denied.
+  With no policy file the built-in policy (observe, one `allow` rule) still denies `danger` and
+  `unqualified` operations and logs everything.
+- **Sections.** `partitions` map a 5250 System name and an SQL RDB name to a named box
+  (`unknown_partition` catches the rest); `environments` group libraries by name or pattern, first
+  match wins; `roles` and `default_role` say who is who; `rules` decide by role, partition,
+  environment and class (`read`, `write`, `ddl`, `compile`, `call`, `liblist`, `promote`, your own),
+  first match wins, no match is deny. A statement takes the most restrictive decision of its parts.
+- **Command files.** The shipped CL command table is `packages/guard/src/commands.yaml`; an unlisted
+  command is `danger`. `command_files` and `commands` add entries, and `class_by_param` classes a
+  command by a parameter's value, so a change-management product's promotion to QA and to production
+  are different classes (`CMPRM ... LEVEL(QA)` is `promote_qa` in the example's `cm-product.yaml`).
+- **Roles.** A user holds every role whose group profile or supplemental group (`groups`),
+  authorization list (`authlists`) or user-name pattern (`users`) matches, else `default_role`. The
+  guard reads these over SQL as the signed-on user.
+- **When the identity lookup fails** (a 5250-only profile with no working SQL connection, say), the
+  guard decides as the profile's user with `default_role`, and the run log says so. User-name roles
+  still match, and `danger` and `unqualified` stay denied. A failed lookup is retried after about 60
+  seconds.
+- **`confirm`** asks the user once through MCP elicitation, naming each operation. Only an accepted
+  form with `confirm: true` runs; a client without elicitation, a decline, a cancel and the 120 second
+  timeout all deny.
+- **Check before you trust it.** `policy_check` (a tool) reports the decisions for a script or verb
+  without sending anything; give `as` and `policy` to try another user or file. `ibmi-agent-kit
+  policy test <policy> <tests>` (see docs/policy.md for the command line) runs a test file offline (exit 0 pass, 1 fail, 2 bad file): run it in
+  your company repo's CI. `ibmi-agent-kit policy replay <candidate> --since 14` replays the run log
+  under a candidate and lists each statement whose decision changes: run it before you enforce.
+- **Run log.** Every decision goes to `runs/` in your profile folder as JSON lines. It is a local file
+  the user can edit, not tamper-proof and not an audit trail.
+- **Keep the agent out of the files.** Add client permission rules that deny the agent edits to the
+  policy file, the profile files and any verb files; otherwise it can loosen its own rules.
+
+Stated limits, beyond those under Safety:
+
+- Library-list shadowing. In observe mode an unqualified command missing from the command table is
+  logged as denied and runs, so after `ADDLIBLE MYLIB` an unqualified unknown `FROBCMD X` runs
+  `MYLIB/FROBCMD`. Commands in `QSYS` cannot be shadowed this way, a qualified unknown command is
+  denied, and so is an unknown command that names a program or command to run (`CMD`, `PGM`, ...).
+- While observing, the command table's `danger` entries are the boundary: an IBM command missing from
+  the table runs. Enforce mode denies it.
+
 ## Words
 
 "Statements and commands" means SQL statements and CL commands. A "verb" is a named,
@@ -171,8 +261,9 @@ as a YAML file; see [docs/verbs.md](docs/verbs.md).
 
 ## Roadmap
 
-`unified-kit` is done; `execution-guard` is in progress (the guard decides `run_script`,
-`verb_run`, `policy_check`, the source tools and the 5250 tools; docs and a live check are open).
+`unified-kit` is done; `execution-guard` is built (the guard decides `run_script`,
+`verb_run`, `policy_check`, the source tools and the 5250 tools, with `policy test` and `policy
+replay`); a live check on PUB400 and the archive are open.
 `project-verbs` is in progress (`verb_list`, `verb_run` and `policy_check` verb input are done;
 an example verb and a live check are open). Next: `config-bootstrap`, a company pilot. See
 `docs/idea.md`.
