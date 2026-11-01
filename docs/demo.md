@@ -230,7 +230,9 @@ an unexpected error.
 9. verb_run SEED-ADDROW, then screen_do key F5. Expected: Marigold appears as row 9 (In stock)
    and the foot reads 9 seeds.
 10. screen_do key F3, then session_close. Expected: F3 ends SEEDLST, the job's sign-on program, so
-   the job ends; session_close reports Session "default" closed.
+   the job ends and the sign-on screen comes back; session_close reports Session "default" closed.
+   Signed off cleanly. If it says no sign off was possible instead, the job already ended with
+   the program: go on.
 11. verb_run SEED-CLEAN. Expected: passes, ending on the empty check: no SEED object is left in
    MYLIB. If SEED-BUILD stopped halfway, SEED-CLEAN stops at the first missing object: run_sql the
    check query from SEED-PREP.yaml to list the names left, delete those with the matching lines of

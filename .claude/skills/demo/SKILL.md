@@ -137,6 +137,7 @@ The statements live in the verb files; never type them yourself.
 9. `run_tests` with the absolute path `<kit>/examples/showcase/screen-tests` and `session` set to
    the open session, before the next step: the tests expect 8 rows.
 10. `verb_run` SEED-ADDROW, then F5 with `screen_do`: the new row shows in the open list.
-11. F3 with `screen_do`, then `session_close`.
+11. F3 with `screen_do`, then `session_close`. F3 ends the job with its sign-on program, so a
+    "no sign off was possible" note here is expected; go on to the next step.
 12. `verb_run` SEED-CLEAN. In enforce mode the user answers its question. If it stops at a missing
     object, follow Part E step 11's recovery with `run_sql` and `run_script`, one step at a time.

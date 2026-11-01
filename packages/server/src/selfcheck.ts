@@ -250,7 +250,7 @@ test("policy test: both demo policies pass their showcase tests, verbs load with
 
 test("showcase: the upload into MYLIB/SEEDSRC and the session on MYLIB/SEEDLST are allowed for the owner", async () => {
   const calls: [string, Record<string, unknown>][] = [
-    ["upload_source_member", { library: "MYLIB", sourceFile: "SEEDSRC", member: "SEEDLST" }],
+    ["upload_source_member", { library: "MYLIB", sourceFile: "SEEDSRC", member: "SEEDLST", create: true }],
     ["session_open", { program: "MYLIB/SEEDLST", library: "MYLIB" }],
   ];
   for (const p of ["observe", "enforce"]) {
