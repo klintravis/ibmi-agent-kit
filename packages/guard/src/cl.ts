@@ -136,7 +136,9 @@ export function classifyClText(text: string, run: Run): Operation[] {
   }
   for (const [i, v] of parsed.positional.entries()) {
     if (params.has(order[i])) return fail(`${name} gives ${order[i]} both by position and by keyword`, name);
-    params.set(order[i], v);
+    // a list given by position is written (A B), the same value as KEYWORD(A B)
+    const list = v.startsWith("(") && v.endsWith(")") && !splitTop(v.slice(1, -1)).error;
+    params.set(order[i], list ? v.slice(1, -1) : v);
   }
 
   let cls: OpClass = entry.class ?? "danger";

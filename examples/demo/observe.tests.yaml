@@ -18,3 +18,21 @@
   as: { user: OTHER, groups: [], partition: demo }
   script: SELECT * FROM MYLIB.T; DELETE FROM MYLIB.T
   expect: [allow, deny]
+- name: owner builds an ILE app in the own library
+  as: { user: MYUSER, groups: [], partition: demo }
+  script: |
+    CL: CRTPF FILE(MYLIB/DEMOCUST) SRCFILE(MYLIB/QDDSSRC)
+    INSERT INTO MYLIB.DEMOCUST VALUES (1001, 'Acme Tools', 'Berlin', 1250.00);
+    CL: CRTBNDDIR BNDDIR(MYLIB/CUSTBD)
+    CL: ADDBNDDIRE BNDDIR(MYLIB/CUSTBD) OBJ((MYLIB/CUSTSRV *SRVPGM))
+    CL: CRTRPGMOD MODULE(MYLIB/CUSTLST) SRCFILE(MYLIB/QRPGLESRC) SRCMBR(CUSTLST)
+    CL: CRTSRVPGM SRVPGM(MYLIB/CUSTSRV) MODULE(MYLIB/CUSTSRV) EXPORT(*ALL)
+    CL: CRTPGM PGM(MYLIB/CUSTLST) MODULE(MYLIB/CUSTLST) BNDSRVPGM((MYLIB/CUSTSRV))
+  expect: [allow, allow, allow, allow, allow, allow, allow]
+- name: a build still cannot change an unnamed or a system library
+  as: { user: MYUSER, groups: [], partition: demo }
+  script: |
+    CL: DLTBNDDIR BNDDIR(CUSTBD)
+    CL: PWRDWNSYS
+    CL: CRTPF FILE(QGPL/X) SRCFILE(MYLIB/QDDSSRC)
+  expect: [deny, deny, deny]

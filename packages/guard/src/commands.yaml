@@ -32,6 +32,12 @@ commands:
   DSPSRVPGM: { class: read, positional: [SRVPGM, OUTPUT, DETAIL], params: { SRVPGM: object } }
   DSPMOD:   { class: read, positional: [MODULE, OUTPUT, DETAIL], params: { MODULE: object } }
   DSPCMD:   { class: read, positional: [CMD, OUTPUT], params: { CMD: object } }
+  DSPBNDDIR: { class: read, positional: [BNDDIR, OUTPUT], params: { BNDDIR: object }, writes: [OUTFILE] }
+  WRKBNDDIR: { class: read, positional: [BNDDIR], params: { BNDDIR: object } }
+  WRKBNDDIRE: { class: read, positional: [BNDDIR], params: { BNDDIR: object } }
+  DSPMSGD:  { class: read, positional: [RANGE, MSGF], params: { MSGF: object } }
+  WRKMSGD:  { class: read, positional: [MSGID, MSGF], params: { MSGF: object } }
+  WRKMSGF:  { class: read, positional: [MSGF], params: { MSGF: object } }
   DSPDTAARA: { class: read, positional: [DTAARA, OUTPUT, OUTFMT], params: { DTAARA: object } }
   DSPJRN:   { class: read, positional: [JRN], params: { JRN: object }, writes: [OUTFILE] }
   DSPSAVF:  { class: read, positional: [FILE, OUTPUT], params: { FILE: object } }
@@ -70,6 +76,7 @@ commands:
   CPYF:     { class: write, positional: [FROMFILE, TOFILE, FROMMBR, TOMBR, MBROPT, CRTFILE], params: { TOFILE: object, FROMFILE: { kind: object, class: read } } }
   CPYSRCF:  { class: write, positional: [FROMFILE, TOFILE, FROMMBR, TOMBR, MBROPT], params: { TOFILE: object, FROMFILE: { kind: object, class: read } } }
   CHGDTAARA: { class: write, positional: [DTAARA, VALUE], params: { DTAARA: object } }
+  CLRDTAQ:  { class: write, positional: [DTAQ], params: { DTAQ: object } }
   SAVLIB:   { class: read, positional: [LIB, DEV], params: { LIB: library }, writes: [SAVF] }
   SAVOBJ:   { class: read, positional: [OBJ, LIB, DEV, OBJTYPE], params: { LIB: library }, writes: [SAVF] }
 
@@ -97,6 +104,20 @@ commands:
   DLTCMD:   { class: ddl, positional: [CMD], params: { CMD: object } }
   DLTDTAARA: { class: ddl, positional: [DTAARA], params: { DTAARA: object } }
   DLTDTAQ:  { class: ddl, positional: [DTAQ], params: { DTAQ: object } }
+  # binding directories: created with no source, so ddl like CRTDTAQ; an entry names an object
+  # bound later, which is only read, so OBJ((MYSRV *SRVPGM)) may stay unqualified
+  CRTBNDDIR: { class: ddl, positional: [BNDDIR], params: { BNDDIR: object } }
+  DLTBNDDIR: { class: ddl, positional: [BNDDIR], params: { BNDDIR: object } }
+  ADDBNDDIRE: { class: ddl, positional: [BNDDIR, OBJ], params: { BNDDIR: object, OBJ: { kind: object, class: read } } }
+  RMVBNDDIRE: { class: ddl, positional: [BNDDIR, OBJ], params: { BNDDIR: object, OBJ: { kind: object, class: read } } }
+  # message files; DFTPGM names a program run later for whoever gets the message
+  CRTMSGF:  { class: ddl, positional: [MSGF], params: { MSGF: object } }
+  DLTMSGF:  { class: ddl, positional: [MSGF], params: { MSGF: object } }
+  ADDMSGD:  { class: ddl, positional: [MSGID, MSGF, MSG], params: { MSGF: object, DFTPGM: { kind: object, class: danger } } }
+  CHGMSGD:  { class: ddl, positional: [MSGID, MSGF, MSG], params: { MSGF: object, DFTPGM: { kind: object, class: danger } } }
+  RMVMSGD:  { class: ddl, positional: [MSGID, MSGF], params: { MSGF: object } }
+  CHGPGM:   { class: ddl, positional: [PGM], params: { PGM: object } }
+  CHGSRVPGM: { class: ddl, positional: [SRVPGM], params: { SRVPGM: object } }
   DLTOBJ:   { class: ddl, positional: [OBJ, OBJTYPE], params: { OBJ: object } }
   CHGOBJD:  { class: ddl, positional: [OBJ, OBJTYPE], params: { OBJ: object } }
   CHGOBJOWN: { class: ddl, positional: [OBJ, OBJTYPE, NEWOWN], params: { OBJ: object } }
@@ -114,13 +135,15 @@ commands:
   CRTBNDRPG: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
   CRTRPGMOD: { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
   CRTRPGPGM: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
-  CRTSQLRPGI: { class: compile, positional: [OBJ, SRCFILE, SRCMBR, COMMIT, RDB, OBJTYPE], params: { OBJ: object, SRCFILE: { kind: object, class: read }, RDB: rdb } }
+  # CRTSQLxxx precompile embedded SQL without running it; TOSRCFILE takes the precompiled source
+  CRTSQLRPGI: { class: compile, positional: [OBJ, SRCFILE, SRCMBR, COMMIT, RDB, OBJTYPE], params: { OBJ: object, SRCFILE: { kind: object, class: read }, RDB: rdb }, writes: [TOSRCFILE] }
   CRTBNDCL: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
   CRTCLMOD: { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
   CRTCLPGM: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
   CRTBNDCBL: { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
   CRTCBLMOD: { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
-  CRTSQLCBLI: { class: compile, positional: [OBJ, SRCFILE, SRCMBR, COMMIT, RDB, OBJTYPE], params: { OBJ: object, SRCFILE: { kind: object, class: read }, RDB: rdb } }
+  CRTSQLCBLI: { class: compile, positional: [OBJ, SRCFILE, SRCMBR, COMMIT, RDB, OBJTYPE], params: { OBJ: object, SRCFILE: { kind: object, class: read }, RDB: rdb }, writes: [TOSRCFILE] }
+  CRTSQLCI: { class: compile, positional: [OBJ, SRCFILE, SRCMBR, COMMIT, RDB, OBJTYPE], params: { OBJ: object, SRCFILE: { kind: object, class: read }, RDB: rdb }, writes: [TOSRCFILE] }
   CRTBNDC:  { class: compile, positional: [PGM, SRCFILE, SRCMBR], params: { PGM: object, SRCFILE: { kind: object, class: read } } }
   CRTCMOD:  { class: compile, positional: [MODULE, SRCFILE, SRCMBR], params: { MODULE: object, SRCFILE: { kind: object, class: read } } }
   CRTPGM:   { class: compile, positional: [PGM, MODULE, ENTMOD], params: { PGM: object, MODULE: { kind: object, class: read } } }

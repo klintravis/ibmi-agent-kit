@@ -135,6 +135,8 @@ Library-list shadowing is a stated limit of observe mode: an unqualified unknown
 
 The shipped table is `packages/guard/src/commands.yaml`. A command not in any table is `danger`. A policy adds entries in `commands:` or in files named by `command_files` (each file holds only a `commands:` section; rules, environments and roles cannot be included). A file that redefines a command the shipped table calls `danger` produces a warning.
 
+The shipped table covers an ILE build and test in your own library: display and work-with commands (`read`), compiles and binds (`CRTBNDRPG`, `CRTRPGMOD`, `CRTSQLRPGI`, `CRTSQLCI`, `CRTCLMOD`, `CRTCBLMOD`, `CRTPGM`, `CRTSRVPGM`, `UPDPGM`, ... as `compile`), binding directories (`CRTBNDDIR`, `ADDBNDDIRE`, `RMVBNDDIRE`, `DLTBNDDIR` as `ddl`; the objects an entry names are only read), message files (`CRTMSGF`, `ADDMSGD`, `CHGMSGD`, `RMVMSGD`, `DLTMSGF` as `ddl`), files, members, data areas and data queues. A second object a command writes is a `write` of that object (`CPYF TOFILE`, `DSPOBJD OUTFILE`, `CRTSQLRPGI TOSRCFILE`). A parameter that names a program to run later is `danger`: `ADDMSGD DFTPGM(MYLIB/P)` is denied, `DFTPGM(*NONE)` is not. Commands that run a command or program the guard does not see (`SBMJOB`, `QSH`, `RUNSQLSTM`, ...) are `danger`.
+
 ```yaml
 # cm-product.yaml: an invented change-management product
 commands:
@@ -147,7 +149,7 @@ commands:
 |---|---|
 | `class` or `class_by_param` | Exactly one. `class_by_param` picks a class from a parameter's value, with a `default`. |
 | `library` | The product library the command must be qualified to; otherwise `danger`. |
-| `positional` | Keyword order for values written without a keyword. |
+| `positional` | Keyword order for values written without a keyword. A list given by position is written in parentheses, `CHGLIBL (A B C)`. More positional values than listed is `danger`. |
 | `params` | Parameters that name an `object`, `library` or `rdb`, optionally `{ kind, class, partition }`. |
 | `writes` | Object parameters that are written when given (for example `OUTFILE`). |
 | `nested_sql` | The parameter holding an SQL statement, classified as SQL (`RUNSQL`). |

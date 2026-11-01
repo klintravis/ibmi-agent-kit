@@ -502,6 +502,14 @@ rows("cl", [
   },
   { name: "a parameter naming another (*FROMLIB)", script: "CL: CRTDUPOBJ OBJ(X) FROMLIB(A) OBJTYPE(*FILE) TOLIB(*FROMLIB) NEWOBJ(Y)", ops: ["ddl lib A", "read lib A"] },
   { name: "copy reads one file and writes another", script: "CL: CPYF FROMFILE(LIVLIB/ORD) TOFILE(JDOE/ORD) MBROPT(*REPLACE)", ops: ["read LIVLIB.ORD", "write JDOE.ORD"] },
+  { name: "binding directory entries: the directory is ddl, each bound object read", script: "CL: ADDBNDDIRE BNDDIR(A/BD) OBJ((A/S *SRVPGM) (T *MODULE))", ops: ["ddl A.BD", "read A.S", "read T env=unqualified"] },
+  { name: "binding directory entries by position", script: "CL: RMVBNDDIRE A/BD ((B/S *SRVPGM))", ops: ["ddl A.BD", "read B.S"] },
+  { name: "binding directory display to an outfile", script: "CL: DSPBNDDIR BNDDIR(A/BD) OUTPUT(*OUTFILE) OUTFILE(B/O)", ops: ["read A.BD", "write B.O"] },
+  { name: "unqualified binding directory create", script: "CL: CRTBNDDIR BD", ops: ["unqualified BD"] },
+  { name: "message description without a default program", script: "CL: ADDMSGD MSGID(USR0001) MSGF(A/MSGF) MSG('Hello') DFTPGM(*NONE)", ops: ["ddl A.MSGF"] },
+  { name: "message description naming a default program is danger", script: "CL: CHGMSGD USR0001 A/MSGF DFTPGM(B/P)", ops: ["ddl A.MSGF", "danger B.P"] },
+  { name: "SQL precompile writes its TOSRCFILE", script: "CL: CRTSQLCI OBJ(A/P) SRCFILE(A/QCSRC) TOSRCFILE(B/QSQLT)", ops: ["compile A.P", "read A.QCSRC", "write B.QSQLT"] },
+  { name: "a list given by position", script: "CL: CHGLIBL (A B C) D", ops: ["liblist lib A", "liblist lib B", "liblist lib C", "liblist lib D"] },
   { name: "library list values", script: "CL: CHGLIBL LIBL(A B C) CURLIB(D)", ops: ["liblist lib A", "liblist lib B", "liblist lib C", "liblist lib D"] },
   { name: "RDB() to an unmapped database", script: "CL: CRTSQLRPGI OBJ(A/P) SRCFILE(A/QSRC) RDB(OTHERRDB)", danger: /OTHERRDB/ },
   { name: "RDB() to a mapped database", script: "CL: CRTSQLRPGI OBJ(A/P) SRCFILE(A/QSRC) RDB(QARDB)", ctx: { rdbs: { QARDB: "qa" } }, ops: ["compile QARDB.A.P @qa", "read QARDB.A.QSRC @qa"] },
@@ -528,6 +536,18 @@ test("command table: shipped table loads, has no custom classes, and the D3 dang
   for (const c of ["SBMJOB", "QSH", "STRQSH", "STRREXPRC", "PWRDWNSYS", "ENDSYS", "ENDSBS", "CHGUSRPRF", "CRTUSRPRF", "DLTUSRPRF", "CHGSYSVAL", "ENDTCP", "QCAPCMD"])
     assert.equal(t[c]?.class, "danger", c);
   for (const c of ["DSPOBJD", "WRKACTJOB", "GO", "SIGNOFF", "ADDLIBLE", "CHGCURLIB", "CALL", "CRTBNDRPG", "RUNSQL"]) assert.ok(t[c], `${c} is shipped`);
+});
+
+test("command table: everyday build commands and their classes", () => {
+  const t = builtinCommands();
+  const want: Record<string, string> = {
+    DSPBNDDIR: "read", WRKBNDDIR: "read", WRKBNDDIRE: "read", DSPMSGD: "read", WRKMSGD: "read", WRKMSGF: "read",
+    CLRDTAQ: "write",
+    CRTBNDDIR: "ddl", DLTBNDDIR: "ddl", ADDBNDDIRE: "ddl", RMVBNDDIRE: "ddl", CRTMSGF: "ddl", DLTMSGF: "ddl",
+    ADDMSGD: "ddl", CHGMSGD: "ddl", RMVMSGD: "ddl", CHGPGM: "ddl", CHGSRVPGM: "ddl",
+    CRTSQLCI: "compile",
+  };
+  for (const [c, cls] of Object.entries(want)) assert.equal(t[c]?.class, cls, c);
 });
 
 test("command table: merge replaces whole entries and custom classes are reported", () => {
