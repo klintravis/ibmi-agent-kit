@@ -29,6 +29,11 @@ then Read `<kit>/docs/demo.md`.
 
 ## 1. Profile and password
 
+First the demo folder's copies (docs/demo.md Setup steps 1 and 4, copy part only; they are not
+profile files, so you may do this): copy `<kit>/examples/demo/` into `<demo folder>/demo/` and
+`<kit>/examples/verbs/SMOKE-SAMPLE.yaml` into `<demo folder>/.ibmi-kit/verbs/`. The names in them
+are set in section 3.
+
 Explain: profiles live in `~/.ibmi-agent-kit/.env.<name>` (README, Profiles). The user creates that
 file from `packages/source/.env.example` and types `IBMI_HOST`, `IBMI_USER` and `IBMI_PASSWORD`
 in their own editor. They also add the `IBMI_KIT_POLICY=` line that points at the demo observe
@@ -42,12 +47,13 @@ is never shown) and one read-only `run_sql`: `SELECT CURRENT USER, CURRENT SERVE
 
 On failure, show the error and point to the likely cause: host, or user and password in the
 profile; for the ssh transport also SSH access, a Java runtime, and write access to the home
-folder (README, SQL transports). Stop.
+folder (README, SQL transports). If the server did not start or the error names the policy: the
+`IBMI_KIT_POLICY` path is missing, not absolute, or not a valid policy. Stop.
 
 ## 3. The demo
 
 1. Ask for a library the user owns. Upper-case it and check it is an IBM i name: 1 to 10 characters
-   from A-Z 0-9 # $ @ _, not starting with a digit. Refuse QGPL and any name starting with Q: it
+   from A-Z 0-9 # $ @ _, the first one A-Z (a leading # or @ breaks the YAML). Refuse QGPL and any name starting with Q: it
    is written into YAML and SQL.
 2. `MYUSER` is the CURRENT USER from step 2, never read from the profile.
 3. Apply both in the demo folder's copies of the policies, tests and the SMOKE-SAMPLE verb
