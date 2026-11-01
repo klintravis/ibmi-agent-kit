@@ -18,8 +18,12 @@
   `/IBMI_HOST old\.example\.com is replaced by new\.example\.com\n/` and `/\npassword: \npassword: \n/`;
   no `Enter keeps the current one`; every `seen` env has `IBMI_PASSWORD !== OLDPW`; the file does
   not contain `OLDPW`; `resolveProfileEnv("prod")` gives host `new.example.com`, user `bob`,
-  password `plainpw`. In the same test, a second profile with a password and no `IBMI_HOST`: the
-  password prompt offers no default and no replaced line is printed. Verify: `npm run clean && npm run check`
+  password `plainpw`. In the same test, the no-host case: write `.env.nohost` with `IBMI_USER=bob`
+  and `IBMI_PASSWORD=${OLDPW}`, `seen.length = 0`, run `["nohost"]` with keys
+  `["h.example.com\r", "\r", "\r", "plainpw\r", "\r"]`; assert exit 0, no `Enter keeps the current one`,
+  no `is replaced by`, and `OLDPW` absent from `seen` and from the file. Place the new test before
+  the final "setup: no password ever reaches stdout or stderr" test, which scans `captured` for
+  every password in `PASSWORDS` (`OLDPW` included). Verify: `npm run clean && npm run check`
   exits 0, and the new test fails against the unfixed `setup-cli.ts`.
 - [ ] 1.3 Host unchanged keeps the password: in the existing test "setup: an update keeps other
   lines and comments, Enter keeps values, ..." (line 97), add
@@ -28,9 +32,10 @@
   `s3cret#2`. Verify: `npm run check` exits 0.
 - [ ] 1.4 Docs: in `packages/server/README.md`, `setup` command step 2, change "Enter keeps the
   current one." to say Enter keeps it only when the host is unchanged; with a new host setup says
-  the host is replaced and asks for a new password. Leave `docs/demo.md` lines 29 and 100 and the
-  root `README.md` line 42 as they are (they rerun setup on the same host or do not mention
-  Enter). Verify: the desk's docs check (`node <desk>/scripts/docs-check.mjs .`, run by
+  the host is replaced and asks for a new password. Leave as they are: `docs/demo.md` lines 29 and
+  100 (rerun on the same host), `packages/server/README.md` line 84 (company-repo mode, already
+  right), root `README.md` line 42, line 83 and `.claude/skills/demo/SKILL.md` line 71 (no
+  Enter-keeps claim). Verify: the desk's docs check (`node <desk>/scripts/docs-check.mjs .`, run by
   `finish-worktree`) passes.
 
 ## 2. Integration
