@@ -76,7 +76,6 @@ commands:
   CPYF:     { class: write, positional: [FROMFILE, TOFILE, FROMMBR, TOMBR, MBROPT, CRTFILE], params: { TOFILE: object, FROMFILE: { kind: object, class: read } } }
   CPYSRCF:  { class: write, positional: [FROMFILE, TOFILE, FROMMBR, TOMBR, MBROPT], params: { TOFILE: object, FROMFILE: { kind: object, class: read } } }
   CHGDTAARA: { class: write, positional: [DTAARA, VALUE], params: { DTAARA: object } }
-  CLRDTAQ:  { class: write, positional: [DTAQ], params: { DTAQ: object } }
   SAVLIB:   { class: read, positional: [LIB, DEV], params: { LIB: library }, writes: [SAVF] }
   SAVOBJ:   { class: read, positional: [OBJ, LIB, DEV, OBJTYPE], params: { LIB: library }, writes: [SAVF] }
 

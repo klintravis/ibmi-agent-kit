@@ -22,14 +22,14 @@
   as: { user: MYUSER, groups: [], partition: demo }
   script: |
     CL: CRTPF FILE(MYLIB/DEMOCUST) SRCFILE(MYLIB/QDDSSRC)
-    INSERT INTO MYLIB.DEMOCUST VALUES (1001, 'Acme Tools', 'Berlin', 1250.00);
+    INSERT INTO MYLIB.DEMOCUST VALUES (1001, 'Demo Customer', 'Berlin', 1250.00);
     CL: CRTBNDDIR BNDDIR(MYLIB/CUSTBD)
     CL: ADDBNDDIRE BNDDIR(MYLIB/CUSTBD) OBJ((MYLIB/CUSTSRV *SRVPGM))
     CL: CRTRPGMOD MODULE(MYLIB/CUSTLST) SRCFILE(MYLIB/QRPGLESRC) SRCMBR(CUSTLST)
     CL: CRTSRVPGM SRVPGM(MYLIB/CUSTSRV) MODULE(MYLIB/CUSTSRV) EXPORT(*ALL)
     CL: CRTPGM PGM(MYLIB/CUSTLST) MODULE(MYLIB/CUSTLST) BNDSRVPGM((MYLIB/CUSTSRV))
   expect: [allow, allow, allow, allow, allow, allow, allow]
-- name: a build still cannot change an unnamed or a system library
+- name: a build in an unnamed or a system library is denied by the policy
   as: { user: MYUSER, groups: [], partition: demo }
   script: |
     CL: DLTBNDDIR BNDDIR(CUSTBD)

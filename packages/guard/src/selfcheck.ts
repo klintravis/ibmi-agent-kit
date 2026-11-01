@@ -509,6 +509,8 @@ rows("cl", [
   { name: "message description without a default program", script: "CL: ADDMSGD MSGID(USR0001) MSGF(A/MSGF) MSG('Hello') DFTPGM(*NONE)", ops: ["ddl A.MSGF"] },
   { name: "message description naming a default program is danger", script: "CL: CHGMSGD USR0001 A/MSGF DFTPGM(B/P)", ops: ["ddl A.MSGF", "danger B.P"] },
   { name: "SQL precompile writes its TOSRCFILE", script: "CL: CRTSQLCI OBJ(A/P) SRCFILE(A/QCSRC) TOSRCFILE(B/QSQLT)", ops: ["compile A.P", "read A.QCSRC", "write B.QSQLT"] },
+  { name: "a positional RUNSQL list is its one statement", script: "CL: RUNSQL ('DELETE FROM A.T')", ops: ["write A.T"] },
+  { name: "a positional RUNSQL list of two literals is danger", script: "CL: RUNSQL ('X' 'Y')", danger: /one quoted literal/ },
   { name: "a list given by position", script: "CL: CHGLIBL (A B C) D", ops: ["liblist lib A", "liblist lib B", "liblist lib C", "liblist lib D"] },
   { name: "library list values", script: "CL: CHGLIBL LIBL(A B C) CURLIB(D)", ops: ["liblist lib A", "liblist lib B", "liblist lib C", "liblist lib D"] },
   { name: "RDB() to an unmapped database", script: "CL: CRTSQLRPGI OBJ(A/P) SRCFILE(A/QSRC) RDB(OTHERRDB)", danger: /OTHERRDB/ },
@@ -542,7 +544,6 @@ test("command table: everyday build commands and their classes", () => {
   const t = builtinCommands();
   const want: Record<string, string> = {
     DSPBNDDIR: "read", WRKBNDDIR: "read", WRKBNDDIRE: "read", DSPMSGD: "read", WRKMSGD: "read", WRKMSGF: "read",
-    CLRDTAQ: "write",
     CRTBNDDIR: "ddl", DLTBNDDIR: "ddl", ADDBNDDIRE: "ddl", RMVBNDDIRE: "ddl", CRTMSGF: "ddl", DLTMSGF: "ddl",
     ADDMSGD: "ddl", CHGMSGD: "ddl", RMVMSGD: "ddl", CHGPGM: "ddl", CHGSRVPGM: "ddl",
     CRTSQLCI: "compile",
