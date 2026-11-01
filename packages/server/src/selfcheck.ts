@@ -303,6 +303,15 @@ test("showcase: both screen tests parse, type no CALL and name no library", asyn
   }
 });
 
+// config-bootstrap "Packed contents": no package's `files` list ships the skill or the templates.
+test("pack guard: no package's files list names or globs .claude or templates", () => {
+  const pkgs = join(EXAMPLES, "../packages");
+  for (const d of readdirSync(pkgs)) {
+    const files: string[] = JSON.parse(readFileSync(join(pkgs, d, "package.json"), "utf8")).files ?? [];
+    for (const f of files) assert.ok(!/\.claude|templates|^\*/.test(f), `packages/${d} files lists ${f}`);
+  }
+});
+
 // demo-quickstart 3: the /demo skill names only real tools and paths, and its connection query is a read.
 test("demo skill: frontmatter, tool names, repo paths and the connection SELECT are valid", async () => {
   const root = join(EXAMPLES, "..");
