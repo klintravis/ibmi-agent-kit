@@ -121,7 +121,8 @@ verbs/smoke.yaml
    - systems or RDBs (S1, S3, S5, S6) no partition lists;
    - change-management products (C1, C2) added or gone, and commands (C3) not in `commands.yaml`.
 3. **Read the run log** since the README's `Last maintenance run:` date: the day files
-   `~/.ibmi-agent-kit/runs/YYYY-MM-DD.jsonl` only, never another file in that folder. Count lines
+   `<config dir>/runs/YYYY-MM-DD.jsonl` only (the kit's config dir: `IBMI_KIT_CONFIG_DIR`, default
+   `~/.ibmi-agent-kit`), never another file in that folder. Count lines
    whose operations have `env: unmatched`, whose `roleSource` is not `matched` (the default role
    decided), and whose `decision` is `confirm`, grouped by library, user and command. If the
    session may not read that folder, ask the admin to copy those day files to a folder outside
