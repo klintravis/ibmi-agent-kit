@@ -36,6 +36,7 @@ class Cancelled extends Error {}
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const isFile = (p: string) => statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
 // The kit checkout this file runs from: <kit>/packages/server/dist/setup-cli.js.
+// shortcut: assumes a checkout, wrong under an npm install; revisit when the kit is published (T-54).
 const KIT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 // A path with its symlinks resolved, through its nearest existing folder when it does not exist yet,
 // so a folder or profile linked into the repo counts as inside it.

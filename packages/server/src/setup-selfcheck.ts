@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -273,6 +273,14 @@ test("setup in a company repo: unknown names, a profile folder in the repo, bad 
       assert.equal(i.out, "", "refused before the first prompt");
       assert.equal(snapshot(repo), before);
     }
+    // A profile folder outside the repo that links into it (a junction needs no admin on Windows).
+    const linked = join(dirname(dir), "linked");
+    symlinkSync(join(repo, "profiles"), linked, "junction");
+    process.env.IBMI_KIT_CONFIG_DIR = linked;
+    const l = await run(["dev"], ["bob\r", "plainpw\r"], okProbe, true, repo);
+    assert.equal(l.code, 2);
+    assert.match(l.err, /inside the company config repo .*Nothing was written/);
+    assert.equal(snapshot(repo), before);
     process.env.IBMI_KIT_CONFIG_DIR = dir;
     writeFileSync(join(repo, "profiles", ".env.qa"), "IBMI_PARTITION=qa\n");
     const h = await run(["qa"], [], okProbe, true, repo);

@@ -155,7 +155,10 @@ verbs/smoke.yaml
 5. **Test and replay.** `ibmi-agent-kit policy test policy.yaml policy.tests.yaml`, then
    `ibmi-agent-kit policy replay policy.yaml --since <days since the last run>`, and show the
    statements whose decision changes.
-6. **Record** today in the README's `Last maintenance run:`, commit on the branch, and summarise
+6. **Team files.** If `.mcp.json` or the README's Get started differs from the Bootstrap step 8
+   and 7 forms, or a skeleton still has an `IBMI_KIT_POLICY` line, propose the update (a repo
+   from before team onboarding).
+7. **Record** today in the README's `Last maintenance run:`, commit on the branch, and summarise
    the differences, the edits, the test count and the replay result for review.
 
 ## Worked example

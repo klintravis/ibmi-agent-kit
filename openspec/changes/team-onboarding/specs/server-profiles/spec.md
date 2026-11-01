@@ -63,6 +63,11 @@ warning naming the file.
 - **WHEN** `IBMI_KIT_CONFIG_DIR` points at a folder inside the repo
 - **THEN** `setup` exits non-zero before the first prompt and writes nothing
 
+#### Scenario: Profile folder linked into the repo
+- **WHEN** `IBMI_KIT_CONFIG_DIR` points at a folder outside the repo that is a symlink or junction
+  to a folder inside it
+- **THEN** `setup` exits non-zero before the first prompt and writes nothing
+
 #### Scenario: Skeleton holds a password
 - **WHEN** `profiles/.env.dev` contains `IBMI_PASSWORD=x`
 - **THEN** `setup` warns that the file holds a password and to remove it from the repo, never
