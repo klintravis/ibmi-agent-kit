@@ -41,9 +41,20 @@ const KIT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 // A path with its symlinks resolved, through its nearest existing folder when it does not exist yet,
 // so a folder or profile linked into the repo counts as inside it.
 const real = (p: string): string => (existsSync(p) ? realpathSync(p) : dirname(p) === p ? p : join(real(dirname(p)), basename(p)));
+// A folder's identity, so another spelling of it (case on macOS, a Windows 8.3 or subst path) still matches.
+const id = (p: string) => {
+  const s = statSync(p, { bigint: true, throwIfNoEntry: false });
+  return s?.ino ? `${s.dev}:${s.ino}` : undefined; // some file systems report no inode
+};
 const within = (root: string, p: string) => {
   const r = relative(root, p);
-  return r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r);
+  if (r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r)) return true;
+  const want = id(root);
+  for (let a = p; want; a = dirname(a)) {
+    if (id(a) === want) return true;
+    if (dirname(a) === a) return false;
+  }
+  return false;
 };
 // Settings a skeleton never supplies: the person's own sign-on and the policy path setup writes.
 const OWN = new Set(["IBMI_USER", "IBMI_PASSWORD", "IBMI_KIT_POLICY"]);
@@ -220,6 +231,15 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
 
   const repoPolicy = repo ? join(cwd, "policy.yaml") : undefined;
   if (repoPolicy && cur.IBMI_KIT_POLICY && cur.IBMI_KIT_POLICY !== repoPolicy) out(`IBMI_KIT_POLICY ${cur.IBMI_KIT_POLICY} is replaced by ${repoPolicy}\n`);
+  // The current password belongs to the current host: on another host it is asked again, never kept.
+  let keep: string | undefined = cur.IBMI_PASSWORD;
+  if (repo) {
+    out(`partition ${skeleton.IBMI_PARTITION} on host ${skeleton.IBMI_HOST}\n`);
+    if (cur.IBMI_HOST !== skeleton.IBMI_HOST) {
+      keep = undefined;
+      if (cur.IBMI_HOST) out(`IBMI_HOST ${cur.IBMI_HOST} is replaced by ${skeleton.IBMI_HOST}\n`);
+    }
+  }
 
   let password = "";
   const values: [string, string][] = [];
@@ -234,7 +254,7 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
     if (repo) values.push(...Object.entries(skeleton).filter(([k]) => !OWN.has(k)));
     else values.push(["IBMI_HOST", await required("IBM i host", cur.IBMI_HOST)]);
     values.push(["IBMI_USER", await required("IBM i user", cur.IBMI_USER)]);
-    while (!password) password = (await ask(cur.IBMI_PASSWORD ? "password (Enter keeps the current one): " : "password: ", true)) || cur.IBMI_PASSWORD || "";
+    while (!password) password = (await ask(keep ? "password (Enter keeps the current one): " : "password: ", true)) || keep || "";
     values.push(["IBMI_PASSWORD", password]);
     if (repoPolicy) values.push(["IBMI_KIT_POLICY", repoPolicy]);
     else {

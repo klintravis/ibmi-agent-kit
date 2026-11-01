@@ -49,10 +49,16 @@ nothing written.
 - **WHEN** the existing profile `dev` names a different `IBMI_KIT_POLICY`
 - **THEN** `setup` says it replaces that path and writes the repo's
 
+#### Scenario: Host replaced
+- **WHEN** the existing profile `dev` holds a password for an `IBMI_HOST` other than the skeleton's
+- **THEN** `setup` prints the skeleton's partition and host and that it replaces the old host,
+  asks for a password without offering to keep the current one, and neither writes nor sends the
+  old password to the new host
+
 ### Requirement: setup never puts a password in the company repo
 In company-repo mode `setup` SHALL NOT write any file inside the repo, SHALL refuse to run when the
 first profile folder, or a partition's profile file in it, resolves to a path inside the repo
-(symlinks followed), and SHALL ignore a skeleton's `IBMI_PASSWORD` with a
+(symlinks followed, the repo folder recognised under any spelling), and SHALL ignore a skeleton's `IBMI_PASSWORD` with a
 warning naming the file.
 
 #### Scenario: Repo unchanged

@@ -13,7 +13,8 @@ import { SETUP_SQL, setupCli, type Input, type Probe } from "./setup-cli.js";
 const POLICY = fileURLToPath(new URL("../../../examples/demo/policy-observe.yaml", import.meta.url));
 const HOSTILE = `p#w=d s$x'y"z`;
 const SKELPW = "skel-pw-9";
-const PASSWORDS = [HOSTILE, "plainpw", "s3cret#2", `a\\nb'c\``, SKELPW];
+const OLDPW = "old-host-pw-7";
+const PASSWORDS = [HOSTILE, "plainpw", "s3cret#2", `a\\nb'c\``, SKELPW, OLDPW];
 const captured: string[] = [];
 
 // A terminal that sends one scripted chunk each time a prompt starts reading.
@@ -239,6 +240,23 @@ test("setup in a company repo: the skeleton's settings, the repo's policy path, 
     assert.equal(snapshot(repo), before);
   }));
 
+test("setup in a company repo: a profile on another host never keeps its password", () =>
+  isolated(async (dir) => {
+    const repo = companyRepo(dirname(dir), { ".env.dev": skel("dev") });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".env.dev"), `IBMI_HOST=old.example.com\nIBMI_USER=bob\nIBMI_PASSWORD=${OLDPW}\n`);
+    seen.length = 0;
+    const r = await run(["dev"], ["\r", "\r", "plainpw\r"], okProbe, true, repo);
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.match(r.out, /partition dev on host kdev\.example\.com\n[^]*IBMI_HOST old\.example\.com is replaced by kdev\.example\.com\n[^]*IBM i user/);
+    assert.match(r.out, /\npassword: \npassword: \n/, "Enter does not keep the old host's password");
+    assert.doesNotMatch(r.out, /Enter keeps the current one/);
+    assert.ok(seen.every((e) => e.IBMI_PASSWORD !== OLDPW), "the old host's password was sent");
+    assert.ok(!readFileSync(join(dir, ".env.dev"), "utf8").includes(OLDPW));
+    assert.equal(resolveProfileEnv("dev").IBMI_HOST, "kdev.example.com");
+    assert.equal(resolveProfileEnv("dev").IBMI_PASSWORD, "plainpw");
+  }));
+
 test("setup in a company repo: several partitions are offered, one is taken as is", () =>
   isolated(async (dir) => {
     const repo = companyRepo(dirname(dir), { ".env.dev": skel("dev"), ".env.prod": skel("prod"), ".env.example": skel("example"), ".env.prod.bak": skel("old") });
@@ -281,6 +299,15 @@ test("setup in a company repo: unknown names, a profile folder in the repo, bad 
     assert.equal(l.code, 2);
     assert.match(l.err, /inside the company config repo .*Nothing was written/);
     assert.equal(snapshot(repo), before);
+    // The repo spelt in another case: runs only where the temp file system ignores case (Windows, macOS).
+    const spelt = join(dirname(repo), "REPO");
+    if (existsSync(spelt)) {
+      process.env.IBMI_KIT_CONFIG_DIR = join(spelt, "cfg");
+      const c = await run(["dev"], ["bob\r", "plainpw\r"], okProbe, true, repo);
+      assert.equal(c.code, 2, c.out + c.err);
+      assert.match(c.err, /inside the company config repo .*Nothing was written/);
+      assert.equal(snapshot(repo), before);
+    }
     process.env.IBMI_KIT_CONFIG_DIR = dir;
     writeFileSync(join(repo, "profiles", ".env.qa"), "IBMI_PARTITION=qa\n");
     const h = await run(["qa"], [], okProbe, true, repo);

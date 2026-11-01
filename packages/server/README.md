@@ -80,7 +80,8 @@ When the current folder holds both `policy.yaml` and a `profiles/` folder (a com
 
 - The partitions are the `profiles/.env.<partition>` skeletons, listed by the same rules as profile names. With one skeleton it is taken; with several, setup lists them and asks for a number or a name. A name on the command line must be one of them, else setup exits 2.
 - It copies every setting of the skeleton (host, partition, transport, ports, guards) into your profile, except `IBMI_USER`, `IBMI_PASSWORD` and `IBMI_KIT_POLICY`. A skeleton without `IBMI_HOST` or `IBMI_PARTITION` is refused (exit 2).
-- It asks for your user and your password (hidden), as above. It does not ask for a host or a policy.
+- It prints the skeleton's partition and host, then asks for your user and your password (hidden), as above. It does not ask for a host or a policy.
+- If your profile already points at another host, setup says the host is replaced and asks for a new password: Enter does not keep the old host's password.
 - `IBMI_KIT_POLICY` is set to the repo's `policy.yaml` as an absolute path, after the same policy check. A different policy path already in your profile is replaced, and setup says so.
 - A password in a skeleton is never copied: setup warns you to remove it from the repo and change it.
 - Your password goes only in your profile folder. If that folder, or a profile file linked from it, lies inside the repo, setup refuses before asking anything and writes nothing.
