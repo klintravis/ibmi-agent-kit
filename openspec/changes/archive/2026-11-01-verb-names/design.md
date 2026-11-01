@@ -1,7 +1,7 @@
 ## Decisions
 
-- **One type, a fixed pattern.** `name` matches `^[A-Za-z$#@][A-Za-z0-9$#@_]{0,9}$` (the repo's
-  other IBM i name patterns; no `.`, which would let `A.B` or `A.` change a qualified name or open
+- **One type, a fixed pattern.** `name` matches `^[A-Za-z$#@][A-Za-z0-9$#@_]{0,9}$` (as the
+  guard's command and CL name patterns; no `.`, which would let `A.B` or `A.` change a qualified name or open
   a CL comment) and is upper cased by `typed`, so `allowed` lists and defaults are validated and
   compared the same way. No user regex: a pattern a verb author writes is a pattern a reviewer must
   audit.

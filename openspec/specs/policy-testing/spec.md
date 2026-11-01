@@ -23,12 +23,25 @@ mismatch with the operations, matching rule and actual decision, and exit non-ze
 fails.
 
 #### Scenario: Passing suite
-- **WHEN** every case's decision matches its `expect`
+- **WHEN** every case's decision matches its `expect` and no verb file is refused
 - **THEN** the command prints the count and exits 0
 
 #### Scenario: Regression
 - **WHEN** a policy edit makes a case that expected `deny` now `allow`
 - **THEN** the command names the case, the rule that now matches, and exits non-zero
+
+### Requirement: Policy test loads verb files
+`policy test` SHALL load the verbs of the project folder and beside the policy file whether or not
+a case names a verb, print each refusal, and exit non-zero when any verb file is refused. A policy
+with no verb folders SHALL behave as before.
+
+#### Scenario: Refused verb, no verb case
+- **WHEN** a verb file beside the policy is refused at load and no test case names a verb
+- **THEN** the command prints the refusal, still runs every case, and exits 1
+
+#### Scenario: No verb folders
+- **WHEN** neither verb folder exists
+- **THEN** the command behaves as before
 
 ### Requirement: policy_check accepts a candidate policy and identity
 `policy_check` SHALL accept an optional `policy` path and `as` identity, and then decide offline
