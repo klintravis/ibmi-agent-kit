@@ -113,7 +113,8 @@ docs/demo.md Part E builds a small RPG app in the user's library and drives its 
 user watches. It needs only sections 1 and 2 and section 3 through Part A, so offer it right after
 Part A, before Parts B, C and D; it works
 under either policy and cleans up after itself. Take each step and its Expected line from Part E.
-The statements live in the verb files; never type them yourself.
+The statements live in the verb files; never type them yourself (the one exception is step 7's
+`CALL` on the 5250 command line).
 
 1. Viewer: the user's `.mcp.json` needs `"env": { "IBMI_5250_VIEWER": "true" }` (Part E step 1).
    It goes in `.mcp.json` only, never in a profile file. If it is missing, the user adds it.
