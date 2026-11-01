@@ -55,7 +55,7 @@ A verb is a named, parameterised SQL/CL procedure in one YAML file, run by `verb
 - **Layers.** `user` (`~/.ibmi-agent-kit/verbs`), `proj` (`.ibmi-kit/verbs` and `IBMI_KIT_VERBS`), `org` (`verbs/` beside the policy file). `proj:NAME` addresses one; a bare `NAME` takes the closest layer (`user`, `proj`, `org`) and `verb_list` marks the hidden ones as overridden.
 - **`:p` vs `${p}`.** `:p` is sent as a bound value, never spliced into the text. `${p}` is text substitution for names and is allowed only for a parameter with an `allowed` list or of type integer, decimal, date or boolean; anything else refuses the verb at load.
 - **`requires_absent`.** A query run just before its setup statement; a returned row fails the verb there, so existing data is never overwritten or cleaned up.
-- **Cleanup.** An entry runs only if the setup `id` it `undoes` succeeded, even when a step failed.
+- **Cleanup.** An entry runs only if the setup `id` it `undoes` succeeded, even when a step failed, unless the connection was reset; then nothing more is sent and the result lists the cleanup to run by hand.
 - **Check first.** `policy_check` with `verb` and `args` shows every statement's decision and runs nothing.
 - **Suites.** `verb_run` with `tag` runs every verb carrying the tag.
 

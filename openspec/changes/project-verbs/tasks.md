@@ -17,7 +17,7 @@
 
 ## 4. Integration
 
-- [ ] 4.1 Root `npm run clean && npm run check` passes and the CI matrix is green after push
+- [x] 4.1 Root `npm run clean && npm run check` passes and the CI matrix is green after push
 - [ ] 4.2 With a PUB400 profile, run `policy_check` with the sample verb and `verb_run tag: smoke` through Claude Code and record results in the PR; skip with a note if no account exists yet
 
 ## Workflow follow-up

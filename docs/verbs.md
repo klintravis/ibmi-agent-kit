@@ -12,7 +12,8 @@ live IBM i yet.
 
 ## A verb file
 
-Every name below is invented.
+Every name below is invented. A runnable sample is in
+[`examples/verbs/SMOKE-SAMPLE.yaml`](../examples/verbs/SMOKE-SAMPLE.yaml).
 
 ```yaml
 name: SMOKE-ORDERS
