@@ -279,6 +279,7 @@ test("company-repo README: Read rules allow ~/.ibmi-agent-kit/runs and deny the 
   const allowed = (p: string) => !deny.some((d) => match(d, p)) && allow.some((a) => match(a, p));
   assert.ok(allowed("~/.ibmi-agent-kit/runs/2026-10-31.jsonl"));
   for (const f of [".env", ".env.prod", "private.txt"]) assert.ok(!allowed(`~/.ibmi-agent-kit/${f}`), f);
+  assert.ok(deny.some((d) => match(d, "~/.ibm-i-servers/.env.prod")), "~/.ibm-i-servers profiles denied");
 });
 
 // config-bootstrap: every discovery query passes run_sql's select gate and the guard classes it read-only.
