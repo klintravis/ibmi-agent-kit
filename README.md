@@ -241,7 +241,8 @@ rules:                                    # first match wins; omitted key or `an
   the lookup to fail (up to the connect time limit). Keep `default_role` your narrowest role.
 - **`confirm`** asks the user once through MCP elicitation, naming each operation. Only an accepted
   form with `confirm: true` runs; a client without elicitation, a decline, a cancel and the 120 second
-  timeout all deny.
+  timeout all deny. One exception: after a confirmed read of an SQL member, `compile_member` fetches
+  the member and asks again for any of its statements that need it.
 - **Check before you trust it.** `policy_check` (a tool) reports the decisions for a script or verb
   without running it; it sends only the catalog lookups needed. With `as` (and optionally `policy`,
   a candidate file) it decides offline and sends nothing. `ibmi-agent-kit

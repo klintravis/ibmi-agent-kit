@@ -31,7 +31,7 @@ Use `policy_check` first to see what the policy would decide. A query in `run_sc
 
 ### Confirmation
 
-A rule with `decision: confirm` makes `run_script`, `verb_run`, a guarded source tool, or `screen_do`, `run_tests` and `session_open` ask the user once, through MCP elicitation, listing every statement that needs it. Only an accepted form with `confirm: true` runs it. A client without elicitation support, a decline, a cancel or no answer within 120 seconds all deny. The server writes one line to stderr per client saying whether confirmation is available.
+A rule with `decision: confirm` makes `run_script`, `verb_run`, a guarded source tool, or `screen_do`, `run_tests` and `session_open` ask the user once, through MCP elicitation, listing every statement that needs it (one exception: after a confirmed read of an SQL member, `compile_member` fetches the member and asks again for any of its statements that need it). Only an accepted form with `confirm: true` runs it. A client without elicitation support, a decline, a cancel or no answer within 120 seconds all deny. The server writes one line to stderr per client saying whether confirmation is available.
 
 ### Policy, partition and run log
 

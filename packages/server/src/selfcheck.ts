@@ -1043,8 +1043,25 @@ for (const [name, args] of COMPILES) {
   });
 }
 
+test("6.4: a member that cannot be fetched after a confirmed read is logged not sent", async () => {
+  const k = await sourceKit({ policy: READ_CONFIRM, memberText: async () => Promise.reject(new Error("CPF9815 member not found")), elicit: async () => ({ action: "accept", content: { confirm: true } }) });
+  try {
+    const r = await k.call("compile_member", SQL_MEMBER);
+    assert.equal(r.error, true);
+    assert.match(r.text, /cannot read JDOE\/QSQLSRC\(SETUP\) to decide its statements: CPF9815/);
+    assert.deepEqual(k.stub.sent, []);
+    const [line] = k.log();
+    assert.equal(line.confirmed, true);
+    assert.match(line.outcome, /^not sent: refused: cannot read JDOE\/QSQLSRC\(SETUP\)/);
+  } finally {
+    await k.close();
+  }
+});
+
 test("6.4: a *CURLIB that moved while the member read was confirmed stops the compile", async () => {
-  const k = await sourceKit({ policy: READ_CONFIRM, curlib: ["JDOE", "OTHER"], memberText: async () => MEMBER_SQL, elicit: async () => ({ action: "accept", content: { confirm: true } }) });
+  // The member's own *CURLIB is decided with the answer recorded before the wait, so the recheck still sees the move.
+  const member = `${MEMBER_SQL}\nCL: CRTDTAARA DTAARA(*CURLIB/X) TYPE(*CHAR)`;
+  const k = await sourceKit({ policy: READ_CONFIRM, curlib: ["JDOE", "OTHER"], memberText: async () => member, elicit: async () => ({ action: "accept", content: { confirm: true } }) });
   try {
     const r = await k.call("compile_member", { ...SQL_MEMBER, command: "CRTSQLRPGI OBJ(*CURLIB/SETUP) SRCFILE(JDOE/QSQLSRC) SRCMBR(SETUP)" });
     assert.equal(r.error, true);

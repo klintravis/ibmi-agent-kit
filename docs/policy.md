@@ -155,7 +155,7 @@ commands:
 
 ## Confirmation
 
-`confirm` rules make `run_script`, `verb_run`, the source tools (`run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list`, `compile_member`) and the 5250 tools (`screen_do`, `run_tests`, `session_open`) ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered.
+`confirm` rules make `run_script`, `verb_run`, the source tools (`run_sql`, `read_source_member`, `search_source`, `upload_source_member`, `manage_library_list`, `compile_member`) and the 5250 tools (`screen_do`, `run_tests`, `session_open`) ask once, via MCP elicitation, naming the server, partition, and each operation. Only an accepted form with `confirm: true` runs; a client without elicitation, a decline, a cancel and a 120 second timeout all deny. Nothing is sent before every confirmation is answered. One exception to asking once: after a confirmed read of an SQL member (type SQL or `RUNSQLSTM`), `compile_member` fetches the member and asks again for any of its statements that need it; the member is never fetched before that read is confirmed.
 
 ## Example
 

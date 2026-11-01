@@ -133,6 +133,9 @@ engine's own sign-on/recovery/sign-off calls) and the screen has a command line 
 ### D7. Confirmation
 All `confirm` operations of one tool call are gathered into one `elicitInput` with schema
 `{ confirm: boolean }`, `{ timeout: 120_000 }`; accept requires `content.confirm === true`.
+One exception: when `compile_member`'s read of an SQL member needs confirming, that read is asked
+first and the member is fetched only after a yes; then any of its statements that need it are
+asked in a second elicitation, decided with the `*CURLIB` recorded before the first.
 - *Rejected — a local browser confirmation page for clients without elicitation:* an agent with
   shell or HTTP tools can submit it itself, so it would look like a human check without being one.
   Without elicitation, `confirm` means deny; teams use observe mode while they settle their rules.

@@ -571,7 +571,16 @@ export function registerGuarded(
     // A deferred member read is in this first prompt (its read line, or RUNSQLSTM's read of SRCFILE).
     await gate(planned);
     if (deferred) {
-      const c = await classify(await fetch(deferred), { lookups, commands: policy.commands, rdbs: policy.rdbs });
+      let text: string;
+      try {
+        text = await fetch(deferred);
+      } catch (e) {
+        record(() => `not sent: ${(e as Error).message}`);
+        throw e;
+      }
+      // *CURLIB as recorded before the wait: asking again would overwrite it, and the recheck below would compare the new value with itself.
+      const known: Lookups = "curlib" in answers ? { ...lookups, currentLibrary: async () => answers.curlib ?? undefined } : lookups;
+      const c = await classify(text, { lookups: known, commands: policy.commands, rdbs: policy.rdbs });
       notes.push(...c.notes);
       const more = planOf(c.statements);
       planned.push(...more);
