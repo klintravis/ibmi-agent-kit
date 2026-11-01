@@ -21,7 +21,8 @@ already holds everything but the person's own user and password.
 - In company-repo mode, when `IBMI_KIT_HOME` is not set, `setup` prints the kit folder to set it
   to (the generated `.mcp.json` uses it, below). It writes no environment variable.
 - `ibmi-kit-config` bootstrap also generates, in the company repo:
-  - `.mcp.json` registering the kit server as `node ${IBMI_KIT_HOME}/packages/server/dist/index.js`,
+  - `.mcp.json` registering the kit server as `"command": "node"`,
+    `"args": ["${IBMI_KIT_HOME}/packages/server/dist/index.js"]`,
     with `"env": { "IBMI_5250_VIEWER": "true" }` as the example of a non-protected setting;
   - a README "Get started" section: clone, `npx ibmi-agent-kit setup` (or the repo-local command
     until it is published), `claude`, approve the server, `/demo` optional; plus one line saying why

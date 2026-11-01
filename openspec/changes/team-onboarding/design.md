@@ -53,9 +53,12 @@ read-back or test steps.
   first profile folder. If that folder is the repo or inside it (`relative(cwd, dir)` neither starts
   with `..` nor is absolute), refuse before the first prompt (exit 2): an `IBMI_KIT_CONFIG_DIR`
   pointing into the clone would otherwise commit-stage a password.
-- **`.mcp.json` command: `node ${IBMI_KIT_HOME}/packages/server/dist/index.js`.** Claude Code
+- **`.mcp.json` command: `"command": "node", "args": ["${IBMI_KIT_HOME}/packages/server/dist/index.js"]`**
+  (command and path as separate fields; one string in `command` would not spawn). Claude Code
   expands `${VAR}` in a `.mcp.json` `command`, `args` and `env` (docs: `mcp.md`, environment
-  variable expansion); an unset variable leaves the text as is and `claude mcp list` warns. The
+  variable expansion); an unset variable without a default still loads the config, keeps the
+  `${VAR}` text as is, and `claude mcp list` reports a missing-variable warning, so the server then
+  fails to start rather than the whole file. The
   file must be committed and shared, so it cannot hold the admin's absolute kit path, and `npx
   ibmi-agent-kit` resolves to nothing until the kit is published (T-54); the published bin is in
   `@ibmi-agent-kit/server`. Interim until then: `IBMI_KIT_HOME` names each person's kit checkout.
@@ -92,9 +95,12 @@ read-back or test steps.
   value; the README step 2 names it; it disappears with the `npx` form.
 - [A colleague starts `claude` in a subfolder] → the server is not registered there either; the
   README says to run both in the repo root.
-- [Skeleton keys other than host and partition (transport, ports, guards) are not applied] → today's
-  skeleton only adds `IBMI_SQL_TRANSPORT=ssh`, the default; a company needing more lists it as a
-  follow-up (owner question in the report).
+- [Skeleton keys other than host and partition (transport, ports, guards) are not applied] → the
+  bootstrap asks each partition's transport (Q16), and `IBMI_SQL_TRANSPORT` is protected, so a
+  company that answered `mapepire` gets colleague profiles on the `ssh` default and a failing
+  connection test. Open owner question: copy the skeleton's non-credential keys too (all but
+  `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_KIT_POLICY`). Until ruled, the README's Get started tells a
+  colleague to add the skeleton's other lines to the profile by hand.
 - [`IBMI_5250_VIEWER=true` in a shared file turns the viewer on for everyone] → it is the
   owner-chosen example; each person may delete it locally only by editing the committed file, so
   the README says what it does.

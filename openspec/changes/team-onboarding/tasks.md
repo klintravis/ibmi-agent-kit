@@ -24,13 +24,14 @@ Archive `first-run` before starting (this change builds on its `setup` requireme
 
 - [ ] 2.1 Update `.claude/skills/ibmi-kit-config/SKILL.md`: the generated-files list gains
   `.mcp.json`; skeletons (step 5) drop `IBMI_KIT_POLICY` and say "run setup in this repo"; step 5
-  writes `.mcp.json` (`node ${IBMI_KIT_HOME}/packages/server/dist/index.js`, env
+  writes `.mcp.json` (`"command": "node"`, `"args": ["${IBMI_KIT_HOME}/packages/server/dist/index.js"]`, env
   `IBMI_5250_VIEWER: "true"`), replacing the session's one; the kit-path lookup prefers
   `$IBMI_KIT_HOME`. Verify by reading the skill against the config-bootstrap delta.
 - [ ] 2.2 Update `templates/company-repo/README.md`: tree gains `.mcp.json`, Profiles section says
   run `setup`, new "Get started" section (clone, `npx ibmi-agent-kit setup` or the repo-local
   command with `IBMI_KIT_HOME`, `claude`, approve the server, `/demo` optional) with the one line on
-  why the policy path lives in each profile.
+  why the policy path lives in each profile, and a note to copy the skeleton's other lines (e.g. a
+  non-`ssh` transport) into the profile by hand (design.md, Risks).
 - [ ] 2.3 Update `templates/dry-run/`: add `.mcp.json` and `README.md` (generated per 2.1/2.2),
   remove the `IBMI_KIT_POLICY` line and fix the comment in `profiles/.env.*`.
 - [ ] 2.4 Extend the dry-run test in `packages/server/src/selfcheck.ts` per design.md (Selfchecks):
