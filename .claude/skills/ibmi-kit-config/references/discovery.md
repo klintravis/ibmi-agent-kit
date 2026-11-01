@@ -3,7 +3,7 @@
 The read-only queries the `ibmi-kit-config` skill runs, grouped by what they feed. Each one is a
 single `SELECT`, sent with `run_sql` (`json: true`, an explicit `maxRows`, and `server` set to the
 partition's profile). `run_sql` refuses anything that is not a select, a statement with a comment
-or a `;`, and a write hidden in a select.
+or an inner `;` (one trailing `;` is stripped), and a write hidden in a select.
 
 Rules for running them:
 

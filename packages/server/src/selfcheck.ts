@@ -236,7 +236,7 @@ test("policy templates: the bootstrap dry-run's policy matches its discovery fix
   const dir = join(EXAMPLES, "../templates/dry-run/");
   const { servers } = JSON.parse(readFileSync(join(dir, "discovery.json"), "utf8"));
   const policy = loadPolicy(join(dir, "policy.yaml"));
-  assert.equal(policy.mode.default, "observe");
+  assert.deepEqual(policy.mode, { default: "observe", partitions: {} });
   assert.deepEqual(policy.partitions.map((p) => p.name), Object.keys(servers));
   for (const p of policy.partitions) {
     const q = servers[p.name];
@@ -245,9 +245,36 @@ test("policy templates: the bootstrap dry-run's policy matches its discovery fix
   }
   const groups = servers.dev.I1.map((g: { GROUP_PROFILE_NAME: string }) => g.GROUP_PROFILE_NAME);
   for (const r of policy.roles) for (const g of r.groups) assert.ok(groups.includes(g), `${r.name}: ${g} not in I1`);
+  // Every role x environment has a case "<role> <env>" holding an allow and a deny.
+  const tests = readFileSync(join(dir, "policy.tests.yaml"), "utf8");
+  const expects = new Map([...tests.matchAll(/^- name: (.+)\n(?:(?!- name:)[\s\S])*?^ {2}expect: \[(.*)\]/gm)].map((m) => [m[1], m[2].split(/,\s*/)]));
+  for (const role of policy.roles) for (const env of policy.environments) {
+    const e = expects.get(`${role.name} ${env.name}`);
+    assert.ok(e, `no case "${role.name} ${env.name}"`);
+    assert.ok(e.includes("allow") && e.includes("deny"), `"${role.name} ${env.name}" needs an allow and a deny: ${e}`);
+  }
+  // Profile skeletons: one per partition, no password line.
+  for (const p of policy.partitions) {
+    const env = readFileSync(join(dir, "profiles", `.env.${p.name}`), "utf8");
+    assert.doesNotMatch(env, /^\s*IBMI_PASSWORD/m, p.name);
+    assert.match(env, new RegExp(`^IBMI_PARTITION=${p.name}$`, "m"));
+  }
   const r = await runBin(["policy", "test", join(dir, "policy.yaml"), join(dir, "policy.tests.yaml")]);
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.doesNotMatch(r.stderr, /warning:/);
+});
+
+// config-bootstrap: every discovery query passes run_sql's select gate and the guard classes it read-only.
+test("policy templates: every ibmi-kit-config discovery query passes run_sql and classifies as read", async () => {
+  const md = readFileSync(join(EXAMPLES, "../.claude/skills/ibmi-kit-config/references/discovery.md"), "utf8");
+  const queries = [...md.matchAll(/```sql\n([\s\S]*?)```/g)].flatMap((m) => m[1].split("\n")).filter((l) => l.trim());
+  assert.ok(queries.length >= 20, `found ${queries.length} queries`);
+  const { assertSelectOnly } = await import(new URL("../../source/dist/util.js", import.meta.url).href);
+  for (const q of queries) {
+    assert.doesNotThrow(() => assertSelectOnly(q), q);
+    const c = await classify(q, { lookups: statedLookups() });
+    assert.ok(c.operations.length > 0 && c.operations.every((o) => o.class === "read"), `${q}: ${JSON.stringify(c.operations.map((o) => o.class))}`);
+  }
 });
 
 test("policy test: a mutated policy names the failing case and the rule, and exits 1", async () => {

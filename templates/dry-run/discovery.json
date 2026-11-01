@@ -14,8 +14,7 @@
       ],
       "L1": [
         { "PREFIX": "WD", "LIBS": 3 },
-        { "PREFIX": "WI", "LIBS": 3 },
-        { "PREFIX": "XC", "LIBS": 1 }
+        { "PREFIX": "WI", "LIBS": 3 }
       ],
       "L2": [
         { "OBJNAME": "WDCUS", "OBJOWNER": "GRPDEV", "OBJTEXT": "Customers - development" },
@@ -67,7 +66,6 @@
       "S1": [{ "RDB": "KPRD01", "USR": "CFGADM" }],
       "S2": [{ "OS_VERSION": "7", "OS_RELEASE": "4" }],
       "S3": [{ "HOST_NAME": "KPRD01", "PARTITION_ID": 3, "NUMBER_OF_PARTITIONS": 3 }],
-      "S6": { "error": "SQL0204 RDB_ENTRY_INFO in QSYS2 type *FILE not found" },
       "L1": [{ "PREFIX": "WP", "LIBS": 3 }],
       "A1": {
         "WP%": [{ "AUTHORIZATION_NAME": "XCMOWN", "OBJECT_AUTHORITY": "*ALL", "LIBS": 3 }, { "AUTHORIZATION_NAME": "*PUBLIC", "OBJECT_AUTHORITY": "*USE", "LIBS": 3 }]

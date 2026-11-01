@@ -101,14 +101,14 @@ verbs/smoke.yaml
       `ref` pinned to the kit commit the admin uses.
    7. `README.md`: from `templates/company-repo/README.md`, with this company's partitions and
       roles, and `Last maintenance run:` set to today.
-   8. `.claude/settings.json` last: the deny rules from the same README. They block edits to the
-      files above, so nothing may be written after it.
 6. **Test.** `ibmi-agent-kit policy test policy.yaml policy.tests.yaml` must print `N cases passed`
    with no `warning:` line. On a failure, fix the policy or the case with the admin and run again.
 7. **Check per role.** For each role, call `policy_check` with `script` (one read and one write in
    that role's environment), `as` (the role's test user, groups and partition) and `policy` (the
    absolute path to the new `policy.yaml`), and show the decisions beside the tests.
-8. **Commit on the branch** and give the admin a summary: files written, inferences and the
+8. **Write `.claude/settings.json` last**, once tests and checks pass: the deny rules from the
+   same README. They block edits to the files above, so nothing may be fixed after it.
+9. **Commit on the branch** and give the admin a summary: files written, inferences and the
    answers behind them, partial discovery steps, and the test count. Stop there.
 
 ## Maintain

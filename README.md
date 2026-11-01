@@ -273,8 +273,9 @@ as a YAML file; see [docs/verbs.md](docs/verbs.md).
 `verb_run`, `policy_check`, the source tools and the 5250 tools, with `policy test` and `policy
 replay`); a live check on PUB400 and the archive are open.
 `project-verbs` is in progress (`verb_list`, `verb_run` and `policy_check` verb input are done;
-an example verb and a live check are open). Next: `config-bootstrap`, a company pilot. See
-`docs/idea.md`.
+an example verb and a live check are open).
+`config-bootstrap` is in progress (the policy templates and the admin skill `ibmi-kit-config` are
+written; packaging and a live run are open). See `docs/idea.md`.
 
 ## Built on
 
