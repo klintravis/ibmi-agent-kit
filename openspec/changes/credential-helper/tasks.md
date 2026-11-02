@@ -18,13 +18,13 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 - [ ] 2.4 Helper runner per `design.md`: no shell, `cwd: homedir()`, stderr dropped, timeout, `maxBuffer`, BOM and one line ending removed, try/catch around the spawn. Errors name only the executable and the exit code or reason.
 - [ ] 2.5 Git work tree check at fetch time: `realpath` of the profile file, walk up for `.git`.
 - [ ] 2.6 Store: lazy import, service `ibmi-agent-kit`, account `USER@host`, `{ linux: { store: 'secret-service' } }`, errors wrapped with the pointer to `credential set` or `IBMI_PASSWORD_COMMAND`. `setCredentialStore(fake)` as the in-process test seam.
-- [ ] 2.7 `fetchSecret` (precedence, no fallback, one warning per process for a plain line), `signOnOnce` (promise chain per key, latch, refusal text from the spec), `lastSecret`. Export from `index.ts`.
+- [ ] 2.7 `fetchSecret` (precedence, no fallback, one warning per process for a plain line), `signOnOnce` (promise chain per key, latch, refusal text from the spec), `lastSecret`, and a test-only `resetSignOnState()`. Export from `index.ts`. The latch is process-wide state and selfchecks share a process: reset between tests.
 - [ ] 2.8 Core selfchecks: helper success, trailing newline, trailing space kept, non-zero exit, empty output, timeout, `.cmd` refusal, secret absent from every error, split cases including quoted Windows paths, cwd is home, git refusal including the spoofed key, precedence and no fallback, env cannot set the keys, store key by `USER@host`, helper not run by `resolveProfileEnv`. Latch: same secret refused without send, changed secret sent, success clears, non-auth failure not recorded, concurrent attempts send once.
 - [ ] 2.9 Selfcheck that loads `@napi-rs/keyring` and constructs an entry without touching the store, so a missing platform binary fails CI.
 
 ## 3. Engines and server
 
-- [ ] 3.1 `Profile.password` optional plus the new fields in `source/src/types.ts` and `screen/src/types.ts`. Both `loadProfile` use `passwordSource`. Update the selfchecks that assert the old missing-password text.
+- [ ] 3.1 `Profile.password` optional plus the new fields in `source/src/types.ts` and `screen/src/types.ts`. Both `loadProfile` use `passwordSource`. Update the selfchecks that assert the old missing-password text. Existing selfchecks that simulate a rejected sign-on (the `session.ts:328` branch, an ssh `client-authentication` case) now latch the fixture's user and host, so later tests fail without sending: call `resetSignOnState()` between them.
 - [ ] 3.2 `transport.ts:48`: `signOnOnce`, rejected on `/\b401\b|authentication/i`. Add a comment that the daemon text is unconfirmed live.
 - [ ] 3.3 `sshMapepire.ts:90`: `signOnOnce`, rejected on `level === "client-authentication"`. Reword `describeConnectError` so it no longer names only `IBMI_PASSWORD`.
 - [ ] 3.4 `session.ts:302`: `signOnOnce` around type, Enter and result check, rejected on `sign on failed` and `still on the sign on screen`.
@@ -39,7 +39,7 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 - [ ] 4.3 The source prompt, per the spec: store with keep or migrate on the same host and user; helper with split, `.cmd` and git checks before any write; store write before the file write. Reword the company-repo `leak` message.
 - [ ] 4.4 `scrub` also masks `lastSecret`. Test once through the existing `deps.connect`.
 - [ ] 4.5 `credential set|delete <profile>` in `server/src/credential-cli.ts`, dispatched in `index.ts`: hidden prompt or one stdin line, extra argv is exit 2, profile file untouched, hint when the profile has no `IBMI_PASSWORD_STORE=os`.
-- [ ] 4.6 Update the setup selfchecks that expect `IBMI_PASSWORD` in the file. Add: default store, helper chosen, hostile helper round-trip, migration removes the line, store failure writes nothing, skeleton helper not copied or run, keep rules on host or user change, scrub of a helper's secret, password on argv refused, `credential` set and delete with a fake store.
+- [ ] 4.6 Every scripted setup selfcheck gains the source prompt, and its default answer writes the store, so install a fake store first (`deps` store defaulting to the real one, as `deps.connect` does): no test may reach the real store. Helper-profile fixtures go in an `mkdtemp` folder, never under the checkout, which is a git work tree and would trigger the refusal. Update those that expect `IBMI_PASSWORD` in the file. Add: default store, helper chosen, hostile helper round-trip, migration removes the line, store failure writes nothing, skeleton helper not copied or run, keep rules on host or user change, scrub of a helper's secret, password on argv refused, `credential` set and delete with a fake store.
 
 ## 5. Docs
 
