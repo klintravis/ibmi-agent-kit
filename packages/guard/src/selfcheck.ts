@@ -1123,7 +1123,7 @@ test("verbs: unknown key is refused naming the file and key; other verbs still l
   const set = loadVerbs(src);
   assert.deepEqual(addresses(set), ["proj:GOOD"]);
   assert.equal(set.errors.length, 1);
-  assert.ok(set.errors[0].split("\n").includes(`${join(root, P, "BAD.yaml")}: (top): Unrecognized key(s) in object: 'step'`), set.errors[0]);
+  assert.ok(set.errors[0].split("\n").includes(`${join(root, P, "BAD.yaml")}: (top): Unrecognized key: "step"`), set.errors[0]);
 });
 
 const SAMPLE = fileURLToPath(new URL("../../../examples/verbs/SMOKE-SAMPLE.yaml", import.meta.url));
@@ -1242,14 +1242,14 @@ test("verbs: a call must reach a verb and give only its parameters, and every on
 
 test("verbs: step shapes: one statement per step, cleanup undoes a setup id, ids are unique", () => {
   const cases: [string, RegExp][] = [
-    ["steps: []\n", /steps: Array must contain at least 1/],
+    ["steps: []\n", /steps: Too small: expected array to have >=1 items/],
     ["steps:\n  - { sql: VALUES 1, cl: DSPLIB }\n", /steps\.0: give exactly one of sql, cl, expect, verb/],
     ["steps:\n  - { sql: VALUES 1, args: { a: 1 } }\n", /steps\.0: args go with verb/],
-    ["steps:\n  - { sql: VALUES 1, requires_absent: VALUES 1 }\n", /steps\.0: Unrecognized key\(s\) in object: 'requires_absent'/],
+    ["steps:\n  - { sql: VALUES 1, requires_absent: VALUES 1 }\n", /steps\.0: Unrecognized key: "requires_absent"/],
     ["steps:\n  - expect: { sql: VALUES 1, rows: 1, empty: true }\n", /steps\.0\.expect: give exactly one of equals, rows, empty/],
     ["setup:\n  - { id: s, sql: VALUES 1 }\n  - { id: s, sql: VALUES 2 }\nsteps:\n  - sql: VALUES 1\n", /setup\.1\.id: s is used twice/],
     ["steps:\n  - sql: VALUES 1\ncleanup:\n  - { undoes: seed, sql: VALUES 1 }\n", /cleanup\.0\.undoes: no setup step has id seed/],
-    ["steps:\n  - sql: VALUES 1\ncleanup:\n  - { sql: VALUES 1 }\n", /cleanup\.0\.undoes: Required/],
+    ["steps:\n  - sql: VALUES 1\ncleanup:\n  - { sql: VALUES 1 }\n", /cleanup\.0\.undoes: Invalid input: expected string, received undefined/],
   ];
   for (const [body, re] of cases) {
     const set = loadVerbs(verbRoot({ [P + "x.yaml"]: `name: X\ndescription: d\n${body}` }).src);
@@ -1408,7 +1408,9 @@ test("verbs: templates are refused at load where substitution would be unsafe or
     ["n: { type: integer }", 'cl: "CALL PGM(P) PARM(:n)"', /steps\.0\.cl: :n: CL has no bound values/],
     ["d: { type: date }", 'sql: "VALUES ${d}"', /a date outside quotes/],
     ["x: { type: string, allowed: [\"O'BRIEN\"] }", 'cl: "CALL PGM(P) PARM(${x})"', /outside quotes and an allowed value holds a quote/],
-    ["n: { type: decimal, default: .inf }", 'sql: "VALUES :n"', /params\.n\.default: Infinity is not a decimal number/],
+    // zod 4's number refuses Infinity itself, so the schema stops it before the typed check; 1e21 still reaches that check
+    ["n: { type: decimal, default: .inf }", 'sql: "VALUES :n"', /params\.n\.default: Invalid input/],
+    ["n: { type: decimal, default: 1e21 }", 'sql: "VALUES :n"', /params\.n\.default: 1e\+21 is not a decimal number/],
     ["n: { type: integer, allowed: [1, two] }", 'sql: "VALUES :n"', /params\.n\.allowed\.1: "two" is not an integer/],
     ["s: { type: string, allowed: [01] }", 'sql: "VALUES :s"', /params\.s\.allowed\.0: 1 is not a string/],
     ["s: { type: string }", 'verb: OTHER\n    args: { t: "x${s}" }', /steps\.0\.args\.t: \$\{s\}: parameter s is a string with no allowed list/],
@@ -2014,7 +2016,7 @@ test("replay: a call whose lookups are malformed is skipped with the reason", as
   const [line] = await fixtureLog();
   const r = await replayRunLog(D4, [{ ...line, lookups: { bases: { "QTEMP.A": "LVORD.ORDERS" } } as unknown as RunLogLine["lookups"] }]);
   assert.deepEqual([r.statements, r.changes.length], [0, 0]);
-  assert.match(r.skipped[0] ?? "", /^call .*: lookups: bases\.QTEMP\.A: Expected array/);
+  assert.match(r.skipped[0] ?? "", /^call .*: lookups: bases\.QTEMP\.A: Invalid input: expected array, received string/);
 });
 
 test("replay: a candidate that looks up what the live run never asked is skipped, not decided on guesses", async () => {

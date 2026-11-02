@@ -44,7 +44,7 @@
     "@ibmi-agent-kit/screen": "^0.2.0",
     "@ibmi-agent-kit/source": "^0.7.0",
     "@modelcontextprotocol/sdk": "^1.19.0",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

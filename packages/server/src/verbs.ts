@@ -378,7 +378,7 @@ export function verbLoader(profileEnv: (server: string) => Record<string, string
 // --- tools ---
 
 const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
-const argsArg = z.record(z.union([z.string(), z.number(), z.boolean()])).optional().describe("parameter values by name; parameters left out take their defaults");
+const argsArg = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe("parameter values by name; parameters left out take their defaults");
 // policy_check's verb input (guarded.ts).
 export const verbCheckInput = { verb: z.string().describe("a verb: NAME (closest layer), user:NAME, proj:NAME or org:NAME"), args: argsArg };
 

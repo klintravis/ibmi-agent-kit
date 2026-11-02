@@ -35,11 +35,11 @@ const caseSchema = z
       .strict(),
     script: z.string().min(1).optional(),
     verb: z.string().min(1).optional(),
-    args: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     lookups: z
       .object({
-        schemas: z.record(z.string()).optional(),
-        bases: z.record(z.array(z.string().regex(/^[^.]+\.[^.]+$/, "LIB.NAME"))).optional(),
+        schemas: z.record(z.string(), z.string()).optional(),
+        bases: z.record(z.string(), z.array(z.string().regex(/^[^.]+\.[^.]+$/, "LIB.NAME"))).optional(),
       })
       .strict()
       .optional(),
@@ -138,8 +138,8 @@ export function describeFailure(r: TestResult): string {
 // Recorded lookup answers (runlog.ts Answers), checked before replay trusts them.
 const answersSchema = z
   .object({
-    schemas: z.record(z.string().nullable()).optional(),
-    bases: z.record(z.array(z.string()).nullable()).optional(),
+    schemas: z.record(z.string(), z.string().nullable()).optional(),
+    bases: z.record(z.string(), z.array(z.string()).nullable()).optional(),
     curlib: z.string().nullable().optional(),
   })
   .strict();
