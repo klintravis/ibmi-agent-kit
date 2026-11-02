@@ -37,9 +37,14 @@ that checkout's folder.
    ```
 
    Once the kit is published, `npx ibmi-agent-kit setup` does the same. Setup lists this repo's
-   partitions, asks your IBM i user and password, copies the partition's settings from
-   `profiles/`, points your profile at this repo's `policy.yaml`, and tests the connection. Your
-   password goes only in your own profile folder (`~/.ibmi-agent-kit`), never in this repo. If it
+   partitions, asks your IBM i user and where your password comes from, copies the partition's
+   settings from `profiles/`, points your profile at this repo's `policy.yaml`, and tests the
+   connection. At the password source prompt press Enter for your OS credential store (then type
+   the password, hidden), or type a helper command that prints it; the command is shown on screen,
+   so it must hold no secret. Your choice goes only in your own profile folder
+   (`~/.ibmi-agent-kit`), never in this repo, and a helper is refused if that folder is inside a
+   git work tree. To rotate the password, run `credential set <profile>` (see the kit's
+   [Passwords](https://github.com/klintravis/ibmi-agent-kit/blob/main/packages/server/README.md#passwords)). If it
    prints `set it to <folder>`, set `IBMI_KIT_HOME` to that folder for your user (Windows:
    `setx IBMI_KIT_HOME "<folder>"`; macOS and Linux: an `export` line in your shell profile) and
    open a new terminal.
@@ -72,10 +77,11 @@ own machine, and the agent returns its URL, so you can watch the screen as it wo
 ## Profiles
 
 Each `profiles/.env.<partition>` holds `IBMI_HOST`, `IBMI_USER` (a placeholder), the transport and
-`IBMI_PARTITION`, with a comment where the password goes. **A password is never written to this
-repo**, and no `IBMI_KIT_POLICY` either (its path differs per clone). Don't copy the skeleton: run
-setup (Get started), which copies every setting except the user, the password and the policy path,
-and adds yours.
+`IBMI_PARTITION`, with a comment that each person picks a password source at setup. **A password
+or helper command is never written to this repo** (a helper in a repo would run on every
+colleague's machine), and no `IBMI_KIT_POLICY` either (its path differs per clone). Don't copy the
+skeleton: run setup (Get started), which copies every setting except the user, the password
+settings and the policy path, and adds yours.
 
 ## Bring your existing skills
 

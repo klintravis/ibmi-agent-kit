@@ -7,7 +7,7 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 
 ## 1. Dependency
 
-- [ ] 1.1 Rebase on `origin/main` once `zod4` has merged (both change `package-lock.json`). If it has not merged, go on and rebase later.
+- [x] 1.1 Rebase on `origin/main` once `zod4` has merged (both change `package-lock.json`). If it has not merged, go on and rebase later.
 - [x] 1.2 Add `@napi-rs/keyring` to `packages/core`, exact pin `2.1.2`. Confirm with `grep` that `package-lock.json` keeps the optional entries of all platforms (npm can drop them), and that `npm audit` shows nothing new against `main`.
 
 ## 2. Core: `packages/core/src/credential.ts`
@@ -43,11 +43,11 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 
 ## 5. Docs
 
-- [ ] 5.1 `README.md` (lines 42, 44, 96), `packages/server/README.md` (64, 72, 82-87), `packages/core/README.md` (26), `packages/source/.env.example` (7), `docs/demo.md` (11, 26, 47, 100, 148): setup offers the store or a helper; `credential set|delete`; rotation.
-- [ ] 5.2 `packages/server/README.md`: helper rules (no shell, `.cmd` refusal, quoting with the single-quote rule for a value starting with a quoted path or holding `#`, git work tree refusal, precedence), try-once behaviour and its limit, the Windows Credential Manager example from `design.md`, Linux needing a Secret Service.
-- [ ] 5.3 `templates/company-repo/README.md` (33, 40-42, 75-77, 242) and `.claude/skills/ibmi-kit-config/SKILL.md` (21-22, 110, 113): no helper line in a skeleton; each user chooses a source at `setup`.
+- [x] 5.1 `README.md` (lines 42, 44, 96), `packages/server/README.md` (64, 72, 82-87), `packages/core/README.md` (26), `packages/source/.env.example` (7), `docs/demo.md` (11, 26, 47, 100, 148): setup offers the store or a helper; `credential set|delete`; rotation.
+- [x] 5.2 `packages/server/README.md`: helper rules (no shell, `.cmd` refusal, quoting with the single-quote rule for a value starting with a quoted path or holding `#`, git work tree refusal, precedence), try-once behaviour and its limit, the Windows Credential Manager example from `design.md`, Linux needing a Secret Service.
+- [x] 5.3 `templates/company-repo/README.md` (33, 40-42, 75-77, 242) and `.claude/skills/ibmi-kit-config/SKILL.md` (21-22, 110, 113): no helper line in a skeleton; each user chooses a source at `setup`.
 
 ## 6. Check
 
-- [ ] 6.1 `npm run clean && npm run check`, `node scripts/check-names.mjs`, and the desk's `docs-check`, all exit 0.
+- [x] 6.1 `npm run clean && npm run check`, `node scripts/check-names.mjs`, and the desk's `docs-check`, all exit 0.
 - [ ] 6.2 Add a line to the report for the owner to check live, not done by the stream: the store on the real Windows box, and a daemon's wrong-password text (a deliberately wrong password burns one attempt, so use a test profile, never PUB400 unasked).

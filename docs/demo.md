@@ -23,7 +23,7 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
 2. Create the profile. In your own terminal (PowerShell, Windows Terminal, macOS Terminal or a
    Linux shell; not through Claude and not with Claude's `!` prefix), run
    `node <abs path>/packages/server/dist/index.js setup demo`. It asks for the host, the user, the
-   password (hidden) and a policy file. Answer the policy prompt with
+   password source (Enter for the OS credential store, then the password, hidden) and a policy file. Answer the policy prompt with
    `<demo folder>/demo/policy-observe.yaml`. Expected: the last line reads
    `OK: demo signs on as <user> to <rdb>`. On `failed:`, fix what it names and run it again;
    Enter keeps an answer. See [`setup` command](../packages/server/README.md#setup-command).
@@ -44,7 +44,7 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
    To watch 5250 sessions live in your browser, add `"env": { "IBMI_5250_VIEWER": "true" }` next to
    `"args"` (or `claude mcp add -e IBMI_5250_VIEWER=true --transport stdio ibmi-agent-kit -- node <abs path>/packages/server/dist/index.js`).
    Settings that are not protected, like this one, may go in the registration's env. Protected
-   settings come only from the profile file: host, user, password, policy and every `IBMI_*_PORT`,
+   settings come only from the profile file: host, user, password source, policy and every `IBMI_*_PORT`,
    `IBMI_5250_VIEWER_PORT` included. The full list is in [Profiles](../README.md#profiles). If
    the profile file sets the same key, the file wins. See the
    [screen README](../packages/screen/README.md) for the viewer.
@@ -97,7 +97,7 @@ under the same policy (see [docs/policy.md](policy.md)).
 
 ## B. Enforce
 
-**Human**: run `setup demo` again in your terminal. Press Enter for host, user and password, and
+**Human**: run `setup demo` again in your terminal. Press Enter for host, user, password source and password, and
 answer the policy prompt with `<demo folder>/demo/policy-enforce.yaml`. Then run `/mcp` and
 restart `ibmi-agent-kit`. Paste:
 

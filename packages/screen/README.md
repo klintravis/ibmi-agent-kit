@@ -127,7 +127,9 @@ Connection and safety settings (host, user, password, ports, `IBMI_RESTRICTED`, 
 |---|---|---|---|
 | `IBMI_HOST` | yes | | IBM i host or IP |
 | `IBMI_USER` | yes | | user profile |
-| `IBMI_PASSWORD` | yes | | password |
+| `IBMI_PASSWORD_STORE` | one of three | | `os`: the password is in the OS credential store (`ibmi-agent-kit credential set <profile>`) |
+| `IBMI_PASSWORD_COMMAND` | one of three | | a helper command that prints the password; wins over the store. See the [server README](../server/README.md#passwords) |
+| `IBMI_PASSWORD` | one of three | | plain password in the file; still works, with a warning. Ignored when a helper or the store is set |
 | `IBMI_5250_DEVICE` | no | | virtual device to claim. Set a fixed name, or the host picks a `QPADEVxxxx` and the job attributes change between runs |
 | `IBMI_5250_PORT` | no | `23` | `992` is telnet over TLS, `23` is plain |
 | `IBMI_5250_CCSID` | no | `37` | EBCDIC code page. 273 German, 500 international, 1140 US with the euro sign |

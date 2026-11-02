@@ -76,7 +76,9 @@ The old `~/.ibm-i-source-mcp/` folder and the install folder are no longer read.
 |---|---|---|---|
 | `IBMI_HOST` | yes | | IBM i host or IP |
 | `IBMI_USER` | yes | | user profile |
-| `IBMI_PASSWORD` | yes | | password |
+| `IBMI_PASSWORD_STORE` | one of three | | `os`: the password is in the OS credential store (`ibmi-agent-kit credential set <profile>`) |
+| `IBMI_PASSWORD_COMMAND` | one of three | | a helper command that prints the password; wins over the store. See the [server README](../server/README.md#passwords) |
+| `IBMI_PASSWORD` | one of three | | plain password in the file; still works, with a warning. Ignored when a helper or the store is set |
 | `IBMI_SSH_PORT` | no | `22` | SSH port on the IBM i (`ssh` transport) |
 | `IBMI_SQL_TRANSPORT` | no | `ssh` | `ssh` uploads and runs the bundled mapepire jar over SSH; `daemon` connects to an admin-run Mapepire server and uploads nothing |
 | `IBMI_MAPEPIRE_PORT` | no | `8076` | port of the Mapepire server (`daemon` transport) |

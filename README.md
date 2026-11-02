@@ -39,9 +39,17 @@ Then create a profile and test it. Run this yourself in a real terminal (PowerSh
 node <abs path>/packages/server/dist/index.js setup [name]
 ```
 
-It asks for the host, the user, the password (hidden) and an optional policy file, writes the profile, then connects and prints `OK` or why it failed. See [`setup` command](packages/server/README.md#setup-command).
+It asks for the host, the user, where the password comes from and an optional policy file, writes the profile, then connects and prints `OK` or why it failed. See [`setup` command](packages/server/README.md#setup-command).
 
-**In a company config repo** (one the `ibmi-kit-config` skill made; layout in [templates/company-repo](templates/company-repo/README.md)), follow that repo's README, Get started: clone it, run `setup` inside the clone, set `IBMI_KIT_HOME` to this checkout, run `claude` there. `setup` then takes the host, partition and other settings from the repo's profile skeleton and the policy path from the clone, and asks only your user and password. Its `.mcp.json` registers the server, so `claude mcp add` is not needed. See [In a company config repo](packages/server/README.md#in-a-company-config-repo).
+**Passwords are not kept in the profile.** At the "password source" prompt press Enter for the OS credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service) and type the password once, hidden. Or type a helper command (for example your company's secret manager's CLI) that prints the password; the helper is run for every sign-on, and it is refused when the profile file is inside a git work tree. The command you type is shown on screen and stored as typed, so it must hold no secret. To rotate a password, change it on the IBM i, then run `node <abs path>/packages/server/dist/index.js credential set <profile>` (a helper: change the secret where it reads it). There is no `credential get`, on purpose. Limits:
+
+- A password the IBM i rejected is not sent again by the same server process, so a stale password costs one sign-on attempt, not a locked profile. The record is per process and per user and host: several clients, several machines or a `setup` run each send it once, and together can still reach the IBM i limit (`QMAXSIGN`).
+- An `IBMI_PASSWORD` line in an existing profile still works, with a warning on standard error that names the file. Run `setup` to move it to the store.
+- Anyone who can run commands as you can read your store entry or run your helper. This keeps passwords out of files, not out of reach of your own account.
+
+Details, helper rules and a Windows Credential Manager example: [Passwords](packages/server/README.md#passwords).
+
+**In a company config repo** (one the `ibmi-kit-config` skill made; layout in [templates/company-repo](templates/company-repo/README.md)), follow that repo's README, Get started: clone it, run `setup` inside the clone, set `IBMI_KIT_HOME` to this checkout, run `claude` there. `setup` then takes the host, partition and other settings from the repo's profile skeleton and the policy path from the clone, and asks only your user and where your password comes from (each person chooses; the repo never supplies one). Its `.mcp.json` registers the server, so `claude mcp add` is not needed. See [In a company config repo](packages/server/README.md#in-a-company-config-repo).
 
 Try it: [docs/demo.md](docs/demo.md) is a quick-start demo you can run against your own IBM i (or guided: `/demo`).
 
@@ -93,8 +101,8 @@ searched and the open sessions.
 
 Protected settings are read from the profile file only, never from the environment, so an MCP
 registration's env cannot override them (`IBMI_KIT_CONFIG_DIR` does choose which profile folder
-is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_PARTITION`, `IBMI_KIT_POLICY`
-(absolute path), `IBMI_KIT_VERBS` (absolute folders, separated by `;` on Windows and `:`
+is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_PASSWORD_COMMAND`, `IBMI_PASSWORD_STORE`,
+`IBMI_PARTITION`, `IBMI_KIT_POLICY` (absolute path), `IBMI_KIT_VERBS` (absolute folders, separated by `;` on Windows and `:`
 elsewhere), `IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`,
 `IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_MAPEPIRE_CA`,
 `IBMI_MAPEPIRE_JAR`, and every `IBMI_*_PORT`

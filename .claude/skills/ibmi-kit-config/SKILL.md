@@ -19,7 +19,7 @@ tools; no kit tool writes configuration.
    explicit `maxRows`, never `file: true`). The only other kit tools used are `list_servers` and
    `policy_check` with `as`, which decides offline and sends nothing.
 3. **No passwords.** Never ask for, accept, write or read a password, token or key. Never open a
-   `.env*` file outside this repo. Profile skeletons carry a comment where the password goes.
+   `.env*` file outside this repo. Profile skeletons carry a comment saying each person picks the OS store or a helper at setup.
 4. **Branch only.** Before the first write, create a branch; never commit to the default branch,
    never push or merge. The admin reviews and merges.
 5. **Observe mode.** Every generated `policy.yaml` has `mode: observe`. Moving a partition to
@@ -107,10 +107,12 @@ verbs/smoke.yaml
       IBMI_USER=YOUR_USER
       IBMI_SQL_TRANSPORT=ssh
       IBMI_PARTITION=<partition>
-      # The password is not kept here: setup puts it in your profile, never in this repo.
+      # No password or helper here: at setup you choose the OS store or a helper, in your own profile, never in this repo.
       ```
 
-      No `IBMI_KIT_POLICY` (setup writes each clone's own path) and never a password. Every
+      No `IBMI_KIT_POLICY` (setup writes each clone's own path) and never a password,
+      `IBMI_PASSWORD_STORE` or `IBMI_PASSWORD_COMMAND` (each colleague chooses at setup; a helper
+      command in a repo would run on every machine, so setup ignores it). Every
       other line is copied into the colleague's profile by `setup`.
    5. `verbs/smoke.yaml`: one verb, `name: SMOKE`, `tags: [smoke]`, one read step (Q19), and a
       test case for it in `policy.tests.yaml` (`verb: org:SMOKE`, `expect: allow`).
