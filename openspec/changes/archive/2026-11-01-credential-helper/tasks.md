@@ -50,4 +50,4 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 ## 6. Check
 
 - [x] 6.1 `npm run clean && npm run check`, `node scripts/check-names.mjs`, and the desk's `docs-check`, all exit 0.
-- [ ] 6.2 Add a line to the report for the owner to check live, not done by the stream: the store on the real Windows box, and a daemon's wrong-password text (a deliberately wrong password burns one attempt, so use a test profile, never PUB400 unasked).
+- [x] 6.2 Add a line to the report for the owner to check live, not done by the stream: the store on the real Windows box, and a daemon's wrong-password text (a deliberately wrong password burns one attempt, so use a test profile, never PUB400 unasked).
