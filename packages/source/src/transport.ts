@@ -47,22 +47,30 @@ export async function connectDaemonMapepire(profile: Profile, reporter: Reporter
   const job = new SQLJob({ naming: "system" }); // the jdbc driver would otherwise default to sql naming
   let sent = false; // a helper, store or latch error is not a connect error, and says so itself
   try {
-    // Rejected on a 401 or the word authentication: ws reports `Unexpected server response: 401` and
-    // mapepire-js passes it on, but the daemon's wrong-password text is unconfirmed against a live box.
+    // Rejected on ws's `Unexpected server response: 401` (mapepire-js passes it on) or the word
+    // authentication, in the message with the host name removed so a host or DNS error naming it can't
+    // match. The daemon's actual wrong-password text is unconfirmed against a live box.
     await signOnOnce(
       profile,
       async (password) => {
         sent = true;
         // Bounded, or a port that accepts TCP and never answers would hold this account's sign-on chain forever.
         // The text must not hold "401" or "authentication": a timeout is not a rejected password.
+        const c = job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password, ...(ca ? { ca } : {}) });
         await withTimeLimit(
-          job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password, ...(ca ? { ca } : {}) }),
+          c,
           CONNECT_TIMEOUT_MS,
-          () => void closeSshMapepire(job).catch(() => {}),
-          `no reply from ${hostKey} within ${CONNECT_TIMEOUT_MS / 1000}s (the port accepts a connection but the websocket handshake never finishes)`,
+          () => {
+            void closeSshMapepire(job).catch(() => {});
+            // mapepire 0.6.3 sets its socket only on websocket open, so the close above can miss a hung
+            // handshake; if the daemon answers late the job goes READY, so close it again then.
+            // shortcut: with a port that never replies, each attempt holds one half-open TCP socket until the peer drops it, because ws's handshake timeout isn't reachable through mapepire's public API; upgrade if mapepire exposes it.
+            void c.then(() => closeSshMapepire(job)).catch(() => {});
+          },
+          `no reply within ${CONNECT_TIMEOUT_MS / 1000}s (the port accepts a connection but the websocket handshake never finishes)`,
         );
       },
-      (e: any) => /\b401\b|authentication/i.test(String(e?.message ?? e)),
+      (e: any) => /Unexpected server response: 401\b|authentication/i.test(String(e?.message ?? e).split(profile.host).join("")),
     );
   } catch (e: any) {
     if (!sent) throw e;

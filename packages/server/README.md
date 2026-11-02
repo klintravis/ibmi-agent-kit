@@ -128,7 +128,7 @@ IBM i disables a user profile after `QMAXSIGN` failed sign-ons, so the kit tries
 Limits, plainly:
 
 - **Per process, not per box.** The record lives in memory, on purpose: writing it to disk would store data derived from the password. Every separate process sends the wrong password once: two MCP clients on the same profile, the same user's profile on two machines, or a client plus a `setup` run (its own process). Together they can still reach `QMAXSIGN`, so fix the password before restarting clients or running `setup` again.
-- **Only an authentication failure counts.** An SSH `client-authentication` failure, a 5250 sign-on failure or sign-on screen still showing after Enter, or a Mapepire daemon error showing HTTP 401 or "authentication". A host that is down is not recorded. The daemon's wording on a wrong password has not been confirmed against a live box: if it differs, nothing is recorded for the daemon and the old behaviour (a send per attempt) remains.
+- **Only an authentication failure counts.** An SSH `client-authentication` failure, a 5250 sign-on failure or sign-on screen still showing after Enter, or a Mapepire daemon error showing "Unexpected server response: 401" or "authentication" (the host name in the message is ignored). A host that is down is not recorded. The daemon's wording on a wrong password has not been confirmed against a live box: if it differs, nothing is recorded for the daemon and the old behaviour (a send per attempt) remains.
 - **Only the last rejected value.** Changing to a different wrong password sends it, and costs an attempt.
 - **A restart clears the record**, and the 5250 check can misfire on a slow screen; the refusal message names the restart as the way to try again.
 

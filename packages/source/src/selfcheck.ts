@@ -784,16 +784,21 @@ test("a daemon TLS handshake failure names certificate trust and IBMI_MAPEPIRE_C
 test("a daemon port that accepts TCP and never replies times out without latching, and the next sign-on for the account runs", async () => {
   resetSignOnState();
   let closed = 0;
-  const hang = patch(mapepire.SQLJob.prototype, { connect: () => new Promise(() => {}), async close() { closed++; } });
+  let answer!: (v: unknown) => void;
+  // the daemon answers after the limit: mapepire then carries on and the job goes ready
+  const hang = patch(mapepire.SQLJob.prototype, { connect: () => new Promise((res) => (answer = res)), async close() { closed++; } });
   const p = loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon" });
-  mock.timers.enable({ apis: ["setTimeout"] }); // the 10s limit fires on a tick, not on the clock
   let restore = hang;
   try {
-    const first = assert.rejects(connectDaemonMapepire(p), (e: Error) => /no reply from h:8076 within 10s/.test(e.message) && !/\b401\b|authentication/i.test(e.message));
+    mock.timers.enable({ apis: ["setTimeout"] }); // the 10s limit fires on a tick, not on the clock
+    const first = assert.rejects(connectDaemonMapepire(p), (e: Error) => /no reply within 10s/.test(e.message) && e.message.split("h:8076").length === 2 && !/\b401\b|authentication/i.test(e.message));
     await new Promise((res) => setImmediate(res)); // the sign-on has fetched and called connect
     mock.timers.tick(10_000);
     await first;
     assert.equal(closed, 1, "the hung job is closed");
+    answer({ success: true });
+    await new Promise((res) => setImmediate(res));
+    assert.equal(closed, 2, "a connect that answers late is closed again, not left as a live job");
     hang();
     restore = patch(mapepire.SQLJob.prototype, {
       async connect() { (this as any).status = "ready"; return { success: true }; },
@@ -801,6 +806,59 @@ test("a daemon port that accepts TCP and never replies times out without latchin
     });
     // the same password reaches the wire again: the chain is free and nothing was latched
     assert.equal(((await connectDaemonMapepire(p)) as any).status, "ready");
+  } finally {
+    mock.timers.reset();
+    restore();
+    resetSignOnState();
+  }
+});
+
+test("a daemon 401 latches the password and the next sign-on is not sent; a host or port that merely names 401 or authentication does not latch", async () => {
+  resetSignOnState();
+  let sends = 0;
+  let fail: Error = new Error("Unexpected server response: 401");
+  const restore = patch(mapepire.SQLJob.prototype, { async connect() { sends++; throw fail; }, async close() {} });
+  const daemon = { ...baseEnv, IBMI_SQL_TRANSPORT: "daemon" };
+  try {
+    const p = loadProfile(daemon);
+    await assert.rejects(connectDaemonMapepire(p), /Unexpected server response: 401/);
+    await assert.rejects(connectDaemonMapepire(p), /not sent.*rejected earlier/s);
+    assert.equal(sends, 1, "the rejected password reached the wire once");
+    // each of these fails for a reason that is not the password, so the second call must send again
+    const cases: [NodeJS.ProcessEnv, string][] = [
+      [{ ...daemon, IBMI_HOST: "sys-401" }, "connect ECONNREFUSED sys-401:8076"],
+      [{ ...daemon, IBMI_MAPEPIRE_PORT: "401" }, "connect ECONNREFUSED 10.0.0.1:401"],
+      [{ ...daemon, IBMI_HOST: "authentication-gw.corp" }, "getaddrinfo ENOTFOUND authentication-gw.corp"],
+    ];
+    for (const [env, text] of cases) {
+      resetSignOnState();
+      sends = 0;
+      fail = new Error(text);
+      const q = loadProfile(env);
+      await assert.rejects(connectDaemonMapepire(q), /cannot connect/);
+      await assert.rejects(connectDaemonMapepire(q), /cannot connect/);
+      assert.equal(sends, 2, `${text} is not a rejected password`);
+    }
+  } finally {
+    restore();
+    resetSignOnState();
+  }
+});
+
+test("a daemon connect timeout on a host named sys-401 does not latch", async () => {
+  resetSignOnState();
+  let sends = 0;
+  const restore = patch(mapepire.SQLJob.prototype, { connect: () => { sends++; return new Promise(() => {}); }, async close() {} });
+  try {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const p = loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon", IBMI_HOST: "sys-401" });
+    for (let i = 1; i <= 2; i++) {
+      const run = assert.rejects(connectDaemonMapepire(p), /no reply within 10s/);
+      await new Promise((res) => setImmediate(res));
+      mock.timers.tick(10_000);
+      await run;
+      assert.equal(sends, i, "the second sign-on sent again");
+    }
   } finally {
     mock.timers.reset();
     restore();

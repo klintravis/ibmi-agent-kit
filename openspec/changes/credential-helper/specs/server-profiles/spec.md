@@ -167,7 +167,8 @@ sign-on sees the result of the first.
 
 ### Requirement: Only an authentication failure counts as a rejection
 A rejection SHALL mean an SSH `client-authentication` failure, a 5250 sign-on failure or the sign-on
-screen still showing after Enter, or a mapepire daemon error showing HTTP 401 or authentication. Any
+screen still showing after Enter, or a mapepire daemon error showing `Unexpected server response: 401` or
+authentication (the host name in the message is ignored). Any
 other failure SHALL NOT be recorded.
 
 #### Scenario: Refused connection is not a rejection

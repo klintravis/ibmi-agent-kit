@@ -67,9 +67,10 @@ plain `profile.password`. A long-lived backend would otherwise hold a stale pass
 
 The refusal fetches once and compares, so correcting the store or helper clears it with no restart. The
 error also says a restart retries the same one, as a human escape: the 5250 "still on the sign on
-screen" branch could misfire on a slow screen. For the daemon, only auth-shaped errors (`401`,
-`authentication`) latch; anything else stays unlatched, which is today's behaviour, so an unconfirmed
-text is safe either way. `ws` reports `Unexpected server response: 401` and mapepire-js passes it on.
+screen" branch could misfire on a slow screen. For the daemon, only auth-shaped errors
+(`Unexpected server response: 401`, or `authentication`) latch, matched on the message with the profile
+host removed so a host name or DNS error can't match; anything else stays unlatched, which is today's
+behaviour, so an unconfirmed text is safe either way. `ws` reports `Unexpected server response: 401` and mapepire-js passes it on.
 Whether the daemon answers 401 is not verified against a live box.
 
 The chain holds a sign-on until the previous one ends. A hung connect delays other sign-ons for that
@@ -166,7 +167,7 @@ use the OS store there. The docs say to run the script by hand first.
 - **Latch is in-process.** See Non-Goals. Docs state that a wrong password can still cost one attempt per
   server process and per `setup` run.
 - **Native module on an unusual platform.** Lazily imported and wrapped, so only store users feel it, with
-  a pointer to the helper. The lockfile must keep all 13 platform optional entries; the selfcheck that
+  a pointer to the helper. The lockfile must keep all 12 platform optional entries; the selfcheck that
   loads the module on all CI legs guards this.
 - **Licence.** `@napi-rs/keyring` is MIT, but its Linux binaries statically link libdbus
   (`AFL-2.1 OR GPL-2.0-or-later`). Flagged to the owner.
