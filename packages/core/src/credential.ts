@@ -173,11 +173,13 @@ export interface CredentialStore {
 // Upper-case user and lower-case host, so an edited host finds no entry instead of the old password.
 export const credentialAccount = (user: string, host: string): string => `${user.toUpperCase()}@${host.toLowerCase()}`;
 
+// The default on Linux falls back silently to the kernel keyring, lost at restart: pin the Secret Service.
+export const KEYRING_OPTIONS = { linux: { store: "secret-service" } } as const;
+
 const realStore: CredentialStore = (() => {
   const entry = async (account: string) => {
     const { AsyncEntry } = await import("@napi-rs/keyring");
-    // The default on Linux falls back silently to the kernel keyring, lost at restart: pin the Secret Service.
-    return new AsyncEntry(SERVICE, account, { linux: { store: "secret-service" } });
+    return new AsyncEntry(SERVICE, account, KEYRING_OPTIONS);
   };
   return {
     get: async (a) => (await entry(a)).getPassword(),

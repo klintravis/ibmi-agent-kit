@@ -829,7 +829,19 @@ test("a daemon 401 latches the password and the next sign-on is not sent; a host
       [{ ...daemon, IBMI_HOST: "sys-401" }, "connect ECONNREFUSED sys-401:8076"],
       [{ ...daemon, IBMI_MAPEPIRE_PORT: "401" }, "connect ECONNREFUSED 10.0.0.1:401"],
       [{ ...daemon, IBMI_HOST: "authentication-gw.corp" }, "getaddrinfo ENOTFOUND authentication-gw.corp"],
+      [{ ...daemon, IBMI_HOST: "Authentication-GW.corp" }, "getaddrinfo ENOTFOUND authentication-gw.corp"],
+      [{ ...daemon, IBMI_HOST: "gw.authentication.corp" }, "getaddrinfo ENOTFOUND gw.authentication.corp"],
     ];
+    // and a host that overlaps the text of a real rejection must not hide it
+    for (const [host, text] of [["server", "Unexpected server response: 401"], ["h", "authentication failed"]]) {
+      resetSignOnState();
+      sends = 0;
+      fail = new Error(text);
+      const q = loadProfile({ ...daemon, IBMI_HOST: host });
+      await assert.rejects(connectDaemonMapepire(q), /cannot connect/);
+      await assert.rejects(connectDaemonMapepire(q), /not sent.*rejected earlier/s);
+      assert.equal(sends, 1, `${text} with host ${host} latches`);
+    }
     for (const [env, text] of cases) {
       resetSignOnState();
       sends = 0;

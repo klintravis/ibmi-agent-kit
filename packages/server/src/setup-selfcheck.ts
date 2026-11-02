@@ -411,13 +411,23 @@ test("setup: a profile on another host never keeps its password", () =>
 // ---- password source: helper, migration, store failure, `credential` ----
 
 // A helper script in a folder with a space in its name, under the temp root and never the checkout (a
-// git work tree, where a helper is refused). Returns the command line that runs it.
-function helperCommand(root: string, secret: string): string {
+// git work tree, where a helper is refused). Returns the command line that runs it; with `marker` each run
+// appends one "x" to that file, so a test can count the runs.
+function helperCommand(root: string, secret: string, marker?: string): string {
   const script = join(root, "my helper", "h.js");
   mkdirSync(dirname(script), { recursive: true });
-  writeFileSync(script, `console.log(${JSON.stringify(secret)});`);
+  writeFileSync(script, (marker ? `require("node:fs").appendFileSync(${JSON.stringify(marker)}, "x");` : "") + `console.log(${JSON.stringify(secret)});`);
   return `"${process.execPath}" "${script}"`;
 }
+
+// A connection whose sign-on fetches the password the way the real one does, so the helper runs for it.
+const fetchingProbe = (env: Record<string, string>): Probe => ({
+  query: async (sql) => {
+    await fetchSecret({ ...passwordSource(env), host: env.IBMI_HOST, user: env.IBMI_USER });
+    return okProbe(env).query(sql);
+  },
+  close: async () => {},
+});
 
 const profile = (dir: string, name: string, text: string) => (mkdirSync(dir, { recursive: true }), writeFileSync(join(dir, `.env.${name}`), text));
 
@@ -496,13 +506,31 @@ test("setup: a plain password is migrated to the store and its line removed; oth
     assert.equal(vault.get("BOB@h.example.com"), "dup-pw-4", "the last line is the one dotenv reads, so that one is migrated");
   }));
 
+test("setup: a profile with a helper on another host drops the helper and never runs it", () =>
+  isolated(async (dir) => {
+    const marker = join(dirname(dir), "runs.txt");
+    profile(dir, "prod", `IBMI_HOST=old.example.com\nIBMI_USER=bob\nIBMI_PASSWORD_COMMAND='${helperCommand(dirname(dir), "x", marker)}'\n`);
+    // host, user kept, store chosen, Enter at the password rejected, password, policy left
+    const r = await run(["prod"], ["new.example.com\r", "\r", "\r", "\r", "plainpw\r", "\r"]);
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.match(r.out, /IBMI_HOST old\.example\.com is replaced by new\.example\.com\n/);
+    assert.doesNotMatch(r.out, /Enter keeps the current/, "neither the old helper nor the old password is offered");
+    const env = resolveProfileEnv("prod");
+    assert.equal(env.IBMI_PASSWORD_COMMAND, undefined, "the old host's helper is gone");
+    assert.equal(env.IBMI_PASSWORD_STORE, "os");
+    assert.equal(existsSync(marker), false, "the helper was not run");
+    assert.deepEqual([...vault], [["BOB@new.example.com", "plainpw"]]);
+  }));
+
 test("setup: the current helper is kept only for the same host and user; the store line goes when a helper is chosen", () =>
   isolated(async (dir) => {
-    const cmd = helperCommand(dirname(dir), "x");
+    const marker = join(dirname(dir), "runs.txt");
+    const cmd = helperCommand(dirname(dir), "x", marker);
     profile(dir, "dev", `IBMI_HOST=h.example.com\nIBMI_USER=bob\nIBMI_PASSWORD_COMMAND='${cmd}'\nIBMI_PASSWORD_STORE=os\n`);
-    const kept = await run(["dev"], ["\r", "\r", "\r", "\r"]);
+    const kept = await run(["dev"], ["\r", "\r", "\r", "\r"], fetchingProbe);
     assert.equal(kept.code, 0, kept.out + kept.err);
     assert.match(kept.out, /Enter keeps the current helper/);
+    assert.equal(readFileSync(marker, "utf8"), "x", "the helper ran once, for the test");
     assert.equal(resolveProfileEnv("dev").IBMI_PASSWORD_COMMAND, cmd);
     assert.equal(resolveProfileEnv("dev").IBMI_PASSWORD_STORE, undefined, "one source only");
     assert.equal(vault.size, 0);

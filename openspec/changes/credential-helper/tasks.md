@@ -25,7 +25,7 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 ## 3. Engines and server
 
 - [x] 3.1 `Profile.password` optional plus the new fields in `source/src/types.ts` and `screen/src/types.ts`. Both `loadProfile` use `passwordSource`. Update the selfchecks that assert the old missing-password text. Existing selfchecks that simulate a rejected sign-on (the `session.ts:328` branch, an ssh `client-authentication` case) now latch the fixture's user and host, so later tests fail without sending: call `resetSignOnState()` between them.
-- [x] 3.2 `transport.ts:48`: `signOnOnce`, rejected on `/Unexpected server response: 401\b|authentication/i` run on the message with the host removed. Add a comment that the daemon text is unconfirmed live.
+- [x] 3.2 `transport.ts:48`: `signOnOnce`, rejected on `/Unexpected server response: 401\b|(?<![\w.-])authentication(?![\w-]|\.\w)/i` run on the raw message (no host removal; `authentication` matches only as a whole word, not inside a host name). Add a comment that the daemon text is unconfirmed live.
 - [x] 3.3 `sshMapepire.ts:90`: `signOnOnce`, rejected on `level === "client-authentication"`. Reword `describeConnectError` so it no longer names only `IBMI_PASSWORD`.
 - [x] 3.4 `session.ts:302`: `signOnOnce` around type, Enter and result check, rejected on `sign on failed` and `still on the sign on screen`.
 - [x] 3.5 `guarded.ts:441,552`: `secret: lastSecret(host, user) ?? conn.profile.password` (the fetched value is the one sent, so it wins over a leftover plain line).

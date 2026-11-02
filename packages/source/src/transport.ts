@@ -48,8 +48,8 @@ export async function connectDaemonMapepire(profile: Profile, reporter: Reporter
   let sent = false; // a helper, store or latch error is not a connect error, and says so itself
   try {
     // Rejected on ws's `Unexpected server response: 401` (mapepire-js passes it on) or the word
-    // authentication, in the message with the host name removed so a host or DNS error naming it can't
-    // match. The daemon's actual wrong-password text is unconfirmed against a live box.
+    // authentication as a whole word, on the raw message (no host removal: it mangles real errors when the
+    // host overlaps their text). The daemon's actual wrong-password text is unconfirmed against a live box.
     await signOnOnce(
       profile,
       async (password) => {
@@ -64,13 +64,14 @@ export async function connectDaemonMapepire(profile: Profile, reporter: Reporter
             void closeSshMapepire(job).catch(() => {});
             // mapepire 0.6.3 sets its socket only on websocket open, so the close above can miss a hung
             // handshake; if the daemon answers late the job goes READY, so close it again then.
-            // shortcut: with a port that never replies, each attempt holds one half-open TCP socket until the peer drops it, because ws's handshake timeout isn't reachable through mapepire's public API; upgrade if mapepire exposes it.
+            // shortcut: with a port that never replies, each attempt holds one half-open TCP socket until the peer drops it, because ws's handshake timeout isn't reachable through mapepire's public API; upgrade if mapepire exposes it. Likewise if the websocket opens after the limit and the connect reply never comes, `c` never settles and that socket stays open.
             void c.then(() => closeSshMapepire(job)).catch(() => {});
           },
           `no reply within ${CONNECT_TIMEOUT_MS / 1000}s (the port accepts a connection but the websocket handshake never finishes)`,
         );
       },
-      (e: any) => /Unexpected server response: 401\b|authentication/i.test(String(e?.message ?? e).split(profile.host).join("")),
+      // shortcut: a single-label host named exactly "authentication" can still match in a DNS error; upgrade if anyone reports it.
+      (e: any) => /Unexpected server response: 401\b|(?<![\w.-])authentication(?![\w-]|\.\w)/i.test(String(e?.message ?? e)),
     );
   } catch (e: any) {
     if (!sent) throw e;

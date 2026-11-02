@@ -68,8 +68,9 @@ plain `profile.password`. A long-lived backend would otherwise hold a stale pass
 The refusal fetches once and compares, so correcting the store or helper clears it with no restart. The
 error also says a restart retries the same one, as a human escape: the 5250 "still on the sign on
 screen" branch could misfire on a slow screen. For the daemon, only auth-shaped errors
-(`Unexpected server response: 401`, or `authentication`) latch, matched on the message with the profile
-host removed so a host name or DNS error can't match; anything else stays unlatched, which is today's
+(`Unexpected server response: 401`, or `authentication` as a whole word) latch, matched on the raw message with no host
+removal (removing it mangled real errors whose text overlaps the host, e.g. host `server`); `authentication` inside a
+host name (`authentication-gw.corp`, `gw.authentication.corp`) does not match, only a single-label host named exactly `authentication` can; anything else stays unlatched, which is today's
 behaviour, so an unconfirmed text is safe either way. `ws` reports `Unexpected server response: 401` and mapepire-js passes it on.
 Whether the daemon answers 401 is not verified against a live box.
 

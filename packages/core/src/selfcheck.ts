@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CONFIG_DIRS, listServers, resolveProfileEnv, credentialAccount, deleteStoredSecret, fetchSecret, lastSecret,
+  CONFIG_DIRS, KEYRING_OPTIONS, listServers, resolveProfileEnv, credentialAccount, deleteStoredSecret, fetchSecret, lastSecret,
   parseHelperCommand, passwordSource, resetSignOnState, runHelper, setCredentialStore, signOnOnce, splitCommand,
   storeSecret, type CredentialStore, type SignOnProfile,
 } from "./index.js";
@@ -476,5 +476,9 @@ test("No error from a failed fetch holds a secret", async () => {
 
 test("@napi-rs/keyring loads and builds an entry on this platform, without touching the store", async () => {
   const { AsyncEntry } = await import("@napi-rs/keyring");
-  assert.equal(typeof new AsyncEntry("ibmi-agent-kit-selfcheck", "nobody@nowhere"), "object");
+  assert.equal(typeof new AsyncEntry("ibmi-agent-kit-selfcheck", "nobody@nowhere", KEYRING_OPTIONS), "object");
+});
+
+test("the real store pins the Secret Service on Linux, never the kernel keyring fallback", () => {
+  assert.deepEqual(KEYRING_OPTIONS, { linux: { store: "secret-service" } });
 });
