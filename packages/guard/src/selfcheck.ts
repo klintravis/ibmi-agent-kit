@@ -627,7 +627,7 @@ test("policy: an unquoted * names the line and says to quote it", () => {
   );
 });
 
-test("policy: a __proto__ key in any YAML map is refused naming the line, as zod 3 refused it", () => {
+test("policy: a __proto__ key in any YAML map is refused naming the line", () => {
   // zod 4 drops a record key of that name without checking it, so parseYaml must refuse it first
   for (const body of ["commands:\n  __proto__: { bogus: 1 }\n", "mode: { __proto__: observe }\n", 'mode: { "__proto__": nope }\n'])
     assert.throws(() => parsePolicy(`version: 1\n${body}rules: []\n`, "p.yaml"), /^Error: p\.yaml line [23]: __proto__ is not allowed as a key$/, body);
@@ -1941,6 +1941,9 @@ test("policy tests: per-statement expects, lookups, curlib; bad files are refuse
     assert.throws(() => parsePolicyTests(lk(v), "t.yaml"), new RegExp(`^Error: t\\.yaml line 1: the YAML tag ${tag} is not allowed$`), v);
   assert.deepEqual(parsePolicyTests(lk("!!map {}"), "t.yaml")[0].lookups, {});
   assert.deepEqual(parsePolicyTests("- { name: !!str x, as: { user: X }, script: S, expect: allow }\n", "t.yaml")[0].name, "x");
+  // a bare ! forces a string, as on zod 3; an unknown tag, which yaml only warns about, is refused
+  assert.deepEqual(parsePolicyTests("- { name: ! 5, as: { user: X }, script: S, expect: allow }\n", "t.yaml")[0].name, "5");
+  assert.throws(() => parsePolicyTests("- { name: !foo x, as: { user: X }, script: S, expect: allow }\n", "t.yaml"), /^Error: t\.yaml line 1: the YAML tag !foo is not allowed$/);
   await assert.rejects(runPolicyTests(D4, parsePolicyTests("- { name: typo, as: { user: X, partition: prd }, script: SELECT 1 FROM A.T, expect: allow }\n", "t.yaml")), /case "typo": IBMI_PARTITION prd is not a partition/);
 });
 

@@ -92,9 +92,10 @@ export function parseYaml(text: string, source: string): unknown {
       if (isScalar(pair.key) && pair.key.value === "__proto__") throw new Error(`${source}${at(pair.key)}: __proto__ is not allowed as a key`);
     },
     // An explicit tag may only name a plain JSON-like type: !!set, !!timestamp, !!binary and the rest
-    // build a Set, Date or Buffer, which zod 4's object check lets through as `{}`.
+    // build a Set, Date or Buffer, which zod 4's object check lets through as `{}`. A bare `!` only
+    // forces a string; an unknown `!foo` is refused too, as yaml would drop it with a warning we don't read.
     Node(_, node) {
-      if (node.tag && !PLAIN_TAGS.has(node.tag)) throw new Error(`${source}${at(node)}: the YAML tag ${node.tag.replace("tag:yaml.org,2002:", "!!")} is not allowed`);
+      if (node.tag && node.tag !== "!" && !PLAIN_TAGS.has(node.tag)) throw new Error(`${source}${at(node)}: the YAML tag ${node.tag.replace("tag:yaml.org,2002:", "!!")} is not allowed`);
     },
   });
   return doc.toJS();
