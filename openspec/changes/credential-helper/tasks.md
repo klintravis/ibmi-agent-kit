@@ -34,12 +34,12 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 
 ## 4. setup and `credential`
 
-- [ ] 4.1 `updated()` can delete lines. Removed keys also leave `want` for the drift check.
-- [ ] 4.2 `OWN` gains both keys. Warn when a skeleton holds `IBMI_PASSWORD_COMMAND`, as for a skeleton password.
-- [ ] 4.3 The source prompt, per the spec: store with keep or migrate on the same host and user; helper with split, `.cmd` and git checks before any write; store write before the file write. Reword the company-repo `leak` message.
-- [ ] 4.4 `scrub` also masks `lastSecret`. Test once through the existing `deps.connect`.
-- [ ] 4.5 `credential set|delete <profile>` in `server/src/credential-cli.ts`, dispatched in `index.ts`: hidden prompt or one stdin line, extra argv is exit 2, profile file untouched, hint when the profile has no `IBMI_PASSWORD_STORE=os`.
-- [ ] 4.6 Every scripted setup selfcheck gains the source prompt, and its default answer writes the store, so install a fake store first (`deps` store defaulting to the real one, as `deps.connect` does): no test may reach the real store. Helper-profile fixtures go in an `mkdtemp` folder, never under the checkout, which is a git work tree and would trigger the refusal. Update those that expect `IBMI_PASSWORD` in the file. Add: default store, helper chosen, hostile helper round-trip, migration removes the line, store failure writes nothing, skeleton helper not copied or run, keep rules on host or user change, scrub of a helper's secret, password on argv refused, `credential` set and delete with a fake store.
+- [x] 4.1 `updated()` can delete lines. Removed keys also leave `want` for the drift check.
+- [x] 4.2 `OWN` gains both keys. Warn when a skeleton holds `IBMI_PASSWORD_COMMAND`, as for a skeleton password.
+- [x] 4.3 The source prompt, per the spec: store with keep or migrate on the same host and user; helper with split, `.cmd` and git checks before any write; store write before the file write. Reword the company-repo `leak` message.
+- [x] 4.4 `scrub` also masks `lastSecret`. Test once through the existing `deps.connect`.
+- [x] 4.5 `credential set|delete <profile>` in `server/src/credential-cli.ts`, dispatched in `index.ts`: hidden prompt or one stdin line, extra argv is exit 2, profile file untouched, hint when the profile has no `IBMI_PASSWORD_STORE=os`.
+- [x] 4.6 Every scripted setup selfcheck gains the source prompt, and its default answer writes the store, so install a fake store first (`deps` store defaulting to the real one, as `deps.connect` does): no test may reach the real store. Helper-profile fixtures go in an `mkdtemp` folder, never under the checkout, which is a git work tree and would trigger the refusal. Update those that expect `IBMI_PASSWORD` in the file. Add: default store, helper chosen, hostile helper round-trip, migration removes the line, store failure writes nothing, skeleton helper not copied or run, keep rules on host or user change, scrub of a helper's secret, password on argv refused, `credential` set and delete with a fake store.
 
 ## 5. Docs
 

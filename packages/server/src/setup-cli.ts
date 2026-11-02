@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameS
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_DIRS, parseProfile, resolveProfileEnv, serverName } from "@ibmi-agent-kit/core";
+import { CONFIG_DIRS, gitWorkTree, lastSecret, parseHelperCommand, parseProfile, resolveProfileEnv, serverName, setCredentialStore, storeSecret, type CredentialStore } from "@ibmi-agent-kit/core";
 import { loadPolicy } from "@ibmi-agent-kit/guard";
 import { loadProfile, MapepireBackend } from "@ibmi-agent-kit/source/tools";
 
@@ -20,7 +20,7 @@ export interface Input extends NodeJS.EventEmitter {
   resume(): unknown;
   pause(): unknown;
 }
-type Write = (text: string) => void;
+export type Write = (text: string) => void;
 export type Probe = { query(sql: string): Promise<{ rows: Record<string, unknown>[] }>; close(): Promise<void> };
 export interface SetupDeps {
   input: Input;
@@ -28,11 +28,12 @@ export interface SetupDeps {
   err: Write;
   connect(env: Record<string, string>): Probe;
   cwd?: string; // default process.cwd()
+  store?: CredentialStore; // default the OS store; the test connection reads through it too
 }
 
 const USAGE = "usage: ibmi-agent-kit setup [name]\n";
 export const SETUP_SQL = "SELECT CURRENT USER, CURRENT SERVER FROM SYSIBM.SYSDUMMY1";
-class Cancelled extends Error {}
+export class Cancelled extends Error {}
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const isFile = (p: string) => statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
 // The kit checkout this file runs from: <kit>/packages/server/dist/setup-cli.js.
@@ -57,7 +58,7 @@ const within = (root: string, p: string) => {
   return false;
 };
 // Settings a skeleton never supplies: the person's own sign-on and the policy path setup writes.
-const OWN = new Set(["IBMI_USER", "IBMI_PASSWORD", "IBMI_KIT_POLICY"]);
+const OWN = new Set(["IBMI_USER", "IBMI_PASSWORD", "IBMI_PASSWORD_COMMAND", "IBMI_PASSWORD_STORE", "IBMI_KIT_POLICY"]);
 
 // The file a name is written to: only names core lists as that server, from characters safe in a
 // file name on every OS (Windows drops a trailing dot, so `x.` would never be listed as `x.`).
@@ -77,12 +78,15 @@ function quote(v: string): string | undefined {
 
 // Every line that sets a key (dotenv reads `KEY=`, `export KEY=` and `KEY:`, the last one wins) gets
 // the new value; a key not there yet is appended. Other lines and the file's line endings stay.
-function updated(text: string, values: [string, string][]): string {
+// Keys in `drop` lose every line that sets them.
+function updated(text: string, values: [string, string][], drop: string[] = []): string {
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const lines = text ? text.split(/\r?\n/) : [];
+  let lines = text ? text.split(/\r?\n/) : [];
   if (lines.at(-1) === "") lines.pop();
+  const setting = (key: string) => new RegExp(`^\\s*(?:export\\s+)?${key.replace(/\./g, "\\.")}\\s*[=:]`); // a skeleton key may hold a dot
+  for (const key of drop) lines = lines.filter((l) => !setting(key).test(l));
   for (const [key, v] of values) {
-    const sets = new RegExp(`^\\s*(?:export\\s+)?${key.replace(/\./g, "\\.")}\\s*[=:]`); // a skeleton key may hold a dot
+    const sets = setting(key);
     let found = false;
     for (let i = 0; i < lines.length; i++) if (sets.test(lines[i])) (lines[i] = `${key}=${quote(v)}`), (found = true);
     if (!found) lines.push(`${key}=${quote(v)}`);
@@ -92,7 +96,7 @@ function updated(text: string, values: [string, string][]): string {
 
 // One raw-mode reader for every prompt: Enter ends, Backspace edits, Ctrl-C cancels; characters
 // pasted past an Enter wait for the next prompt. Raw mode is off again whenever a prompt ends.
-function reader(input: Input, out: Write) {
+export function reader(input: Input, out: Write) {
   let pending = "";
   input.setEncoding("utf8");
   return (question: string, hidden = false) =>
@@ -149,6 +153,7 @@ const realDeps = (): SetupDeps => ({
 
 export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Promise<number> {
   const { input, out, err } = deps;
+  if (deps.store) setCredentialStore(deps.store);
   const cwd = resolve(deps.cwd ?? process.cwd());
   if (args.length > 1) return err(USAGE), 2;
   const [dir, ...later] = CONFIG_DIRS();
@@ -167,11 +172,11 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
     if (args[0] !== undefined && !partitions.includes(args[0])) {
       return err(`"${args[0]}" is not a partition of the company config repo ${cwd}; its partitions: ${partitions.join(", ")}. Nothing was written.\n`), 2;
     }
-    // The password goes only in the profile folder, so that folder, or a profile linked elsewhere, must not lie in the repo.
+    // The profile (a helper command or store setting included) goes only in the profile folder, so that folder, or a profile linked elsewhere, must not lie in the repo.
     const root = real(cwd);
     const leak = [dir, ...partitions.map((p) => join(dir, fileFor(p)!))].find((p) => within(root, real(p)));
     if (leak) {
-      return err(`${leak} lies inside the company config repo ${cwd}, so setup would write your password into the repo. Use a profile folder outside it (IBMI_KIT_CONFIG_DIR) and no profile linked into it. Nothing was written.\n`), 2;
+      return err(`${leak} lies inside the company config repo ${cwd}, so setup would write your profile, with its password source, into the repo. Use a profile folder outside it (IBMI_KIT_CONFIG_DIR) and no profile linked into it. Nothing was written.\n`), 2;
     }
   }
   if (args[0] !== undefined && !fileFor(args[0])) {
@@ -214,6 +219,7 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
     const missing = ["IBMI_HOST", "IBMI_PARTITION"].filter((k) => !skeleton[k]?.trim());
     if (missing.length) return err(`${from} sets no ${missing.join(" and no ")}. Nothing was written.\n`), 2;
     if (skeleton.IBMI_PASSWORD) err(`warning: ${from} holds a password. It is ignored, never copied: remove it from the repo and its git history, and change that password.\n`);
+    if (skeleton.IBMI_PASSWORD_COMMAND) err(`warning: ${from} holds IBMI_PASSWORD_COMMAND. It is ignored, never copied or run: a command in a repo runs on every colleague's machine. Remove it from the repo.\n`);
   }
 
   const file = fileFor(name)!;
@@ -231,13 +237,16 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
 
   const repoPolicy = repo ? join(cwd, "policy.yaml") : undefined;
   if (repoPolicy && cur.IBMI_KIT_POLICY && cur.IBMI_KIT_POLICY !== repoPolicy) out(`IBMI_KIT_POLICY ${cur.IBMI_KIT_POLICY} is replaced by ${repoPolicy}\n`);
-  // The current password belongs to the current host: on another host it is asked again, never kept.
-  let keep: string | undefined = cur.IBMI_PASSWORD;
   if (repo) {
     out(`partition ${skeleton.IBMI_PARTITION} on host ${skeleton.IBMI_HOST}\n`);
   }
 
-  let password = "";
+  // The password belongs to a user on a host. A new host or user never keeps the current source.
+  let password = ""; // typed, or an old plain line being migrated; empty for a helper or a kept store entry
+  let host = "";
+  let user = "";
+  let source: "store" | "helper" | "kept" = "store"; // kept: the current helper line stays as it is
+  let command = "";
   const values: [string, string][] = [];
   try {
     const required = async (q: string, current?: string) => {
@@ -249,15 +258,38 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
     // In a company repo the skeleton's settings (host, partition, transport, ports, guards) are the company's.
     if (repo) values.push(...Object.entries(skeleton).filter(([k]) => !OWN.has(k)));
     else values.push(["IBMI_HOST", await required("IBM i host", cur.IBMI_HOST)]);
-    // Both modes: a host other than the stored one (or none stored) never keeps the stored password.
-    const host = values.find(([k]) => k === "IBMI_HOST")![1];
-    if (host !== cur.IBMI_HOST) {
-      keep = undefined;
-      if (cur.IBMI_HOST) out(`IBMI_HOST ${cur.IBMI_HOST} is replaced by ${host}\n`);
+    host = values.find(([k]) => k === "IBMI_HOST")![1];
+    if (host !== cur.IBMI_HOST && cur.IBMI_HOST) out(`IBMI_HOST ${cur.IBMI_HOST} is replaced by ${host}\n`);
+    user = await required("IBM i user", cur.IBMI_USER);
+    values.push(["IBMI_USER", user]);
+    const same = host === cur.IBMI_HOST && user === cur.IBMI_USER;
+    const curHelper = same ? cur.IBMI_PASSWORD_COMMAND : undefined;
+    const curStore = same && !cur.IBMI_PASSWORD_COMMAND && cur.IBMI_PASSWORD_STORE === "os";
+    const curPlain = same && !cur.IBMI_PASSWORD_COMMAND && !cur.IBMI_PASSWORD_STORE ? cur.IBMI_PASSWORD : undefined;
+    const answer = (await ask(curHelper ? "password source (Enter keeps the current helper, os for the OS credential store, or another helper command): " : "password source (Enter for the OS credential store, or a helper command): ")).trim();
+    if (!answer && curHelper) source = "kept";
+    else if (!answer || answer.toLowerCase() === "os") source = "store";
+    else (source = "helper"), (command = answer);
+    if (source === "helper") {
+      try {
+        parseHelperCommand(command);
+      } catch (e) {
+        return err(`${message(e)}. Nothing was written.\n`), 2;
+      }
+      const tree = gitWorkTree(path);
+      if (tree) {
+        return err(`a password helper cannot be used for ${path}: it is inside the git work tree ${tree}, where a pulled change could add a command. Use the OS credential store (Enter at the source prompt), or a profile folder outside the work tree. Nothing was written.\n`), 2;
+      }
     }
-    values.push(["IBMI_USER", await required("IBM i user", cur.IBMI_USER)]);
-    while (!password) password = (await ask(keep ? "password (Enter keeps the current one): " : "password: ", true)) || keep || "";
-    values.push(["IBMI_PASSWORD", password]);
+    if (source === "store") {
+      for (;;) {
+        const typed = await ask(curPlain || curStore ? "password (Enter keeps the current one): " : "password: ", true);
+        if (typed) password = typed;
+        else if (curPlain) password = curPlain; // migrated: stored below, its line removed
+        else if (!curStore) continue; // an existing store entry stays as it is
+        break;
+      }
+    }
     if (repoPolicy) values.push(["IBMI_KIT_POLICY", repoPolicy]);
     else {
       // One pair of surrounding quotes (Windows "Copy as path") is dropped and a leading ~ expands.
@@ -279,19 +311,35 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
     }
   }
 
+  // The chosen source is the only one left in the file; a plain password line never stays.
+  const drop = ["IBMI_PASSWORD"];
+  if (source === "store") (values.push(["IBMI_PASSWORD_STORE", "os"]), drop.push("IBMI_PASSWORD_COMMAND"));
+  else if (source === "helper") (values.push(["IBMI_PASSWORD_COMMAND", command]), drop.push("IBMI_PASSWORD_STORE"));
+  else drop.push("IBMI_PASSWORD_STORE");
+
   // Prove the new text reads back as meant, every other setting included, before it touches the disk.
   const bad = values.find(([, v]) => quote(v) === undefined)?.[0];
   if (bad) {
     err(`${bad} cannot be written safely in a profile file (it holds a line break, or all three of ' " and \`). Nothing was written.\n`);
     return 2;
   }
-  const next = updated(old, values);
+  const next = updated(old, values, drop);
   const want: Record<string, string> = { ...cur, ...Object.fromEntries(values) };
+  for (const k of drop) delete want[k];
   const after = parseProfile(next);
   const drift = [...new Set([...Object.keys(want), ...Object.keys(after)])].find((k) => want[k] !== after[k]);
   if (drift) {
     err(`${drift} would not read back unchanged after the update, so ${path} was left as it was. Edit it by hand.\n`);
     return 2;
+  }
+
+  // The store comes first: when it fails, the file stays as it was.
+  if (password && source === "store") {
+    try {
+      await storeSecret(user, host, password);
+    } catch (e) {
+      return err(`${message(e)}. Nothing was written.\n`), 2;
+    }
   }
 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -308,8 +356,13 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   }
   out(`saved ${path}\n`);
 
-  // The test reads the file back, never the answers held here. The password is cut from any error text.
-  const scrub = (t: string) => [password, JSON.stringify(password).slice(1, -1), encodeURIComponent(password)].reduce((s, p) => s.split(p).join("***"), t);
+  // The test reads the file back, never the answers held here. The typed password and whatever the
+  // helper or store returned for the test are cut from any error text.
+  const scrub = (t: string) =>
+    [password, lastSecret(host, user)]
+      .filter((s): s is string => !!s)
+      .flatMap((s) => [s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s)])
+      .reduce((s, p) => s.split(p).join("***"), t);
   let probe: Probe | undefined;
   try {
     const env = resolveProfileEnv(name);

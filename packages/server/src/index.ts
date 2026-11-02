@@ -1,13 +1,21 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { credentialCli } from "./credential-cli.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, onceShutdown, type KitServer } from "./server.js";
 import { setupCli } from "./setup-cli.js";
 
-// `policy test|replay` runs offline and `setup` asks at the terminal, both printing to stdout;
-// anything else serves MCP on stdio.
+// `policy test|replay` runs offline, `setup` and `credential` ask at the terminal, all printing to
+// stdout; anything else serves MCP on stdio.
 if (process.argv[2] === "policy") process.exitCode = await policyCli(process.argv.slice(3));
-else if (process.argv[2] === "setup") {
+else if (process.argv[2] === "credential") {
+  process.exitCode = await credentialCli(process.argv.slice(3), {
+    input: process.stdin,
+    out: (t) => void process.stdout.write(t),
+    err: (t) => void process.stderr.write(t),
+  });
+  setTimeout(() => process.exit(), 1000).unref();
+} else if (process.argv[2] === "setup") {
   process.exitCode = await setupCli(process.argv.slice(3));
   setTimeout(() => process.exit(), 1000).unref(); // fires only if a test connection left a handle open
 } else serve();
