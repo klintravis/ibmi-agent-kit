@@ -1,7 +1,7 @@
 // The CL command table (design D3): the shipped commands.yaml, its schema, and the merge a policy
 // uses for its `command_files` and `commands`. Loading the policy itself is not done here.
 import { readFileSync } from "node:fs";
-import { LineCounter, parseDocument, visit } from "yaml";
+import { LineCounter, isScalar, parseDocument, visit } from "yaml";
 import { z } from "zod";
 import { BUILTIN_CLASSES } from "./types.js";
 
@@ -82,18 +82,44 @@ export function parseYaml(text: string, source: string): unknown {
     const where = err.linePos ? ` line ${err.linePos[0].line}` : "";
     throw new Error(`${source}${where}: ${err.message.split("\n")[0]}`);
   }
+  const at = (node: { range?: [number, number, number] | null }) => (node.range ? ` line ${lineCounter.linePos(node.range[0]).line}` : "");
   visit(doc, {
     Alias(_, node) {
-      const line = node.range ? ` line ${lineCounter.linePos(node.range[0]).line}` : "";
-      throw new Error(`${source}${line}: *${node.source} is read as a YAML alias; quote values starting with * ("*${node.source}")`);
+      throw new Error(`${source}${at(node)}: *${node.source} is read as a YAML alias; quote values starting with * ("*${node.source}")`);
+    },
+    // Zod 4 drops a `__proto__` record key unchecked (zod 3 checked it first): no guard file has one.
+    Pair(_, pair) {
+      if (isScalar(pair.key) && pair.key.value === "__proto__") throw new Error(`${source}${at(pair.key)}: __proto__ is not allowed as a key`);
+    },
+    // An explicit tag may only name a plain JSON-like type: !!set, !!timestamp, !!binary and the rest
+    // build a Set, Date or Buffer, which zod 4's object check lets through as `{}`.
+    Node(_, node) {
+      if (node.tag && !PLAIN_TAGS.has(node.tag)) throw new Error(`${source}${at(node)}: the YAML tag ${node.tag.replace("tag:yaml.org,2002:", "!!")} is not allowed`);
     },
   });
   return doc.toJS();
 }
 
+const PLAIN_TAGS = new Set(["map", "seq", "str", "int", "float", "bool", "null"].map((t) => `tag:yaml.org,2002:${t}`));
+
+type Line = { path: PropertyKey[]; message: string };
+// Zod 4 nests a record key's message under `invalid_key` and each union branch's under `invalid_union`
+// (zod 3 printed both directly): unfold them. The branch shown is the first whose shape matched.
+function lines(issues: z.core.$ZodIssue[], base: PropertyKey[] = []): Line[] {
+  return issues.flatMap((i): Line[] => {
+    const path = [...base, ...i.path];
+    if (i.code === "invalid_key") return lines(i.issues, path);
+    if (i.code === "invalid_union") {
+      const hit = i.errors.find((e) => !e.some((x) => !x.path.length && (x.code === "invalid_type" || x.code === "invalid_value")));
+      if (hit) return lines(hit, path);
+    }
+    return [{ path, message: i.message }];
+  });
+}
+
 // zod issues as one line each, naming `source` and the key path.
 export function issueLines(source: string, error: z.ZodError): string {
-  return error.issues.map((i) => `${source}: ${i.path.join(".") || "(top)"}: ${i.message}`).join("\n");
+  return lines(error.issues).map((i) => `${source}: ${i.path.join(".") || "(top)"}: ${i.message}`).join("\n");
 }
 
 // Later tables win, a whole entry at a time: an override restates the command.

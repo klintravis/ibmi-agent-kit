@@ -355,6 +355,27 @@ test("verb tools: an analyst cannot widen access through a project verb", async 
   assert.match(r.text, /FAILED proj:FIX-ORDERS: nothing was sent: proj:FIX-ORDERS steps\.0 is denied: no rule matches write LVORD\.ORDHDR \(environment live, partition prod\)/);
 });
 
+test("verb tools: a __proto__ key in args is dropped by the schema and changes neither a bound value nor a decision", async () => {
+  // JSON, not YAML, so zod 4 drops the key where zod 3 refused a bad value under it
+  const { set } = verbs({ "s.yaml": SEEDED });
+  const k = await kit({ set, policy: D4 });
+  try {
+    const base = await k.call("policy_check", { verb: "SEEDED", args: { k: 9 } });
+    assert.equal(base.error, false, base.text);
+    for (const evil of ['"EVIL"', '{"k":1}', "5"]) {
+      const r = await k.call("policy_check", { verb: "SEEDED", args: JSON.parse(`{"k":9,"__proto__":${evil}}`) });
+      assert.equal(r.error, false, r.text);
+      assert.deepEqual(r.s, base.s, evil);
+    }
+    // alone, it supplies no parameter: k keeps its default 7, as with no args at all
+    const bare = await k.call("policy_check", { verb: "SEEDED", args: JSON.parse('{"__proto__":{"k":1}}') });
+    const none = await k.call("policy_check", { verb: "SEEDED" });
+    assert.deepEqual([bare.error, bare.text, bare.s], [none.error, none.text, none.s]);
+  } finally {
+    await k.close();
+  }
+});
+
 test("verb tools: policy_check with a verb runs nothing and returns each statement's operations, rule and decision", async () => {
   const { set } = verbs({ "s.yaml": SEEDED });
   const k = await kit({ set, policy: D4 });

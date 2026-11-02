@@ -627,6 +627,22 @@ test("policy: an unquoted * names the line and says to quote it", () => {
   );
 });
 
+test("policy: a __proto__ key in any YAML map is refused naming the line, as zod 3 refused it", () => {
+  // zod 4 drops a record key of that name without checking it, so parseYaml must refuse it first
+  for (const body of ["commands:\n  __proto__: { bogus: 1 }\n", "mode: { __proto__: observe }\n", 'mode: { "__proto__": nope }\n'])
+    assert.throws(() => parsePolicy(`version: 1\n${body}rules: []\n`, "p.yaml"), /^Error: p\.yaml line [23]: __proto__ is not allowed as a key$/, body);
+  assert.throws(() => parseCommandFile("commands:\n  CMD: { class: read, params: { __proto__: object } }\n", "c.yaml"), /^Error: c\.yaml line 2: __proto__ is not allowed/);
+});
+
+test("policy: a record key that fails its pattern is named with the repo's message, through a union too", () => {
+  const p = (body: string) => () => parsePolicy(`version: 1\n${body}rules: []\n`, "p.yaml");
+  assert.throws(p("commands: { TOOLONGNAME12: { class: read } }\n"), /^Error: p\.yaml: commands\.TOOLONGNAME12: an IBM i name of at most 10 characters$/);
+  assert.throws(p("commands: { FOO: { class: read, params: { TOOLONGNAME12: object } } }\n"), /^Error: p\.yaml: commands\.FOO\.params\.TOOLONGNAME12: an IBM i name of at most 10 characters$/);
+  assert.throws(p('mode: { "bad key": observe }\n'), /^Error: p\.yaml: mode\.bad key: a name is letters, digits, _ and -$/);
+  assert.throws(p("mode: { dev: nope }\n"), /^Error: p\.yaml: mode\.dev: Invalid option/);
+  assert.throws(p("mode: 5\n"), /^Error: p\.yaml: mode: Invalid input$/);
+});
+
 test("policy: an error in a command file names that file", () => {
   const dir = tmp();
   writeFileSync(join(dir, "cm-product.yaml"), "commands:\n  CMPRM: { clas: promote }\n");
@@ -1919,6 +1935,12 @@ test("policy tests: per-statement expects, lookups, curlib; bad files are refuse
   assert.throws(() => parsePolicyTests("- { name: x, as: { user: X }, script: S, expect: alow }\n", "t.yaml"), /t\.yaml: 0\.expect/);
   assert.throws(() => parsePolicyTests("- { name: x, as: { user: X, group: [G] }, script: S, expect: allow }\n", "t.yaml"), /Unrecognized key/);
   assert.throws(() => parsePolicyTests("[]\n", "t.yaml"), /t\.yaml/);
+  // an explicit tag that builds a Set, Date or Buffer passed zod 4's object check as {}; plain tags stay
+  const lk = (v: string) => `- { name: x, as: { user: X }, script: S, lookups: ${v}, expect: allow }\n`;
+  for (const [tag, v] of [["!!set", "!!set {}"], ["!!timestamp", "!!timestamp 2020-01-01"], ["!!binary", "!!binary aGVsbG8="], ["!!omap", "!!omap []"]])
+    assert.throws(() => parsePolicyTests(lk(v), "t.yaml"), new RegExp(`^Error: t\\.yaml line 1: the YAML tag ${tag} is not allowed$`), v);
+  assert.deepEqual(parsePolicyTests(lk("!!map {}"), "t.yaml")[0].lookups, {});
+  assert.deepEqual(parsePolicyTests("- { name: !!str x, as: { user: X }, script: S, expect: allow }\n", "t.yaml")[0].name, "x");
   await assert.rejects(runPolicyTests(D4, parsePolicyTests("- { name: typo, as: { user: X, partition: prd }, script: SELECT 1 FROM A.T, expect: allow }\n", "t.yaml")), /case "typo": IBMI_PARTITION prd is not a partition/);
 });
 
@@ -2017,6 +2039,16 @@ test("replay: a call whose lookups are malformed is skipped with the reason", as
   const r = await replayRunLog(D4, [{ ...line, lookups: { bases: { "QTEMP.A": "LVORD.ORDERS" } } as unknown as RunLogLine["lookups"] }]);
   assert.deepEqual([r.statements, r.changes.length], [0, 0]);
   assert.match(r.skipped[0] ?? "", /^call .*: lookups: bases\.QTEMP\.A: Invalid input: expected array, received string/);
+});
+
+test("replay: a __proto__ key in recorded lookups (JSON) is still refused, the line skipped with the reason", async () => {
+  // the lookups object is strict, so zod 4 reports the own key as unrecognized before it could drop it
+  const [line] = await fixtureLog();
+  const lookups = { ...line.lookups };
+  Object.defineProperty(lookups, "__proto__", { value: { x: 1 }, enumerable: true, configurable: true, writable: true }); // an own key, as JSON.parse makes
+  const r = await replayRunLog(D4, [{ ...line, lookups }]);
+  assert.deepEqual([r.statements, r.changes.length], [0, 0]);
+  assert.match(r.skipped[0] ?? "", /lookups: \(top\): Unrecognized key: "__proto__"/);
 });
 
 test("replay: a candidate that looks up what the live run never asked is skipped, not decided on guesses", async () => {
