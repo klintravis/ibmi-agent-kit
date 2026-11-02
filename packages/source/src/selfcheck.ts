@@ -383,7 +383,8 @@ test("IBMI_READ_ONLY fails closed, so a stray space cannot unlock the box", () =
 });
 
 test("loadProfile fails loudly when host/user/password missing", () => {
-  assert.throws(() => loadProfile({ IBMI_HOST: "h" }), /IBMI_HOST, IBMI_USER and\/or IBMI_PASSWORD/);
+  assert.throws(() => loadProfile({ IBMI_HOST: "h" }), /IBMI_HOST and\/or IBMI_USER/);
+  assert.throws(() => loadProfile({ IBMI_HOST: "h", IBMI_USER: "u" }), /missing a password source/, "a profile with no source at all is refused by passwordSource");
 });
 
 // --- compile ---

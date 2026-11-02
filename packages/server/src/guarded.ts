@@ -4,7 +4,7 @@
 // this file does the I/O. Engines never write to stdout, and neither does this.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { Msg } from "@ibmi-agent-kit/core";
+import { lastSecret, type Msg } from "@ibmi-agent-kit/core";
 import { assertNotRunaway, validName, withTimeLimit } from "@ibmi-agent-kit/source/tools";
 import {
   classify,
@@ -32,10 +32,13 @@ import {
 } from "@ibmi-agent-kit/guard";
 import { checkVerb, QUERY, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
 
+// The run log masks a plain password, else the last one a sign-on fetched; never fetches itself.
+const secretOf = (conn: Conn): string | undefined => conn.profile.password ?? lastSecret(conn.profile.host, conn.profile.user);
+
 // What the guard needs of a connection: the source engine's MapepireBackend fits, a stub does too.
 // `generation` is the job the caller decided against: another job refuses before sending.
 export interface Conn {
-  profile: { user: string; password: string; readOnly: boolean; blockedTables: string[]; blockedCl: string[] };
+  profile: { host: string; user: string; password?: string; readOnly: boolean; blockedTables: string[]; blockedCl: string[] };
   query(sql: string, params?: unknown[], maxRows?: number, reporter?: undefined, generation?: number): Promise<{ rows: Record<string, unknown>[]; columns: { name: string }[]; truncated: boolean }>;
   execute(sql: string, params?: unknown[], reporter?: undefined, generation?: number): Promise<{ rowsAffected: number; messages: Msg[] }>;
   cl(command: string, reporter?: undefined, generation?: number): Promise<{ ok: boolean; messages: Msg[] }>;
@@ -438,7 +441,7 @@ export function registerGuarded(
       ...(p.names ? { names: p.names } : {}),
       lookups: p.lookups,
       notes: p.notes,
-      secret: conn.profile.password,
+      secret: secretOf(conn),
       statements: p.statements.map((s, i) => ({
         statement: s.statement,
         decision: s.decision,
@@ -503,7 +506,7 @@ export function registerGuarded(
         stale: () => conn.generation !== generation,
       },
       log: (call) =>
-        runLog.record({ ...call, server, identity: who.identity, ...(Object.keys(who.names).length ? { names: who.names } : {}), notes: [...who.notes, ...(call.notes ?? [])], secret: conn.profile.password }),
+        runLog.record({ ...call, server, identity: who.identity, ...(Object.keys(who.names).length ? { names: who.names } : {}), notes: [...who.notes, ...(call.notes ?? [])], secret: secretOf(conn) }),
     };
   }
 
@@ -549,7 +552,7 @@ export function registerGuarded(
         ...(Object.keys(who.names).length ? { names: who.names } : {}),
         lookups: answers,
         notes: [...who.notes, ...notes],
-        secret: conn.profile.password,
+        secret: secretOf(conn),
         statements: planned.map((p) => ({ ...p, outcome: outcome(p) })),
       });
 

@@ -5,7 +5,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readF
 import { tmpdir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveProfileEnv } from "@ibmi-agent-kit/core";
+import { resetSignOnState, resolveProfileEnv, signOnOnce } from "@ibmi-agent-kit/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, LATEST_PROTOCOL_VERSION, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
@@ -14,6 +14,7 @@ import { MapepireBackend } from "@ibmi-agent-kit/source/tools";
 import { Session } from "@ibmi-agent-kit/screen/tools";
 import { CONFIRM_TIMEOUT_MS, supplementalGroups, toolStatements, type Conn } from "./guarded.js";
 import { policyCli } from "./policy-cli.js";
+import { verbLoader } from "./verbs.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine, type ServerDeps } from "./server.js";
 import "./verbs-selfcheck.js"; // project-verbs runner and tools
 import "./setup-selfcheck.js"; // the setup command
@@ -630,7 +631,7 @@ function stubConn(
   };
   const conn: Conn = {
     generation: 0,
-    profile: { user: o.user ?? "JDOE", password: "Secret1x", readOnly: o.readOnly ?? false, blockedTables: o.blockedTables ?? [], blockedCl: [] },
+    profile: { host: "h", user: o.user ?? "JDOE", password: "Secret1x", readOnly: o.readOnly ?? false, blockedTables: o.blockedTables ?? [], blockedCl: [] },
     async query(sql, _params, maxRows = 100, _reporter, generation) {
       queries.push(sql);
       const rows = own(sql);
@@ -1077,6 +1078,122 @@ async function sourceKit(o: { policy?: Policy; member?: string[]; curlib?: strin
 }
 
 const ORDVAL = { library: "JDOE", sourceFile: "QRPGLESRC", member: "ORDVAL", type: "RPGLE" };
+
+// --- credential helper seams (credential-helper spec; task 3.6) ---
+
+// The source engine over the stub box, but its connect step is the real signOnOnce around a counting
+// fake `send`, as in MapepireTransport.live(): every query signs on first until one is accepted.
+async function signOnKit(o: { reject?: boolean; profile?: Record<string, unknown> } = {}) {
+  const stub = stubConn();
+  const localDir = mkdtempSync(join(tmpdir(), "kit-cred-"));
+  const profile: Record<string, any> = { host: "box", user: "JDOE", password: "Secret1x", sshPort: 22, sqlTransport: "ssh", mapepirePort: 8076, sourceFileCcsid: 37, localDir, readOnly: false, blockedCl: [], blockedTables: [], ...o.profile };
+  const wire: string[] = []; // every password that reached the wire
+  let up = false;
+  const ensure = async () => {
+    if (up) return;
+    await signOnOnce(profile as Parameters<typeof signOnOnce>[0], async (pw) => {
+      wire.push(pw);
+      if (o.reject) throw new Error("client-authentication: all configured authentication methods failed");
+      up = true;
+    }, (e) => /authentication/.test(String((e as Error).message)));
+  };
+  const transport = {
+    connect: ensure,
+    close: async () => {},
+    query: async (sql: string, params?: unknown[], maxRows?: number) => (await ensure(), stub.conn.query(sql, params, maxRows)),
+    execute: async (sql: string, params?: unknown[]) => (await ensure(), stub.conn.execute(sql, params)),
+    cl: async (command: string) => (await ensure(), stub.conn.cl(command)),
+  };
+  const be = new MapepireBackend(profile as ConstructorParameters<typeof MapepireBackend>[0], transport as unknown as ConstructorParameters<typeof MapepireBackend>[1]);
+  const k = await guardedKit({ policy: D4_ENFORCE, stub, be });
+  return { ...k, wire, close: async () => (await k.close(), rmSync(localDir, { recursive: true, force: true })) };
+}
+
+// A helper that prints a secret and drops a marker file each time it runs.
+function helperFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "kit-helper-"));
+  const marker = join(dir, "ran.txt");
+  const script = join(dir, "h.mjs");
+  writeFileSync(script, `import { appendFileSync } from "node:fs"; appendFileSync(${JSON.stringify(marker)}, "x"); process.stdout.write("HelperS3cret");\n`);
+  const profile = { passwordCommand: `"${process.execPath}" "${script}"`, profileFile: join(dir, ".env.dev"), password: undefined };
+  return { dir, marker, profile };
+}
+
+test("seam: a guarded run_sql with a rejected sign-on sends the password once, and a second call sends none", async () => {
+  resetSignOnState();
+  const k = await signOnKit({ reject: true });
+  try {
+    // readBox's identity query signs on, fails and is not cached; the tool's own query would sign on again.
+    const first = await k.call("run_sql", { statement: "select * from JDOE.T" });
+    assert.equal(first.error, true);
+    assert.equal(k.wire.length, 1, "one send of the rejected password, not two");
+    const second = await k.call("run_sql", { statement: "select * from JDOE.T" });
+    assert.equal(second.error, true);
+    assert.match(second.text, /not sent: that password was rejected earlier/);
+    assert.equal(k.wire.length, 1, "the latch refused the retry before the wire");
+    assert.deepEqual(k.stub.sent, [], "nothing reached the box");
+  } finally {
+    await k.close();
+    resetSignOnState();
+  }
+});
+
+test("seam: the policy path, partition and verb reads never run the password helper", async () => {
+  resetSignOnState();
+  const h = helperFixture();
+  const { root, env } = emptyConfig();
+  const saved = { ...process.env };
+  const config = join(root, "config");
+  mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, ".env.dev"), `IBMI_HOST=h\nIBMI_USER=JDOE\nIBMI_PASSWORD_COMMAND='${h.profile.passwordCommand}'\n`); // single quotes: dotenv turns \n in a double-quoted value into a newline
+  Object.assign(process.env, env);
+  for (const k of Object.keys(process.env)) if (k.startsWith("IBMI_") && !(k in env)) delete process.env[k];
+  try {
+    const stub = stubConn();
+    const kit = createServer({ policy: builtinPolicy(), conn: () => stub.conn, runLogDir: join(root, "runs"), notice: () => {} });
+    const client = new Client({ name: "selfcheck", version: "0" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([kit.mcp.connect(b), client.connect(a)]);
+    try {
+      const r = await client.callTool({ name: "policy_check", arguments: { script: "DELETE FROM INLIB1.ORD", server: "dev", as: { user: "JDOE", groups: ["GRPDEV"], partition: "dev" } } });
+      assert.notEqual(r.isError, true);
+      const listed = JSON.stringify(await client.callTool({ name: "list_servers", arguments: {} })); // task 3.7
+      assert.doesNotMatch(listed, /PASSWORD|kit-helper|h\.mjs|HelperS3cret/i, "no source field reaches list_servers");
+    } finally {
+      await client.close();
+      await shutdownAll(kit.engines);
+    }
+    const profileEnv = resolveProfileEnv("dev");
+    assert.equal(profileEnv.IBMI_PASSWORD_COMMAND, h.profile.passwordCommand, "the command is read as text");
+    verbLoader((s) => resolveProfileEnv(s) as Record<string, string>)("dev");
+    assert.equal(existsSync(h.marker), false, "no read of a profile, partition or verb ran the helper");
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(h.dir, { recursive: true, force: true });
+    resetSignOnState();
+  }
+});
+
+test("seam: the run log masks the secret a helper supplied", async () => {
+  resetSignOnState();
+  const h = helperFixture();
+  const k = await signOnKit({ profile: h.profile });
+  try {
+    assert.equal((await k.call("run_sql", { statement: "select 1 from JDOE.T" })).error, false); // signs on: fetches the secret
+    assert.equal(readFileSync(h.marker, "utf8"), "x", "the helper ran once for the one send");
+    assert.deepEqual(k.wire, ["HelperS3cret"]);
+    assert.equal((await k.call("run_sql", { statement: "select 'HelperS3cret' from JDOE.T" })).error, false);
+    const text = JSON.stringify(k.log());
+    assert.doesNotMatch(text, /HelperS3cret/);
+    assert.match(text, /select '\*\*\*' from JDOE\.T/i);
+  } finally {
+    await k.close();
+    rmSync(h.dir, { recursive: true, force: true });
+    resetSignOnState();
+  }
+});
 
 test("6.1: compile_member with an override target is decided as compile into LIVLIB, and the denied call never reaches the box", async () => {
   const k = await sourceKit();

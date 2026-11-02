@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resetSignOnState } from "@ibmi-agent-kit/core";
 import { ScreenBuffer, type Field } from "./screen.js";
 import { Session } from "./session.js";
 import { Viewer } from "./viewer.js";
@@ -595,7 +596,7 @@ const pub400 = (firstContact: boolean) => {
     screen,
     firstContact,
     encoder: enc,
-    profile: { user: "MYUSER", password: "S3CRET", initialProgram: "PGM", initialMenu: "MNU", initialLibrary: "LIB" },
+    profile: { host: "h", user: "MYUSER", password: "S3CRET", initialProgram: "PGM", initialMenu: "MNU", initialLibrary: "LIB" },
     pressKey: async (k: string) => {
       pressed.push(k);
       screen.fields = [];
@@ -603,6 +604,21 @@ const pub400 = (firstContact: boolean) => {
   });
   return { stub, screen, pressed };
 };
+
+test("seam: three sign-ons in a row (the run_tests shape) with a rejected password type it once", async () => {
+  resetSignOnState();
+  try {
+    let enters = 0;
+    for (let suite = 0; suite < 3; suite++) {
+      const { stub } = pub400(true);
+      stub.pressKey = async () => void enters++; // the screen stays up: the box rejected the password
+      await assert.rejects(stub.signOn(), suite === 0 ? /still on the sign on screen/ : /sign-on for MYUSER@h not sent/i);
+    }
+    assert.equal(enters, 1, "the latch refused the second and third suite before any key was sent");
+  } finally {
+    resetSignOnState();
+  }
+});
 
 test("a two field custom sign on screen is recognised on first contact only", async () => {
   const { stub, screen, pressed } = pub400(true);
@@ -646,7 +662,7 @@ test("a custom sign on screen met again after recovery is still recognised, sign
   const logs: string[] = [];
   const s: Session = Object.assign(Object.create(Session.prototype), {
     screen, firstContact: true, encoder: enc, typed: new Map(),
-    profile: { user: "MYUSER", password: "S3CRET", restricted: true, allowedCl: [], blockedCl: [], initialProgram: "PGM" },
+    profile: { host: "h", user: "MYUSER", password: "S3CRET", restricted: true, allowedCl: [], blockedCl: [], initialProgram: "PGM" },
     stack: { reset() {} }, emit: () => true,
     looksLikeRecovery: () => state === "recovery",
     pressKey: async function (this: { firstContact: boolean }, k: string) {

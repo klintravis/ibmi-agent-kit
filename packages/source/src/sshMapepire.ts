@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): requests go through a job.transport shim over the ssh stream, which mapepire-js 0.6.3 sends through instead of job.socket.
+// Modified by ibmi-agent-kit (2026): requests go through a job.transport shim over the ssh stream, which mapepire-js 0.6.3 sends through instead of job.socket; the ssh sign-on goes through signOnOnce.
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, type ClientChannel, type SFTPWrapper } from "ssh2";
 import mapepire from "@ibm/mapepire-js";
+import { signOnOnce } from "@ibmi-agent-kit/core";
 import { NOOP_REPORTER, type Profile, type Reporter } from "./types.js";
 
 const { SQLJob } = mapepire;
@@ -45,7 +46,7 @@ function describeConnectError(e: Error, where: string, user: string, afterSecs: 
   if (code === "ECONNREFUSED") return new Error(`IBM i at ${where} refused the connection: the machine answered but nothing listens on that port. Is the ssh server started (strtcpsvr server(*sshd)) and is IBMI_SSH_PORT right?`);
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") return new Error(`IBM i host not found: "${where}" does not resolve. Check IBMI_HOST for typos, and your dns or vpn.`);
   if (code === "EHOSTUNREACH" || code === "ENETUNREACH") return new Error(`IBM i at ${where} is not reachable: no route to host (after ${afterSecs}s). Check the network or vpn.`);
-  if (level === "client-authentication" || /authentication/i.test(msg)) return new Error(`reached ${where}, but sign-on failed for user ${user}. Check IBMI_USER and IBMI_PASSWORD, and that the profile is not disabled.`);
+  if (level === "client-authentication" || /authentication/i.test(msg)) return new Error(`reached ${where}, but sign-on failed for user ${user}. Check IBMI_USER and the password source (IBMI_PASSWORD_STORE, IBMI_PASSWORD_COMMAND or IBMI_PASSWORD), and that the profile is not disabled.`);
   return new Error(`cannot connect to ${where}: ${msg}`);
 }
 
@@ -82,13 +83,22 @@ async function sshConnect(profile: Profile, hostKey: string, reporter: Reporter)
   const secs = () => Math.round((Date.now() - t0) / 1000);
   reporter.step(`connecting to ${hostKey} over ssh as ${profile.user}`);
   const hb = beat(() => reporter.step(`still trying to reach ${hostKey} (${secs()}s, gives up at ${CONNECT_TIMEOUT_MS / 1000}s)`), 3000);
+  let sent = false; // a helper, store or latch error is not a connect error, and says so itself
   try {
-    await new Promise<void>((res, rej) => {
-      conn
-        .on("ready", res)
-        .on("error", (e) => rej(describeConnectError(e, hostKey, profile.user, secs())))
-        .connect({ host: profile.host, port: profile.sshPort, username: profile.user, password: profile.password, keepaliveInterval: 15000, readyTimeout: CONNECT_TIMEOUT_MS });
-    });
+    await signOnOnce(
+      profile,
+      (password) =>
+        new Promise<void>((res, rej) => {
+          sent = true;
+          conn
+            .on("ready", res)
+            .on("error", rej)
+            .connect({ host: profile.host, port: profile.sshPort, username: profile.user, password, keepaliveInterval: 15000, readyTimeout: CONNECT_TIMEOUT_MS });
+        }),
+      (e) => (e as { level?: string })?.level === "client-authentication", // judged on ssh2's raw error, before it is reworded
+    );
+  } catch (e) {
+    throw sent ? describeConnectError(e as Error, hostKey, profile.user, secs()) : e;
   } finally {
     clearInterval(hb);
   }

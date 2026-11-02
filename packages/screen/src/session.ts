@@ -1,8 +1,9 @@
-// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery; pressKey takes an optional `guarded` check of the command line before the key is sent, after the engine's own command check on the same text; the sign on screen's System name is read.
+// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery; pressKey takes an optional `guarded` check of the command line before the key is sent, after the engine's own command check on the same text; the sign on screen's System name is read; the password is typed inside signOnOnce, fetched per send.
 // One 5250 session: transport, screen, and settle logic. The host says it is done twice, by
 // unlocking the keyboard and then definitively by sending a read command, so nothing here polls.
 
 import { EventEmitter } from "node:events";
+import { signOnOnce } from "@ibmi-agent-kit/core";
 import { CMD, KEY_TO_AID, KEYS, OPCODE_CANCEL_INVITE, READ_CMDS, isNondisplay } from "./codes.js";
 import { encode } from "./ebcdic.js";
 import { assertCommandAllowed } from "./guard.js";
@@ -295,11 +296,21 @@ export class Session extends EventEmitter {
     if (input.length < 2) throw new Error("sign on screen has fewer than two input fields");
 
     reporter.step(`signing on as ${this.profile.user}`);
+    // Type, Enter and the result check are one send: the password is fetched for it, and a rejection
+    // is remembered so the same password is not typed again. A latch refusal types nothing.
+    await signOnOnce(
+      this.profile,
+      (password) => this.typeAndEnter(input, password, reporter),
+      (e) => /sign on failed|still on the sign on screen/.test(String((e as Error)?.message)),
+    );
+  }
+
+  private async typeAndEnter(input: Field[], password: string, reporter: Reporter): Promise<void> {
     // By the nondisplay bit, not by position: on a customised screen input[1] may be Program, which
     // would render the password and send it as a name.
     const pw = input.find((f) => isNondisplay(f.attr)) ?? input[1];
     this.screen.typeInto(input[0], this.profile.user, this.encoder);
-    this.screen.typeInto(pw, this.profile.password, this.encoder);
+    this.screen.typeInto(pw, password, this.encoder);
 
     // A custom screen has no program/menu/library fields to fill, whatever else it paints.
     const custom = !this.looksLikeStandardSignOn();

@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): Profile carries the password source (plain, helper or OS store) instead of a required password.
 export type { LoggingLevel as LogLevel } from "@modelcontextprotocol/sdk/types.js";
 import type { LoggingLevel as LogLevel } from "@modelcontextprotocol/sdk/types.js";
 
@@ -11,7 +12,11 @@ export const NOOP_REPORTER: Reporter = { step: () => {}, log: () => {} };
 export interface Profile {
   host: string;
   user: string;
-  password: string;
+  // password source: signOnOnce in core fetches it per send, no field here is read directly
+  password?: string;
+  passwordCommand?: string;
+  passwordStore?: "os";
+  profileFile?: string;          // the profile file the loader read, for the git work tree check
   port: number;
   tls: boolean;
   tlsInsecure: boolean;

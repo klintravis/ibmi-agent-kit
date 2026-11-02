@@ -1,5 +1,5 @@
-// Modified by ibmi-agent-kit (2026): profiles resolve through @ibmi-agent-kit/core, no .env is loaded into process.env; adds IBMI_SQL_TRANSPORT, IBMI_MAPEPIRE_PORT and IBMI_MAPEPIRE_CA; IBMI_LOCAL_DIR is read per profile.
-import { listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
+// Modified by ibmi-agent-kit (2026): profiles resolve through @ibmi-agent-kit/core, no .env is loaded into process.env; adds IBMI_SQL_TRANSPORT, IBMI_MAPEPIRE_PORT and IBMI_MAPEPIRE_CA; IBMI_LOCAL_DIR is read per profile; the password comes from passwordSource (plain, helper or OS store).
+import { listServers, passwordSource, resolveProfileEnv } from "@ibmi-agent-kit/core";
 import type { Profile } from "./types.js";
 
 // --- servers ---
@@ -27,10 +27,10 @@ function transport(v: string | undefined): Profile["sqlTransport"] {
 }
 
 export function loadProfile(env: Record<string, string | undefined>): Profile {
-  const { IBMI_HOST: host, IBMI_USER: user, IBMI_PASSWORD: password } = env;
-  if (!host || !user || !password) throw new Error("missing IBMI_HOST, IBMI_USER and/or IBMI_PASSWORD in the env file");
+  const { IBMI_HOST: host, IBMI_USER: user } = env;
+  if (!host || !user) throw new Error("missing IBMI_HOST and/or IBMI_USER in the env file");
   return {
-    host, user, password,
+    host, user, ...passwordSource(env),
     sshPort: Number(env.IBMI_SSH_PORT || 22),
     sqlTransport: transport(env.IBMI_SQL_TRANSPORT),
     mapepirePort: Number(env.IBMI_MAPEPIRE_PORT || 8076),

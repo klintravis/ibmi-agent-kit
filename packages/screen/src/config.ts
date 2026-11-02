@@ -1,5 +1,5 @@
-// Modified by ibmi-agent-kit (2026): profiles now resolve through @ibmi-agent-kit/core, which also checks the name; the module-level dotenv loading is removed.
-import { CONFIG_DIRS, listServers, resolveProfileEnv } from "@ibmi-agent-kit/core";
+// Modified by ibmi-agent-kit (2026): profiles now resolve through @ibmi-agent-kit/core, which also checks the name; the module-level dotenv loading is removed; the password comes from passwordSource (plain, helper or OS store).
+import { CONFIG_DIRS, listServers, passwordSource, resolveProfileEnv } from "@ibmi-agent-kit/core";
 import { DEFAULT_CCSID } from "./ebcdic.js";
 import type { Profile } from "./types.js";
 
@@ -28,10 +28,10 @@ const num = (v: string | undefined, dflt: number) => {
 export function loadProfile(env: NodeJS.ProcessEnv | Record<string, string> = process.env): Profile {
   const host = env.IBMI_HOST;
   const user = env.IBMI_USER;
-  const password = env.IBMI_PASSWORD;
-  if (!host || !user || !password) {
-    throw new Error("missing IBMI_HOST, IBMI_USER and/or IBMI_PASSWORD in the env file");
+  if (!host || !user) {
+    throw new Error("missing IBMI_HOST and/or IBMI_USER in the env file");
   }
+  const source = passwordSource(env);
 
   // Not aliased to IBMI_RESTRICTED: the two mean different things.
   if (env.IBMI_READ_ONLY) {
@@ -51,7 +51,7 @@ export function loadProfile(env: NodeJS.ProcessEnv | Record<string, string> = pr
   return {
     host,
     user,
-    password,
+    ...source,
     port,
     tls: port === 992,
     tlsInsecure: bool(env.IBMI_5250_TLS_INSECURE, false, "IBMI_5250_TLS_INSECURE"),

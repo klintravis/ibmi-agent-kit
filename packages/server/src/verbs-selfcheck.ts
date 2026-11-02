@@ -79,7 +79,7 @@ function box(o: { user?: string; group?: string; rdb?: string; rows?: (sql: stri
   };
   const conn: Conn = {
     generation: 0,
-    profile: { user: o.user ?? "JDOE", password: "Secret1x", readOnly: o.readOnly ?? false, blockedTables: o.blockedTables ?? [], blockedCl: [] },
+    profile: { host: "h", user: o.user ?? "JDOE", password: "Secret1x", readOnly: o.readOnly ?? false, blockedTables: o.blockedTables ?? [], blockedCl: [] },
     async query(sql, _params, maxRows = 100, _reporter, generation) {
       const mine = own(sql);
       if (mine) return { rows: mine, columns: [], truncated: false };

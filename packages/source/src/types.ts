@@ -1,9 +1,13 @@
-// Modified by ibmi-agent-kit (2026): Profile carries the SQL transport, the Mapepire daemon port and CA, and the local copy folder.
+// Modified by ibmi-agent-kit (2026): Profile carries the SQL transport, the Mapepire daemon port and CA, the local copy folder, and the password source (plain, helper or OS store).
 // --- config ---
 export interface Profile {
   host: string;
   user: string;
-  password: string;
+  // password source: signOnOnce in core fetches it per send, no field here is read directly
+  password?: string;
+  passwordCommand?: string;
+  passwordStore?: "os";
+  profileFile?: string;          // the profile file the loader read, for the git work tree check
   sshPort: number;               // default 22
   sqlTransport: "ssh" | "daemon"; // IBMI_SQL_TRANSPORT, default ssh
   mapepirePort: number;          // daemon transport only, default 8076

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 // @ibm/mapepire-js is pinned to exactly 0.6.3: the ssh shim and the closed-socket marking here and in
 // sshMapepire.ts set its private fields (status, socket, transport, responseEmitter), which a minor bump can rename.
 import mapepire from "@ibm/mapepire-js";
-import type { Msg, SqlTransport } from "@ibmi-agent-kit/core";
+import { signOnOnce, type Msg, type SqlTransport } from "@ibmi-agent-kit/core";
 import { NOOP_REPORTER, type Profile, type Reporter, type SqlColumn } from "./types.js";
 import { closeSshMapepire, connectSshMapepire, raceJobClosed } from "./sshMapepire.js";
 
@@ -44,9 +44,20 @@ export async function connectDaemonMapepire(profile: Profile, reporter: Reporter
     }
   }
   const job = new SQLJob({ naming: "system" }); // the jdbc driver would otherwise default to sql naming
+  let sent = false; // a helper, store or latch error is not a connect error, and says so itself
   try {
-    await job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password: profile.password, ...(ca ? { ca } : {}) });
+    // Rejected on a 401 or the word authentication: ws reports `Unexpected server response: 401` and
+    // mapepire-js passes it on, but the daemon's wrong-password text is unconfirmed against a live box.
+    await signOnOnce(
+      profile,
+      async (password) => {
+        sent = true;
+        await job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password, ...(ca ? { ca } : {}) });
+      },
+      (e: any) => /\b401\b|authentication/i.test(String(e?.message ?? e)),
+    );
   } catch (e: any) {
+    if (!sent) throw e;
     if (isCertError(e)) {
       throw new Error(`cannot connect to the mapepire server at ${hostKey}: ${e?.message || e}. The TLS handshake failed, so certificate trust may be the cause: set IBMI_MAPEPIRE_CA in the profile to the path of a PEM file holding the CA that signed the server's certificate.`);
     }
