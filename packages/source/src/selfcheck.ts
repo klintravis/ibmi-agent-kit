@@ -831,6 +831,8 @@ test("a daemon 401 latches the password and the next sign-on is not sent; a host
       [{ ...daemon, IBMI_HOST: "authentication-gw.corp" }, "getaddrinfo ENOTFOUND authentication-gw.corp"],
       [{ ...daemon, IBMI_HOST: "Authentication-GW.corp" }, "getaddrinfo ENOTFOUND authentication-gw.corp"],
       [{ ...daemon, IBMI_HOST: "gw.authentication.corp" }, "getaddrinfo ENOTFOUND gw.authentication.corp"],
+      [{ ...daemon, IBMI_HOST: "authentication.corp" }, "getaddrinfo ENOTFOUND authentication.corp"],
+      [{ ...daemon, IBMI_HOST: "gw.authentication" }, "getaddrinfo ENOTFOUND gw.authentication"],
     ];
     // and a host that overlaps the text of a real rejection must not hide it
     for (const [host, text] of [["server", "Unexpected server response: 401"], ["h", "authentication failed"]]) {

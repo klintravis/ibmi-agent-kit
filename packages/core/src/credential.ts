@@ -174,19 +174,23 @@ export interface CredentialStore {
 export const credentialAccount = (user: string, host: string): string => `${user.toUpperCase()}@${host.toLowerCase()}`;
 
 // The default on Linux falls back silently to the kernel keyring, lost at restart: pin the Secret Service.
-export const KEYRING_OPTIONS = { linux: { store: "secret-service" } } as const;
-
-const realStore: CredentialStore = (() => {
-  const entry = async (account: string) => {
-    const { AsyncEntry } = await import("@napi-rs/keyring");
-    return new AsyncEntry(SERVICE, account, KEYRING_OPTIONS);
-  };
+const KEYRING_OPTIONS = { linux: { store: "secret-service" } } as const;
+interface KeyringEntry {
+  getPassword(): Promise<string | null>;
+  setPassword(secret: string): Promise<void>;
+  deletePassword(): Promise<boolean>;
+}
+// Takes the class loader so a selfcheck can see the options the store passes without touching the OS.
+export const keyringStore = (load: () => Promise<new (service: string, account: string, options: typeof KEYRING_OPTIONS) => KeyringEntry>): CredentialStore => {
+  const entry = async (account: string) => new (await load())(SERVICE, account, KEYRING_OPTIONS);
   return {
     get: async (a) => (await entry(a)).getPassword(),
     set: async (a, s) => (await entry(a)).setPassword(s),
     delete: async (a) => (await entry(a)).deletePassword(),
   };
-})();
+};
+
+const realStore = keyringStore(async () => (await import("@napi-rs/keyring")).AsyncEntry);
 
 let store: CredentialStore = realStore;
 // Test seam: install a fake, or call with no argument to go back to the real store.

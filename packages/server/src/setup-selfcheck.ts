@@ -511,7 +511,7 @@ test("setup: a profile with a helper on another host drops the helper and never 
     const marker = join(dirname(dir), "runs.txt");
     profile(dir, "prod", `IBMI_HOST=old.example.com\nIBMI_USER=bob\nIBMI_PASSWORD_COMMAND='${helperCommand(dirname(dir), "x", marker)}'\n`);
     // host, user kept, store chosen, Enter at the password rejected, password, policy left
-    const r = await run(["prod"], ["new.example.com\r", "\r", "\r", "\r", "plainpw\r", "\r"]);
+    const r = await run(["prod"], ["new.example.com\r", "\r", "\r", "\r", "plainpw\r", "\r"], fetchingProbe);
     assert.equal(r.code, 0, r.out + r.err);
     assert.match(r.out, /IBMI_HOST old\.example\.com is replaced by new\.example\.com\n/);
     assert.doesNotMatch(r.out, /Enter keeps the current/, "neither the old helper nor the old password is offered");
