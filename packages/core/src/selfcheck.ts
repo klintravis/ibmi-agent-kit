@@ -476,7 +476,8 @@ test("No error from a failed fetch holds a secret", async () => {
 
 test("@napi-rs/keyring loads and builds an entry on this platform, without touching the store", async () => {
   const { AsyncEntry } = await import("@napi-rs/keyring");
-  assert.equal(typeof new AsyncEntry("ibmi-agent-kit-selfcheck", "nobody@nowhere", KEYRING_OPTIONS), "object");
+  // No options: with the Secret Service pinned, the constructor itself asks D-Bus, which CI's Linux lacks.
+  assert.equal(typeof new AsyncEntry("ibmi-agent-kit-selfcheck", "nobody@nowhere"), "object");
 });
 
 test("the real store pins the Secret Service on Linux, never the kernel keyring fallback", () => {
