@@ -8,19 +8,19 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 ## 1. Dependency
 
 - [ ] 1.1 Rebase on `origin/main` once `zod4` has merged (both change `package-lock.json`). If it has not merged, go on and rebase later.
-- [ ] 1.2 Add `@napi-rs/keyring` to `packages/core`, exact pin `2.1.2`. Confirm with `grep` that `package-lock.json` keeps the optional entries of all platforms (npm can drop them), and that `npm audit` shows nothing new against `main`.
+- [x] 1.2 Add `@napi-rs/keyring` to `packages/core`, exact pin `2.1.2`. Confirm with `grep` that `package-lock.json` keeps the optional entries of all platforms (npm can drop them), and that `npm audit` shows nothing new against `main`.
 
 ## 2. Core: `packages/core/src/credential.ts`
 
-- [ ] 2.1 Add `IBMI_PASSWORD_COMMAND` and `IBMI_PASSWORD_STORE` to `PROTECTED`. `resolveProfileEnv` sets `IBMI_KIT_PROFILE_FILE` after the file overlay.
-- [ ] 2.2 `passwordSource(env)`: the fields for `loadProfile`; errors on a `STORE` value other than `os` and when no source exists, naming `IBMI_PASSWORD_STORE` or `IBMI_PASSWORD_COMMAND`.
-- [ ] 2.3 Splitter and `.cmd`/`.bat`/`.ps1` refusal, exported for `setup`.
-- [ ] 2.4 Helper runner per `design.md`: no shell, `cwd: homedir()`, stderr dropped, timeout, `maxBuffer`, BOM and one line ending removed, try/catch around the spawn. Errors name only the executable and the exit code or reason.
-- [ ] 2.5 Git work tree check at fetch time: `realpath` of the profile file, walk up for `.git`.
-- [ ] 2.6 Store: lazy import, service `ibmi-agent-kit`, account `USER@host`, `{ linux: { store: 'secret-service' } }`, errors wrapped with the pointer to `credential set` or `IBMI_PASSWORD_COMMAND`. `setCredentialStore(fake)` as the in-process test seam.
-- [ ] 2.7 `fetchSecret` (precedence, no fallback, one warning per process for a plain line), `signOnOnce` (promise chain per key, latch, refusal text from the spec), `lastSecret`, and a test-only `resetSignOnState()`. Export from `index.ts`. The latch is process-wide state and selfchecks share a process: reset between tests.
-- [ ] 2.8 Core selfchecks: helper success, trailing newline, trailing space kept, non-zero exit, empty output, timeout, `.cmd` refusal, secret absent from every error, split cases including quoted Windows paths, cwd is home, git refusal including the spoofed key, precedence and no fallback, env cannot set the keys, store key by `USER@host`, helper not run by `resolveProfileEnv`. Latch: same secret refused without send, changed secret sent, success clears, non-auth failure not recorded, concurrent attempts send once.
-- [ ] 2.9 Selfcheck that loads `@napi-rs/keyring` and constructs an entry without touching the store, so a missing platform binary fails CI.
+- [x] 2.1 Add `IBMI_PASSWORD_COMMAND` and `IBMI_PASSWORD_STORE` to `PROTECTED`. `resolveProfileEnv` sets `IBMI_KIT_PROFILE_FILE` after the file overlay.
+- [x] 2.2 `passwordSource(env)`: the fields for `loadProfile`; errors on a `STORE` value other than `os` and when no source exists, naming `IBMI_PASSWORD_STORE` or `IBMI_PASSWORD_COMMAND`.
+- [x] 2.3 Splitter and `.cmd`/`.bat`/`.ps1` refusal, exported for `setup`.
+- [x] 2.4 Helper runner per `design.md`: no shell, `cwd: homedir()`, stderr dropped, timeout, `maxBuffer`, BOM and one line ending removed, try/catch around the spawn. Errors name only the executable and the exit code or reason.
+- [x] 2.5 Git work tree check at fetch time: `realpath` of the profile file, walk up for `.git`.
+- [x] 2.6 Store: lazy import, service `ibmi-agent-kit`, account `USER@host`, `{ linux: { store: 'secret-service' } }`, errors wrapped with the pointer to `credential set` or `IBMI_PASSWORD_COMMAND`. `setCredentialStore(fake)` as the in-process test seam.
+- [x] 2.7 `fetchSecret` (precedence, no fallback, one warning per process for a plain line), `signOnOnce` (promise chain per key, latch, refusal text from the spec), `lastSecret`, and a test-only `resetSignOnState()`. Export from `index.ts`. The latch is process-wide state and selfchecks share a process: reset between tests.
+- [x] 2.8 Core selfchecks: helper success, trailing newline, trailing space kept, non-zero exit, empty output, timeout, `.cmd` refusal, secret absent from every error, split cases including quoted Windows paths, cwd is home, git refusal including the spoofed key, precedence and no fallback, env cannot set the keys, store key by `USER@host`, helper not run by `resolveProfileEnv`. Latch: same secret refused without send, changed secret sent, success clears, non-auth failure not recorded, concurrent attempts send once.
+- [x] 2.9 Selfcheck that loads `@napi-rs/keyring` and constructs an entry without touching the store, so a missing platform binary fails CI.
 
 ## 3. Engines and server
 
