@@ -18,7 +18,7 @@ const BUNDLED_JAR = join(dirname(fileURLToPath(import.meta.url)), "..", "vendor"
 const BUNDLED_JAR_VERSION = "2.3.5"; // vendor/mapepire-server.jar, bump with BUNDLED_JAR_SHA256 below
 const BUNDLED_JAR_SHA256 = "41b1cfa67778ac204426f1dda0b51bd3f45fe3b89c91121d968660140acc0876";
 const REMOTE_DIR = ".ibm-i-source-mcp";
-const CONNECT_TIMEOUT_MS = 10_000;
+export const CONNECT_TIMEOUT_MS = 10_000;
 const MAPEPIRE_TIMEOUT_MS = 60_000; // a cold jvm on IBM i can take most of a minute
 // turns off PASE and Java stdio conversion so our UTF-8 JSON is not mangled to the job ccsid.
 // Inline prefixes because IBM i sshd drops channel env vars.

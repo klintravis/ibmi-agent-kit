@@ -23,7 +23,7 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
 2. Create the profile. In your own terminal (PowerShell, Windows Terminal, macOS Terminal or a
    Linux shell; not through Claude and not with Claude's `!` prefix), run
    `node <abs path>/packages/server/dist/index.js setup demo`. It asks for the host, the user, the
-   password source (Enter for the OS credential store, then the password, hidden) and a policy file. Answer the policy prompt with
+   password source (Enter for the OS credential store, then the password, hidden; the source prompt itself is echoed, so never type the password there) and a policy file. Answer the policy prompt with
    `<demo folder>/demo/policy-observe.yaml`. Expected: the last line reads
    `OK: demo signs on as <user> to <rdb>`. On `failed:`, fix what it names and run it again;
    Enter keeps an answer. See [`setup` command](../packages/server/README.md#setup-command).

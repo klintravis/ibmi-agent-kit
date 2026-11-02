@@ -28,7 +28,7 @@ they work on all CI legs. No selfcheck touches the real store, a live box or a p
 - [x] 3.2 `transport.ts:48`: `signOnOnce`, rejected on `/\b401\b|authentication/i`. Add a comment that the daemon text is unconfirmed live.
 - [x] 3.3 `sshMapepire.ts:90`: `signOnOnce`, rejected on `level === "client-authentication"`. Reword `describeConnectError` so it no longer names only `IBMI_PASSWORD`.
 - [x] 3.4 `session.ts:302`: `signOnOnce` around type, Enter and result check, rejected on `sign on failed` and `still on the sign on screen`.
-- [x] 3.5 `guarded.ts:441,552`: `secret: conn.profile.password ?? lastSecret(host, user)`.
+- [x] 3.5 `guarded.ts:441,552`: `secret: lastSecret(host, user) ?? conn.profile.password` (the fetched value is the one sent, so it wins over a leftover plain line).
 - [x] 3.6 Selfchecks at the seams, with a fake `send` or transport: a guarded SQL call with a rejected sign-on sends once (the `readBox` double send), `run_tests` over three suites sends once, helper not run by the policy path, partition and verb reads, run log masks a helper's secret.
 - [x] 3.7 Check tool output and `list_servers` still expose no source field: the new `Profile` fields do not reach any output. `passwordCommand` is not a secret but stays out of output anyway.
 

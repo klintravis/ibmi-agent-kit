@@ -1,5 +1,6 @@
 // Modified by ibmi-agent-kit (2026): checks for the SQL transports, query, execute and cl (incl. the job generation), and a side-effect-free tools.ts.
-import { test } from "node:test";
+import { mock, test } from "node:test";
+import { resetSignOnState } from "@ibmi-agent-kit/core";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { spawnSync } from "node:child_process";
@@ -778,6 +779,33 @@ test("a daemon TLS handshake failure names certificate trust and IBMI_MAPEPIRE_C
     fail = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
     await assert.rejects(connectDaemonMapepire(p), (e: Error) => /Is it running/.test(e.message) && !/IBMI_MAPEPIRE_CA/.test(e.message));
   } finally { restore(); }
+});
+
+test("a daemon port that accepts TCP and never replies times out without latching, and the next sign-on for the account runs", async () => {
+  resetSignOnState();
+  let closed = 0;
+  const hang = patch(mapepire.SQLJob.prototype, { connect: () => new Promise(() => {}), async close() { closed++; } });
+  const p = loadProfile({ ...baseEnv, IBMI_SQL_TRANSPORT: "daemon" });
+  mock.timers.enable({ apis: ["setTimeout"] }); // the 10s limit fires on a tick, not on the clock
+  let restore = hang;
+  try {
+    const first = assert.rejects(connectDaemonMapepire(p), (e: Error) => /no reply from h:8076 within 10s/.test(e.message) && !/\b401\b|authentication/i.test(e.message));
+    await new Promise((res) => setImmediate(res)); // the sign-on has fetched and called connect
+    mock.timers.tick(10_000);
+    await first;
+    assert.equal(closed, 1, "the hung job is closed");
+    hang();
+    restore = patch(mapepire.SQLJob.prototype, {
+      async connect() { (this as any).status = "ready"; return { success: true }; },
+      query() { return { execute: async () => oneRow, close: async () => {} }; },
+    });
+    // the same password reaches the wire again: the chain is free and nothing was latched
+    assert.equal(((await connectDaemonMapepire(p)) as any).status, "ready");
+  } finally {
+    mock.timers.reset();
+    restore();
+    resetSignOnState();
+  }
 });
 
 test("a reconnect closes the dead job's ssh client", async () => {

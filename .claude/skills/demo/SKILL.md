@@ -68,9 +68,11 @@ node <kit>/packages/server/dist/index.js setup <name>
 
 The user runs it **in their own terminal**: PowerShell, Windows Terminal, macOS Terminal or a Linux
 shell. Not through you, and not with the `!` prefix. Neither is a terminal, so setup refuses, and
-anything printed would land in this conversation. It asks for host, user, the password (hidden)
-and a policy file. The answer to the last one is `<demo folder>/demo/policy-observe.yaml`. Wait for
-the last line it prints.
+anything printed would land in this conversation. It asks for host, user, a password source and a
+policy file. The source prompt is echoed: the user presses Enter (or types `os`) for the OS
+credential store, and only then is asked for the password, hidden; or types a helper command that
+prints the password. The password itself must never be typed at the source prompt. The answer to
+the policy prompt is `<demo folder>/demo/policy-observe.yaml`. Wait for the last line it prints.
 
 - `OK: <name> signs on as <user> to <rdb>`: go on.
 - `failed:` and a reason: the reason names the cause (host, user or password, SSH access, a Java

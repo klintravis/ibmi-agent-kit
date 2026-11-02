@@ -1195,6 +1195,24 @@ test("seam: the run log masks the secret a helper supplied", async () => {
   }
 });
 
+test("seam: with a leftover plain password and a helper set, the run log masks the fetched secret", async () => {
+  resetSignOnState();
+  const h = helperFixture();
+  const k = await signOnKit({ profile: { ...h.profile, password: "Stale1Pw" } });
+  try {
+    assert.equal((await k.call("run_sql", { statement: "select 1 from JDOE.T" })).error, false);
+    assert.deepEqual(k.wire, ["HelperS3cret"], "the helper's value is the one sent");
+    assert.equal((await k.call("run_sql", { statement: "select 'HelperS3cret' from JDOE.T" })).error, false);
+    const text = JSON.stringify(k.log());
+    assert.doesNotMatch(text, /HelperS3cret/);
+    assert.match(text, /select '\*\*\*' from JDOE\.T/i);
+  } finally {
+    await k.close();
+    rmSync(h.dir, { recursive: true, force: true });
+    resetSignOnState();
+  }
+});
+
 test("6.1: compile_member with an override target is decided as compile into LIVLIB, and the denied call never reaches the box", async () => {
   const k = await sourceKit();
   try {

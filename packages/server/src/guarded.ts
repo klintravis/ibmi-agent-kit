@@ -32,8 +32,9 @@ import {
 } from "@ibmi-agent-kit/guard";
 import { checkVerb, QUERY, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
 
-// The run log masks a plain password, else the last one a sign-on fetched; never fetches itself.
-const secretOf = (conn: Conn): string | undefined => conn.profile.password ?? lastSecret(conn.profile.host, conn.profile.user);
+// The run log masks the last password a sign-on fetched (the one sent: a helper or store beats a leftover plain
+// line), else the plain one before any sign-on; never fetches itself.
+const secretOf = (conn: Conn): string | undefined => lastSecret(conn.profile.host, conn.profile.user) ?? conn.profile.password;
 
 // What the guard needs of a connection: the source engine's MapepireBackend fits, a stub does too.
 // `generation` is the job the caller decided against: another job refuses before sending.

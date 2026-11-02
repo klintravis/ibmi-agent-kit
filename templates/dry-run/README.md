@@ -25,19 +25,23 @@ You need Node 20 or later and a built checkout of
 that checkout's folder.
 
 1. Clone this repo and `cd` into it.
-2. Run setup in this folder, in a real terminal (it hides your password):
+2. Run setup in this folder, in a real terminal (it hides the password it asks for):
 
    ```sh
    node <kit>/packages/server/dist/index.js setup
    ```
 
    Once the kit is published, `npx ibmi-agent-kit setup` does the same. Setup lists `dev`, `qa`
-   and `prod`, asks your IBM i user and password, copies the partition's settings from
-   `profiles/`, points your profile at this repo's `policy.yaml`, and tests the connection. Your
-   password goes only in your own profile folder (`~/.ibmi-agent-kit`), never in this repo. If it
-   prints `set it to <folder>`, set `IBMI_KIT_HOME` to that folder for your user (Windows:
-   `setx IBMI_KIT_HOME "<folder>"`; macOS and Linux: an `export` line in your shell profile) and
-   open a new terminal.
+   and `prod`, asks your IBM i user and where your password comes from, copies the partition's
+   settings from `profiles/`, points your profile at this repo's `policy.yaml`, and tests the
+   connection. The password source prompt is echoed, not hidden: press Enter (or type `os`) for
+   your OS credential store, and setup then asks for the password, hidden; or type a helper command
+   that prints it, which is shown on screen and so must hold no secret. Never type the password
+   itself at the source prompt. Your choice goes only in your own profile folder
+   (`~/.ibmi-agent-kit`), never in this repo, and a helper is refused if that folder is inside a
+   git work tree. If it prints `set it to <folder>`, set `IBMI_KIT_HOME` to that folder for your
+   user (Windows: `setx IBMI_KIT_HOME "<folder>"`; macOS and Linux: an `export` line in your shell
+   profile) and open a new terminal.
 3. Run `claude` in this folder.
 4. Approve the `ibmi-agent-kit` server when Claude Code asks: this repo's `.mcp.json` registers it.
 5. Optional: run `/demo` for a guided tour. It is a skill of the kit checkout, so run it from `<kit>`,

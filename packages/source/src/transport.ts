@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import mapepire from "@ibm/mapepire-js";
 import { signOnOnce, type Msg, type SqlTransport } from "@ibmi-agent-kit/core";
 import { NOOP_REPORTER, type Profile, type Reporter, type SqlColumn } from "./types.js";
-import { closeSshMapepire, connectSshMapepire, raceJobClosed } from "./sshMapepire.js";
+import { CONNECT_TIMEOUT_MS, closeSshMapepire, connectSshMapepire, raceJobClosed } from "./sshMapepire.js";
+import { withTimeLimit } from "./util.js";
 
 const { SQLJob } = mapepire;
 type Job = InstanceType<typeof SQLJob>;
@@ -52,7 +53,14 @@ export async function connectDaemonMapepire(profile: Profile, reporter: Reporter
       profile,
       async (password) => {
         sent = true;
-        await job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password, ...(ca ? { ca } : {}) });
+        // Bounded, or a port that accepts TCP and never answers would hold this account's sign-on chain forever.
+        // The text must not hold "401" or "authentication": a timeout is not a rejected password.
+        await withTimeLimit(
+          job.connect({ host: profile.host, port: profile.mapepirePort, user: profile.user, password, ...(ca ? { ca } : {}) }),
+          CONNECT_TIMEOUT_MS,
+          () => void closeSshMapepire(job).catch(() => {}),
+          `no reply from ${hostKey} within ${CONNECT_TIMEOUT_MS / 1000}s (the port accepts a connection but the websocket handshake never finishes)`,
+        );
       },
       (e: any) => /\b401\b|authentication/i.test(String(e?.message ?? e)),
     );

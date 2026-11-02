@@ -30,7 +30,7 @@ You need Node 20 or later and a built checkout of
 that checkout's folder.
 
 1. Clone this repo and `cd` into it.
-2. Run setup in this folder, in a real terminal (it hides your password):
+2. Run setup in this folder, in a real terminal (it hides the password it asks for):
 
    ```sh
    node <kit>/packages/server/dist/index.js setup
@@ -39,9 +39,10 @@ that checkout's folder.
    Once the kit is published, `npx ibmi-agent-kit setup` does the same. Setup lists this repo's
    partitions, asks your IBM i user and where your password comes from, copies the partition's
    settings from `profiles/`, points your profile at this repo's `policy.yaml`, and tests the
-   connection. At the password source prompt press Enter for your OS credential store (then type
-   the password, hidden), or type a helper command that prints it; the command is shown on screen,
-   so it must hold no secret. Your choice goes only in your own profile folder
+   connection. The password source prompt is echoed, not hidden: press Enter (or type `os`) for
+   your OS credential store (then type the password, hidden), or type a helper command that
+   prints it; the command is shown on screen, so it must hold no secret. Never type the password
+   itself at the source prompt. Your choice goes only in your own profile folder
    (`~/.ibmi-agent-kit`), never in this repo, and a helper is refused if that folder is inside a
    git work tree. To rotate the password, run `credential set <profile>` (see the kit's
    [Passwords](https://github.com/klintravis/ibmi-agent-kit/blob/main/packages/server/README.md#passwords)). If it
