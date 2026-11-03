@@ -27,6 +27,10 @@ your own IBM i: PUB400 or your own box. Every step names its expected result. St
    `<demo folder>/demo/policy-observe.yaml`. Expected: the last line reads
    `OK: demo signs on as <user> to <rdb>`. On `failed:`, fix what it names and run it again;
    Enter keeps an answer. See [`setup` command](../packages/server/README.md#setup-command).
+   Without a profile, `list_servers` instead offers a one-time sign-on page in your own browser; it creates a
+   profile named `default` with no policy file, so the demo's policy still needs `setup`, and the page
+   is not for a headless or remote session. Open the link yourself and type the password only there, never in
+   the chat. See [Sign-on page](../packages/server/README.md#sign-on-page).
 3. In the demo folder, a `.mcp.json` registering the kit server (the same command as the README's
    `claude mcp add`):
 

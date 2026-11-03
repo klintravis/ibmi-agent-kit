@@ -39,10 +39,10 @@ New `packages/server/src/signon-selfcheck.ts`, imported by `selfcheck.ts`, in th
 
 ## 6. Docs
 
-- [ ] 6.1 `packages/server/README.md`: a "Sign-on page" section (what it does, the protections, `QMAXSIGN`, the re-offer limit, per-process limit, headless and Linux routes, what agents can and cannot do with the link); link it from Passwords, A wrong password is sent once and `setup`; the `list_servers` row in Tools it owns. Verify: `docs-check` (run by the desk's repo check at finish) reports no gap.
-- [ ] 6.2 Root `README.md` install path: the page as the first sign-on route and `setup` as the terminal route. Verify: `docs-check` reports no gap.
-- [ ] 6.3 `docs/demo.md` and `.claude/skills/demo/SKILL.md`: the page route at the profile step, the `default` profile afterwards, keeping "never ask for the password" and the `setup` command. Verify: the demo selfcheck passes.
-- [ ] 6.4 Run `node scripts/check-names.mjs` and the full check. Verify: both exit 0.
+- [x] 6.1 `packages/server/README.md`: a "Sign-on page" section (what it does, the protections, `QMAXSIGN`, the re-offer limit, per-process limit, headless and Linux routes, what agents can and cannot do with the link); link it from Passwords, A wrong password is sent once and `setup`; the `list_servers` row in Tools it owns. Verify: `docs-check` (run by the desk's repo check at finish) reports no gap.
+- [x] 6.2 Root `README.md` install path: the page as the first sign-on route and `setup` as the terminal route. Verify: `docs-check` reports no gap.
+- [x] 6.3 `docs/demo.md` and `.claude/skills/demo/SKILL.md`: the page route at the profile step, the `default` profile afterwards, keeping "never ask for the password" and the `setup` command. Verify: the demo selfcheck passes.
+- [x] 6.4 Run `node scripts/check-names.mjs` and the full check. Verify: both exit 0.
 
 ## Live verification (owner only, not run by agents)
 

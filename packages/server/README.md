@@ -17,7 +17,7 @@ The other tools come from the engines; see the Tools table in the [root README](
 
 | Tool | What it does | Annotation |
 |---|---|---|
-| `list_servers` | Lists the configured servers (the `.env.<name>` files), the open 5250 sessions on each, and the profile folders searched. | read-only |
+| `list_servers` | Lists the configured servers (the `.env.<name>` files), the open 5250 sessions on each, and the profile folders searched. With no profile it also offers a first-profile [sign-on page](#sign-on-page). | read-only |
 | `run_script` | Runs SQL statements (`;` separated) and CL commands (lines starting `CL:`) in order. Every statement is classified and decided, and every confirmation asked, before the first is sent: one denied statement or a declined confirmation sends nothing. Stops at the first failure. Returns per statement the decision, outcome, rows affected, rows (up to `maxRows`, default 100, at most 1000) and messages. | changes data; runs code |
 | `policy_check` | Decides a `script`, or every statement a `verb` (with `args`) would send, without running it: per statement the operations with library, partition, environment and class, the matching rule and the decision, plus `warnings` for a CL command given a parameter its command-table entry does not name (the decision is unchanged). Sends only the catalog lookups needed. With `as` (an identity) and optionally `policy` (a candidate file) it decides offline and sends nothing. | read-only |
 | `verb_list` | Lists the verbs by layer (`user`, `proj`, `org`) with description, tags and parameters, marks those a closer layer overrides, and names files refused at load. | read-only |
@@ -65,6 +65,8 @@ A profile holds no password. It names where the password comes from, and the kit
 Both new keys are read from the profile file only; the process environment cannot set them. When a profile sets more than one, the order is helper, then store, then plain line. The kit never falls back: if the helper fails, the connection fails and the plain line is not tried, because a stale password would cost a sign-on attempt.
 
 **Choose a source at `setup`.** At the "password source" prompt press Enter (or type `os`) for the OS store and then type the password, hidden, or type a helper command. When the profile already has a helper for the same host and user, Enter keeps it. See [`setup` command](#setup-command). In a company config repo each person makes this choice; the repo never supplies one.
+
+**Or use the page.** A store profile with no entry, or whose password was rejected, is offered a one-time [sign-on page](#sign-on-page) in your browser.
 
 **Rotate a password.**
 
@@ -134,13 +136,46 @@ Limits, plainly:
 
 Not yet verified against real systems: the OS store on Windows, macOS and Linux (the selfchecks use a fake store and a fake helper), and a Mapepire daemon's response to a wrong password.
 
+A store profile gets one more chance through the [sign-on page](#sign-on-page): after a rejection the next error offers the page once per user and host, and a second wrong password ends it.
+
+## Sign-on page
+
+A person can give the server a password, or create a first profile, on a one-time page in their own browser, with no command line. The server serves it on `127.0.0.1` only, from `signon-page.ts`, and only while the stdio server runs. `setup` and `credential` are separate processes and serve no page; the standalone screen and source servers serve none either.
+
+**When it is offered.** The tool call that needs it fails at once, without sending anything, and the error holds the offer. It does not wait for the page.
+
+| Situation | Offer |
+|---|---|
+| A `IBMI_PASSWORD_STORE=os` profile has no stored entry | a page for that user and host |
+| The stored password was rejected (see [A wrong password is sent once](#a-wrong-password-is-sent-once)) | one more page, see below |
+| No profile exists and `list_servers` runs | a first-profile page (host, user, password; in a [company config repo](#in-a-company-config-repo) the host and partition come from the skeleton); `default` is the profile name, or the partition's name in a company repo. An unknown server name with no profile listed says that `list_servers` offers it |
+| A helper (`IBMI_PASSWORD_COMMAND`) or plain `IBMI_PASSWORD` profile | none; the existing error stands |
+| A profile with no password source | none; it keeps its load error |
+| A store that cannot be read (for example Linux without a Secret Service) | none; the existing store error stands |
+
+With profiles present, a mistyped server name stays the usual `Available: ...` error. `list_servers` stays read-only: opening the listener writes nothing, and only a person's submission does.
+
+**How it reaches the person.** If the client declares URL elicitation, the server asks it to open the page, once per page, and the first error says a prompt was offered, without the link. The link is printed in the error when the client does not support URL elicitation, declines or fails the request, or has not answered within 10 seconds of the offer. Form-mode elicitation is never used. Whether the VS Code extension shows the prompt is not verified; the printed link is the fallback. The error also names `ibmi-agent-kit setup` and `ibmi-agent-kit credential set <profile>`.
+
+**What the page does.** It names the host and the user, escaped, and warns that a wrong password counts as a failed sign-on toward `QMAXSIGN`. The password goes only to the OS credential store: not to the client, the model, the log or the IBM i. Submitting sends nothing to the IBM i and does not say whether the password is right. The next tool call fetches it and signs on, once. A first-profile submission writes the profile by the rules of `setup` (store first, then the file; `IBMI_PASSWORD_STORE=os`, no password in the file; mode 600 in a folder with mode 700 on macOS and Linux). From a skeleton it copies every setting except the user, password, helper, store and policy lines, and sets the policy path to the repo's `policy.yaml`. It refuses a profile folder inside a git work tree or the company repo, and never overwrites a profile that has appeared since the offer.
+
+**Protections.** Loopback bind on a random port, opened on the first offer and closed when no page is left; a Host check (a name that is not loopback is refused); a random 128-bit token that expires after 5 minutes and dies on the first accepted submission; a GET shows the form and does not use the token; a submission is a POST with the token in its body, 4 KiB at most, and a foreign `Origin` is refused; nothing is read from the URL but the token. Every response, refusals included, sends `cache-control: no-store`, a content security policy with `frame-ancestors 'none'` and no script, and `referrer-policy: no-referrer`. The link holds only the address and the token.
+
+**Limits.**
+
+- **Each wrong password costs a real sign-on attempt** toward `QMAXSIGN`, which the kit cannot see. The page offers one re-offer after a rejected password, per user and host, per server process: the first wrong password, then one more page, then no page and the error names `credential set` and the restart. Two MCP clients are two processes and count separately, so together they can spend more attempts. A page that expires unused does not count.
+- **The submission does not try the password.** Ask the assistant to try again.
+- **An agent holding the printed link can submit a value**, including a wrong one, if it has a shell or a web tool. The error tells the model to hand the link to the user and not to open it. The page stores the value and says nothing about whether it is right, takes only one accepted submission per link, and is bounded by the re-offer limit above. When the client elicits, the link does not go through the model.
+- **Where the page cannot work.** The link points at the server's own loopback, so a headless, remote or container session cannot open it; there is no non-loopback option. Use `ibmi-agent-kit setup` or `ibmi-agent-kit credential set <profile>` there. On Linux without a Secret Service the store write fails, the page says so and points at `IBMI_PASSWORD_COMMAND`, and nothing is written; there is no in-memory fallback.
+- Not verified live: any client's handling of the prompt, and the OS store on each platform.
+
 ## `setup` command
 
 ```sh
 node <repo>/packages/server/dist/index.js setup [name]
 ```
 
-Writes or updates one profile and tests it. No name means `default`, so the file is `.env`; any other name writes `.env.<name>`. The file goes in the first profile folder: `IBMI_KIT_CONFIG_DIR` if set, else `~/.ibmi-agent-kit`, created if missing.
+Writes or updates one profile and tests it. It is the terminal route for sessions where the [sign-on page](#sign-on-page) cannot work. No name means `default`, so the file is `.env`; any other name writes `.env.<name>`. The file goes in the first profile folder: `IBMI_KIT_CONFIG_DIR` if set, else `~/.ibmi-agent-kit`, created if missing.
 
 1. It asks for the host and the user. If the file already exists, its values are shown in brackets and Enter keeps them.
 2. It asks for the password source (see [Passwords](#passwords)): Enter or `os` for the OS store, or a helper command, which is echoed because it is not secret. A host or user that differs from the file never keeps the current source. For the store it then asks for the password without showing it. Enter keeps the stored (or old plain) one only when the host and user are unchanged; otherwise `setup` asks for a new password. The store is written first; if that fails, the profile file stays as it was. The profile ends with exactly one source and no `IBMI_PASSWORD` line. A helper command is refused, writing nothing, when it is a `.cmd`, `.bat` or `.ps1` file or the profile file is inside a git work tree. Backspace edits, and Ctrl-C quits without writing anything.

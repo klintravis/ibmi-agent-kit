@@ -74,6 +74,12 @@ credential store, and only then is asked for the password, hidden; or types a he
 prints the password. The password itself must never be typed at the source prompt. The answer to
 the policy prompt is `<demo folder>/demo/policy-observe.yaml`. Wait for the last line it prints.
 
+If a tool error or `list_servers` offers a sign-on page and prints a link, pass the link to the user
+and ask them to open it in their own browser; never open it, and never ask for or relay the password.
+The page makes a profile named `default` with no policy file, so the demo still needs `setup <name>`
+for its policy (use `setup default` to add it). Headless or remote sessions use `setup` or
+`credential set <profile>`. After the user submits, they tell you, and you call the tool again.
+
 - `OK: <name> signs on as <user> to <rdb>`: go on.
 - `failed:` and a reason: the reason names the cause (host, user or password, SSH access, a Java
   runtime, write access to the home folder for the ssh transport, or the policy file). The user

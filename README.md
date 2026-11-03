@@ -33,7 +33,9 @@ claude mcp add ibmi-agent-kit -- node <abs path>/packages/server/dist/index.js
 Use the absolute path to this checkout in place of `<abs path>`. Restart Claude Code or run
 `/mcp`. The server speaks MCP on stdio and exits when the client closes it.
 
-Then create a profile and test it. Run this yourself in a real terminal (PowerShell, Windows Terminal, macOS Terminal or a Linux shell), not through Claude:
+**First sign-on in your browser.** With no profile, `list_servers` offers a one-time page on `127.0.0.1` in your own browser (host, user, password); a store profile with no stored password is offered one too. The password goes only to the OS credential store, never to Claude or the IBM i. It is not tried at submit: ask Claude to try again, and each wrong password is a real sign-on attempt toward `QMAXSIGN`. In a headless, remote or no-Secret-Service session, use `setup`. See [Sign-on page](packages/server/README.md#sign-on-page).
+
+Or create a profile and test it from the terminal (the route for those sessions). Run this yourself in a real terminal (PowerShell, Windows Terminal, macOS Terminal or a Linux shell), not through Claude:
 
 ```sh
 node <abs path>/packages/server/dist/index.js setup [name]
