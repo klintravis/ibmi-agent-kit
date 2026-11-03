@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { delimiter, isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { message } from "./profile-write.js";
 import type { Msg } from "@ibmi-agent-kit/core";
 import {
   decidePlans,
@@ -85,7 +86,6 @@ export interface RunReport {
   results: VerbResult[];
 }
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const at = (p: Planned) => `${p.verb} ${p.where}`;
 const show = (v: unknown) => (typeof v === "string" ? JSON.stringify(v) : v === undefined ? "nothing" : String(v));
 // How run_script and verb_run tell a query from a change: queries take the time limit.
@@ -187,8 +187,8 @@ async function one(s: Planned, run: RunState): Promise<string | undefined> {
     return undefined;
   } catch (e) {
     if (exec.stale?.()) run.reset = true;
-    run.out.set(s, `failed: ${errText(e)}`);
-    return errText(e);
+    run.out.set(s, `failed: ${message(e)}`);
+    return message(e);
   }
 }
 
@@ -252,7 +252,7 @@ export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]
       p.file = v.file;
       p.plan = planVerb(set, c.ref, c.args);
     } catch (e) {
-      p.error = `nothing was sent: ${errText(e)}`;
+      p.error = `nothing was sent: ${message(e)}`;
     }
     return p;
   });
@@ -268,7 +268,7 @@ export async function runVerbs(ctx: VerbContext, set: VerbSet, calls: VerbCall[]
       if (refusals.length) p.error = `nothing was sent: ${refusals.join("; ")}`;
     });
   } catch (e) {
-    for (const p of planned) p.error = `nothing was sent: ${errText(e)}`;
+    for (const p of planned) p.error = `nothing was sent: ${message(e)}`;
   }
 
   const ready = planned.filter((p) => !p.error);
@@ -377,7 +377,8 @@ export function verbLoader(profileEnv: (server: string) => Record<string, string
 
 // --- tools ---
 
-const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
+export const key = (server?: string) => server || "default";
+export const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
 const argsArg = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe("parameter values by name; parameters left out take their defaults");
 // policy_check's verb input (guarded.ts).
 export const verbCheckInput = { verb: z.string().describe("a verb: NAME (closest layer), user:NAME, proj:NAME or org:NAME"), args: argsArg };
@@ -393,9 +394,8 @@ function reportText(r: RunReport): string {
 }
 
 export function registerVerbTools(mcp: McpServer, deps: { verbs(server: string): VerbSet; context(server: string): Promise<VerbContext> }): void {
-  const key = (server?: string) => server || "default";
   const reply = (text: string, structured: Record<string, unknown>, isError = false) => ({ content: [{ type: "text" as const, text }], structuredContent: structured, ...(isError ? { isError } : {}) });
-  const fail = (e: unknown) => ({ content: [{ type: "text" as const, text: errText(e) }], isError: true });
+  const fail = (e: unknown) => ({ content: [{ type: "text" as const, text: message(e) }], isError: true });
 
   mcp.registerTool(
     "verb_list",

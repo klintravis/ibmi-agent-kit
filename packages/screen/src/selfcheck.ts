@@ -13,7 +13,7 @@ import { Viewer } from "./viewer.js";
 import { loadProfile, loadProfileFor } from "./config.js";
 import { decode, encode } from "./ebcdic.js";
 import { assertCommandAllowed } from "./guard.js";
-import { KEY_TO_AID, AID, CMD, ESC, FFW, ORDER, attrName, attrOf } from "./codes.js";
+import { KEY_TO_AID, AID, CMD, ESC, FFW, ORDER, attrOf } from "./codes.js";
 import { buildAttention, buildInbound, buildQueryReply, buildSaveScreenReply } from "./inbound.js";
 import { MAX_STEPS, renderFrame } from "./render.js";
 import { formatSuite, parseTest } from "./testrun.js";
@@ -28,6 +28,7 @@ import { ScreenStack, windowTitle, type Exchange } from "./stack.js";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = (n: string) => readFileSync(join(ROOT, "test", "fixtures", n));
 const enc = (t: string) => encode(t, 37);
+const attrName = (a: number) => (attrOf(a).nondisplay ? "nondisplay" : attrOf(a).colour);
 
 // A GDS record around a body, with the header length computed rather than counted by hand.
 const gds = (...body: number[]) => {

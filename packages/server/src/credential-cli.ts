@@ -4,6 +4,7 @@
 // 0 done, 2 a usage error or store failure, 130 cancelled.
 import { credentialAccount, deleteStoredSecret, resolveProfileEnv, setCredentialStore, storeSecret, type CredentialStore } from "@ibmi-agent-kit/core";
 import { Cancelled, reader, type Input, type Write } from "./setup-cli.js";
+import { message } from "./profile-write.js";
 
 export interface CredentialDeps {
   input: Input;
@@ -13,7 +14,6 @@ export interface CredentialDeps {
 }
 
 const USAGE = "usage: ibmi-agent-kit credential set|delete <profile>\n(the password is asked for, never given on the command line)\n";
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // One line of a piped stdin, without its line ending.
 const line = (input: Input) =>

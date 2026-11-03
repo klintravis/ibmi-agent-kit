@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { setSignOnPage } from "@ibmi-agent-kit/core";
 import { credentialCli } from "./credential-cli.js";
 import { policyCli } from "./policy-cli.js";
+import { message } from "./profile-write.js";
 import { createServer, onceShutdown, type KitServer } from "./server.js";
 import { setupCli } from "./setup-cli.js";
 
@@ -32,7 +33,7 @@ function serve(): void {
     kit = createServer();
   } catch (e) {
     // A tool name registered twice: the SDK's message names it.
-    console.error(`[ibmi-agent-kit] startup failed: ${e instanceof Error ? e.message : e}`);
+    console.error(`[ibmi-agent-kit] startup failed: ${message(e)}`);
     process.exit(1);
   }
 

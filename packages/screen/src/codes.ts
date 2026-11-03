@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): attrName moved to the self-check, its only user.
 // 5250 data stream code tables. Adapted from green-screen-react (MIT, visionbridge-solutions),
 // packages/proxy/src/tn5250/constants.ts.
 
@@ -75,11 +76,6 @@ export function attrOf(a: number): Attr {
     underline: !nondisplay && (a & 0x04) !== 0,
     nondisplay,
   };
-}
-
-export function attrName(a: number): string {
-  const { colour, nondisplay } = attrOf(a);
-  return nondisplay ? "nondisplay" : colour;
 }
 
 // Field Format Word: the two bytes that may precede a field's attribute.

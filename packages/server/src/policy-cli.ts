@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIRS } from "@ibmi-agent-kit/core";
+import { message } from "./profile-write.js";
 import { describeFailure, loadPolicy, loadPolicyTests, loadVerbs, replayRunLog, runPolicyTests, type ReplayOutcome, type RunLogLine } from "@ibmi-agent-kit/guard";
 
 const USAGE = `usage:
@@ -89,7 +90,7 @@ export async function policyCli(args: string[], out: Write = (t) => console.log(
     err(USAGE);
     return 2;
   } catch (e) {
-    err(e instanceof Error ? e.message : String(e));
+    err(message(e));
     return 2;
   }
 }

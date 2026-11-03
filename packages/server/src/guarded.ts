@@ -30,7 +30,7 @@ import {
   type ToolStatement,
   type VerbSet,
 } from "@ibmi-agent-kit/guard";
-import { checkVerb, QUERY, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
+import { checkVerb, key, QUERY, serverArg, verbCheckInput, type ConfirmItem, type VerbContext } from "./verbs.js";
 
 // The run log masks the last password a sign-on fetched (the one sent: a helper or store beats a leftover plain
 // line), else the plain one before any sign-on; never fetches itself.
@@ -511,8 +511,6 @@ export function registerGuarded(
     };
   }
 
-  const key = (server?: string) => server || "default";
-
   // The engines' hook (design D6): an engine tool call decided and confirmed before the
   // engine acts. Throws to refuse (logged then); otherwise returns what logs the call's outcome.
   async function guardTool(tool: string, input: Record<string, unknown>, server: string | undefined): Promise<(outcome: string) => void> {
@@ -603,7 +601,6 @@ export function registerGuarded(
     return (outcome) => record(() => outcome);
   }
 
-  const serverArg = z.string().optional().describe("which IBM i to use, named by a .env.<name> file. Omit for the default .env server (see list_servers)");
   const result = (structured: Record<string, unknown>, text: string, isError = false) => ({
     content: [{ type: "text" as const, text }],
     structuredContent: structured,

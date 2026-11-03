@@ -84,14 +84,14 @@ export function repoLeak(cwd: string, dir: string, partitions: string[]): string
 }
 
 // The partition's skeleton with its checks: `error` is a refusal, `warnings` are printed and the run goes on.
-export function readSkeleton(skeletons: string, name: string): { from: string; skeleton: Record<string, string>; error?: string; warnings: string[] } {
+export function readSkeleton(skeletons: string, name: string): { skeleton: Record<string, string>; error?: string; warnings: string[] } {
   const from = join(skeletons, fileFor(name)!);
   const skeleton = parseProfile(readFileSync(from, "utf8"));
   const missing = ["IBMI_HOST", "IBMI_PARTITION"].filter((k) => !skeleton[k]?.trim());
   const warnings: string[] = [];
   if (skeleton.IBMI_PASSWORD) warnings.push(`warning: ${from} holds a password. It is ignored, never copied: remove it from the repo and its git history, and change that password.\n`);
   if (skeleton.IBMI_PASSWORD_COMMAND) warnings.push(`warning: ${from} holds IBMI_PASSWORD_COMMAND. It is ignored, never copied or run: a command in a repo runs on every colleague's machine. Remove it from the repo.\n`);
-  return { from, skeleton, error: missing.length ? `${from} sets no ${missing.join(" and no ")}` : undefined, warnings };
+  return { skeleton, error: missing.length ? `${from} sets no ${missing.join(" and no ")}` : undefined, warnings };
 }
 
 // A bad policy stops the server for every profile at startup, so it is checked before the write.
