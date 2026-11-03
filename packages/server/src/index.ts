@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { setSignOnPage } from "@ibmi-agent-kit/core";
 import { credentialCli } from "./credential-cli.js";
 import { policyCli } from "./policy-cli.js";
 import { createServer, onceShutdown, type KitServer } from "./server.js";
@@ -34,6 +35,8 @@ function serve(): void {
     console.error(`[ibmi-agent-kit] startup failed: ${e instanceof Error ? e.message : e}`);
     process.exit(1);
   }
+
+  setSignOnPage(kit.signOn.hook); // a process-level seam, so here and not in createServer
 
   // Exit from the write callback, so the last line reaches a piped stderr before the process ends.
   const stop = onceShutdown(kit.engines, (code) => {

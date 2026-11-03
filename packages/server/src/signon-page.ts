@@ -49,7 +49,7 @@ const HEADERS = {
   connection: "close",
 };
 const GONE = "this link is not valid: it expired, was used, or is wrong. Ask your assistant to try again for a new one.";
-const TERMINAL = "Run `ibmi-agent-kit setup` or `ibmi-agent-kit credential set <profile>` in a terminal instead.";
+export const TERMINAL = "Run `ibmi-agent-kit setup` or `ibmi-agent-kit credential set <profile>` in a terminal instead.";
 
 const esc = (s: string) => s.replace(/[&<>"'`]/g, (c) => `&#${c.charCodeAt(0)};`);
 const shell = (body: string) =>

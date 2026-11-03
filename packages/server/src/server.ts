@@ -6,6 +6,7 @@ import { loadPolicy, RunLog, type Policy } from "@ibmi-agent-kit/guard";
 import { CONFIRM_TIMEOUT_MS, registerGuarded, type GuardDeps } from "./guarded.js";
 import { KEYS, register as registerScreen, type Session } from "@ibmi-agent-kit/screen/tools";
 import { register as registerSource, SQL_TIME_LIMIT_MS, type MapepireBackend } from "@ibmi-agent-kit/source/tools";
+import { SignOnOffers } from "./signon-offer.js";
 import { registerVerbTools, verbLoader } from "./verbs.js";
 
 export interface Engine {
@@ -15,6 +16,7 @@ export interface Engine {
 export interface KitServer {
   mcp: McpServer;
   engines: Engine[];
+  signOn: SignOnOffers; // serve() installs signOn.hook in core; createServer installs nothing
 }
 
 export interface ServerDeps extends Partial<Omit<GuardDeps, "policyFor">> {
@@ -23,6 +25,7 @@ export interface ServerDeps extends Partial<Omit<GuardDeps, "policyFor">> {
   runLogDir?: string;
   sourceBackend?: (server?: string) => MapepireBackend; // the source engine's connection, for a stub transport
   screenSession?: (server?: string) => Session; // a 5250 session, for a fake host
+  signOn?: { now?: () => number; cwd?: () => string }; // the sign-on page's clock and folder, for a check
 }
 
 // No process state is touched here: no listeners, no exit, no stdout. index.ts owns the process.
@@ -71,6 +74,7 @@ export function createServer(deps: ServerDeps = {}): KitServer {
     verbs,
   });
   registerVerbTools(mcp, { verbs, context: guard.verbContext });
+  const signOn = new SignOnOffers(mcp.server, deps.signOn);
 
   mcp.registerTool(
     "list_servers",
@@ -80,10 +84,10 @@ export function createServer(deps: ServerDeps = {}): KitServer {
         "List the configured IBM i servers, named by the .env.<name> files on disk, and the open 5250 sessions on each. Pass a name as `server` to any tool.",
       annotations: { title: "List servers", readOnlyHint: true },
     },
-    async () => ({ content: [{ type: "text" as const, text: listServersText(screen.openSessions()) }] }),
+    async () => ({ content: [{ type: "text" as const, text: listServersText(screen.openSessions()) + (await signOn.firstProfileText()) }] }),
   );
 
-  return { mcp, engines: [screen, source] };
+  return { mcp, engines: [screen, source, signOn], signOn };
 }
 
 export function listServersText(open: { server: string; session: string; closed?: boolean }[]): string {

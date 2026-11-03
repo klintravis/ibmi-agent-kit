@@ -19,10 +19,10 @@ and no IBM i. Run `npm run clean && npm run check` after each group.
 
 ## 4. Delivery and wiring
 
-- [ ] 4.1 Add the offer logic in D3: elicitation fired and not awaited, a random `elicitationId` that is not the token, 10-second window, link fallback with the hand-to-user text and the terminal route, and the completion notifier. Verify: group 5 selfchecks.
-- [ ] 4.2 Return the page from `createServer` on `KitServer`, join it to `engines`, and install the hook in `serve()`. Verify: a selfcheck that `createServer` alone installs no hook, and that shutdown closes the listener.
-- [ ] 4.3 Make the `list_servers` handler carry the first-profile offer when no profile exists, and keep `readOnlyHint`. Verify: selfcheck on the text, and the existing `No profiles found` check still passes or is updated with the new wording.
-- [ ] 4.4 Confirm the engines need no change. Verify: `git diff --stat main -- packages/screen packages/source` is empty; if a file there must change, add its `Modified by ibmi-agent-kit (2026)` line.
+- [x] 4.1 Add the offer logic in D3: elicitation fired and not awaited, a random `elicitationId` that is not the token, 10-second window, link fallback with the hand-to-user text and the terminal route, and the completion notifier. Verify: group 5 selfchecks.
+- [x] 4.2 Return the page from `createServer` on `KitServer`, join it to `engines`, and install the hook in `serve()`. Verify: a selfcheck that `createServer` alone installs no hook, and that shutdown closes the listener.
+- [x] 4.3 Make the `list_servers` handler carry the first-profile offer when no profile exists, and keep `readOnlyHint`. Verify: selfcheck on the text, and the existing `No profiles found` check still passes or is updated with the new wording.
+- [x] 4.4 Confirm the engines need no change. Verify: `git diff --stat main -- packages/screen packages/source` is empty; if a file there must change, add its `Modified by ibmi-agent-kit (2026)` line.
 
 ## 5. Selfchecks
 
@@ -30,12 +30,12 @@ New `packages/server/src/signon-selfcheck.ts`, imported by `selfcheck.ts`, in th
 
 - [x] 5.1 Token: GET does not consume; an accepted POST does; a second POST is refused and the fake store is not written; an expired token is refused (injected clock); a new offer gets a new token.
 - [x] 5.2 Refusals: wrong Host, missing or wrong token, foreign Origin, token only in the query string, GET with values in the query string ignored, oversized body. Headers: no-store, CSP, referrer policy, on every response including refusals.
-- [ ] 5.3 Secret absent: submit a marker password, then run accepted, store-failed and rejected paths; assert the marker is in no tool result, notification sent to the client, run log file, captured stderr or page response.
-- [ ] 5.4 Delivery: fake client without `elicitation.url` gets the link and no request; a client with it gets no link in the first error; a decline, a request error and 10 seconds unanswered each print the link for the same page; form mode is never requested; the link holds no host, user or profile name; the completion notification fires after a submit of an elicited page and not after a link-only one.
-- [ ] 5.5 No extra attempt: count `send` calls. Missing entry sends 0; a guarded identity lookup plus query makes one page and sends 0; a submission sends 0; the next call sends 1; a rejected value retried sends 0.
-- [ ] 5.6 Re-offer: stale entry rejected, then page, then rejected, then no page; first-time page, then rejected, then page, then rejected, then no page; an expired offer does not count; helper and plain profiles get no offer.
+- [x] 5.3 Secret absent: submit a marker password, then run accepted, store-failed and rejected paths; assert the marker is in no tool result, notification sent to the client, run log file, captured stderr or page response.
+- [x] 5.4 Delivery: fake client without `elicitation.url` gets the link and no request; a client with it gets no link in the first error; a decline, a request error and 10 seconds unanswered each print the link for the same page; form mode is never requested; the link holds no host, user or profile name; the completion notification fires after a submit of an elicited page and not after a link-only one.
+- [x] 5.5 No extra attempt: count `send` calls. Missing entry sends 0; a guarded identity lookup plus query makes one page and sends 0; a submission sends 0; the next call sends 1; a rejected value retried sends 0.
+- [x] 5.6 Re-offer: stale entry rejected, then page, then rejected, then no page; first-time page, then rejected, then page, then rejected, then no page; an expired offer does not count; helper and plain profiles get no offer.
 - [x] 5.7 First profile: no repo writes `.env` with `IBMI_PASSWORD_STORE=os` and no password; one skeleton and several skeletons; skeleton password and helper never copied and warned; a skeleton with no host refused; a line break in a value refused; policy path set; store failure writes no file; profile folder in a git work tree and in the repo refused; a profile that appears after the offer is not overwritten; a typo with profiles present stays the existing error; HTML in a value is escaped.
-- [ ] 5.8 Standalone: with no hook installed, the engines' missing-entry and unknown-server texts are unchanged.
+- [x] 5.8 Standalone: with no hook installed, the engines' missing-entry and unknown-server texts are unchanged.
 
 ## 6. Docs
 

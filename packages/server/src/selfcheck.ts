@@ -183,6 +183,12 @@ test("the bin speaks only JSON-RPC on stdout and exits when stdin closes", { tim
       assert.ok(names.includes(n), `missing ${n}`);
     }
 
+    // serve() installs the sign-on hook: the unknown-server error names the setup page only while it is installed.
+    const opened = reply(3);
+    send({ id: 3, method: "tools/call", params: { name: "session_open", arguments: { server: "nosuch" } } });
+    await opened;
+    assert.match(JSON.stringify(messages.find((m) => m.id === 3)), /Available: none; list_servers offers a setup page/);
+
     const t0 = Date.now();
     child.stdin.end();
     const code = await Promise.race([exited, new Promise<"timeout">((d) => setTimeout(() => d("timeout"), 6000).unref())]);
