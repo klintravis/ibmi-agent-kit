@@ -98,14 +98,15 @@ function call(url: string, o: { method?: string; host?: string; headers?: Record
 }
 const tokenOf = (p: Page) => new URL(p.url).searchParams.get("t")!;
 const post = (p: Page, fields: Record<string, string>, o: Parameters<typeof call>[1] = {}) =>
-  call(p.url, { method: "POST", body: new URLSearchParams(fields).toString(), path: "/", ...o });
+  // A browser form post carries Origin; the default does too, so success rows run as a browser would.
+  call(p.url, { method: "POST", body: new URLSearchParams(fields).toString(), path: "/", ...o, headers: { origin: `http://127.0.0.1:${new URL(p.url).port}`, ...o.headers } });
 const submit = (p: Page, password = MARKER, extra: Record<string, string> = {}) => post(p, { t: tokenOf(p), password, ...extra });
 
 function everyHeader(r: Res, what: string) {
   assert.equal(r.headers["cache-control"], "no-store", what);
   assert.match(String(r.headers["content-security-policy"]), /frame-ancestors 'none'/, what);
   assert.match(String(r.headers["content-security-policy"]), /default-src 'none'/, what);
-  assert.equal(r.headers["referrer-policy"], "no-referrer", what);
+  assert.equal(r.headers["referrer-policy"], "same-origin", what);
 }
 const offer = async (pages: SignOnPages, why: "missing" | "rejected" = "missing", p = BOB) => {
   const page = await pages.offer(p, why);
@@ -291,6 +292,25 @@ test("signon page: re-offer limit - a submitted rejected-page counts, an expired
     assert.equal((await submit(await offer(pages, "rejected", erin), "pw-5")).status, 500);
     failSet = undefined;
     assert.ok(await pages.offer(erin, "rejected"));
+  }));
+
+test("signon page: a reused page takes the rejected cause, so its wrong submission counts and no third page follows", () =>
+  isolated(async (_root, pages) => {
+    const p1 = await offer(pages, "missing");
+    assert.equal(await offer(pages, "rejected"), p1, "the live page is reused");
+    assert.equal((await submit(p1, "wrong")).status, 200);
+    assert.equal(await pages.offer(BOB, "rejected"), undefined);
+  }));
+
+test("signon page: a post with the page's own Origin saves, for an account page and a first-profile page", () =>
+  isolated(async (root, pages) => {
+    const page = await offer(pages);
+    assert.equal((await submit(page)).status, 200); // post() sends Origin http://127.0.0.1:<port>
+    assert.equal(vault.get("BOB@box.example.com"), MARKER);
+    const f = await first(pages);
+    const r = await post(f, { t: tokenOf(f), host: "box.example.com", user: "carol", password: "pw-c" });
+    assert.equal(r.status, 200, r.text);
+    assert.ok(existsSync(join(dirOf(root), ".env")));
   }));
 
 // ---- first profile (5.7) ----
@@ -711,6 +731,8 @@ test("signon retry: stale entry rejected, page, rejected, no page; first-time pa
       await k.settle();
       assert.equal(k.requests.length, 2, "then no page");
       assert.ok(!LINK.test(last.text) && /not sent: that password was rejected earlier/.test(last.text), last.text);
+      assert.match(last.text, /credential set/);
+      assert.match(last.text, /restart/);
       assert.equal(k.wire.length, 2);
     } finally {
       await k.close();

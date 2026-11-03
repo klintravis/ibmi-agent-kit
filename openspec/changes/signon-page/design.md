@@ -99,7 +99,7 @@ CSP. Beyond the viewer:
   have one winner. Invalid input re-renders with blank password and does not consume. A store failure consumes;
   the next call offers a new page.
 - `default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, no
-  script, `referrer-policy: no-referrer`, `autocomplete="off"`.
+  script, `referrer-policy: same-origin` (`no-referrer` makes a browser send `Origin: null` on the form post), `autocomplete="off"`.
 - All displayed values escaped. The server never logs a request body.
 
 Shortcut accepted: no constant-time compare beyond what the 128-bit token gives; the viewer does the same on

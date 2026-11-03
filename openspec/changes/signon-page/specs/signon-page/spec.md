@@ -116,7 +116,7 @@ SHALL be refused. The page SHALL take no value from its URL other than the token
 
 ### Requirement: Every page response is locked down
 Every response, refusals included, SHALL set `cache-control: no-store`, a content security policy with
-`frame-ancestors 'none'`, and `referrer-policy: no-referrer`. The page SHALL run no script.
+`frame-ancestors 'none'`, and `referrer-policy: same-origin`. The page SHALL run no script.
 
 #### Scenario: Response headers
 - **WHEN** the page answers a GET, a POST or a refused request

@@ -44,7 +44,7 @@ const HEADERS = {
   "cache-control": "no-store",
   // Inline style only: no script, no fetch, no framing, no base, posts only to itself.
   "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-  "referrer-policy": "no-referrer",
+  "referrer-policy": "same-origin", // no-referrer would make a browser send `Origin: null` on the form post, which is refused
   "x-content-type-options": "nosniff",
   connection: "close",
 };
@@ -105,7 +105,10 @@ export class SignOnPages {
   async offer(p: SignOnProfile, why: "missing" | "rejected"): Promise<Page | undefined> {
     const key = credentialAccount(p.user, p.host);
     const live = this.pending(key);
-    if (live) return live.ready.then(() => live.page);
+    if (live) {
+      if (live.account && why === "rejected") live.account.why = "rejected"; // a reused page counts its submission
+      return live.ready.then(() => live.page);
+    }
     if (why === "rejected" && this.reoffered.has(key)) return undefined;
     return this.open(key, { account: { p, why } });
   }

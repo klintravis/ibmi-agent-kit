@@ -31,7 +31,7 @@ export class SignOnOffers {
   hook: SignOnPageHook = async (p, why) => {
     try {
       const page = await this.pages.offer(p, why);
-      if (!page) return "";
+      if (!page) return why === "rejected" ? `No page is offered again for ${p.user} on ${p.host}. Run \`ibmi-agent-kit credential set <profile>\` in a terminal, then restart the server.` : "";
       const what =
         why === "missing"
           ? `No password is stored for ${p.user} on ${p.host}.`
