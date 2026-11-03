@@ -11,6 +11,7 @@ permissions:
 jobs:
   check:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15 # a test that leaves a server running goes red, not six hours of hanging
     strategy:
       fail-fast: false
       matrix:
