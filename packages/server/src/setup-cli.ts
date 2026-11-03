@@ -3,14 +3,14 @@
 // stays written), 2 a usage error or refusal (nothing written), 130 cancelled (nothing written).
 // Run in a company config repo (policy.yaml and profiles/ in the current folder), it takes the
 // settings from the chosen profiles/.env.<partition> skeleton and the repo's policy path.
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_DIRS, gitWorkTree, lastSecret, parseHelperCommand, parseProfile, resolveProfileEnv, serverName, setCredentialStore, storeSecret, type CredentialStore } from "@ibmi-agent-kit/core";
+import { CONFIG_DIRS, gitWorkTree, lastSecret, parseHelperCommand, parseProfile, resolveProfileEnv, setCredentialStore, type CredentialStore } from "@ibmi-agent-kit/core";
 import { loadPolicy } from "@ibmi-agent-kit/guard";
 import { loadProfile, MapepireBackend } from "@ibmi-agent-kit/source/tools";
+import { companyRepo, fileFor, isFile, message, OWN, planProfile, policyError, readSkeleton, repoLeak, writeProfile } from "./profile-write.js";
 
 export interface Input extends NodeJS.EventEmitter {
   isTTY?: boolean;
@@ -34,65 +34,9 @@ export interface SetupDeps {
 const USAGE = "usage: ibmi-agent-kit setup [name]\n";
 export const SETUP_SQL = "SELECT CURRENT USER, CURRENT SERVER FROM SYSIBM.SYSDUMMY1";
 export class Cancelled extends Error {}
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const isFile = (p: string) => statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
 // The kit checkout this file runs from: <kit>/packages/server/dist/setup-cli.js.
 // shortcut: assumes a checkout, wrong under an npm install; revisit when the kit is published (T-54).
 const KIT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-// A path with its symlinks resolved, through its nearest existing folder when it does not exist yet,
-// so a folder or profile linked into the repo counts as inside it.
-const real = (p: string): string => (existsSync(p) ? realpathSync(p) : dirname(p) === p ? p : join(real(dirname(p)), basename(p)));
-// A folder's identity, so another spelling of it (case on macOS, a Windows 8.3 or subst path) still matches.
-const id = (p: string) => {
-  const s = statSync(p, { bigint: true, throwIfNoEntry: false });
-  return s?.ino ? `${s.dev}:${s.ino}` : undefined; // some file systems report no inode
-};
-const within = (root: string, p: string) => {
-  const r = relative(root, p);
-  if (r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r)) return true;
-  const want = id(root);
-  for (let a = p; want; a = dirname(a)) {
-    if (id(a) === want) return true;
-    if (dirname(a) === a) return false;
-  }
-  return false;
-};
-// Settings a skeleton never supplies: the person's own sign-on and the policy path setup writes.
-const OWN = new Set(["IBMI_USER", "IBMI_PASSWORD", "IBMI_PASSWORD_COMMAND", "IBMI_PASSWORD_STORE", "IBMI_KIT_POLICY"]);
-
-// The file a name is written to: only names core lists as that server, from characters safe in a
-// file name on every OS (Windows drops a trailing dot, so `x.` would never be listed as `x.`).
-export function fileFor(name: string): string | undefined {
-  const file = name === "default" ? ".env" : `.env.${name}`;
-  const safe = /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) && !name.includes("..") && !name.endsWith(".");
-  return safe && serverName(file) === name ? file : undefined;
-}
-
-// dotenv 16 unescapes nothing inside quotes and expands \n and \r inside double quotes, so a value
-// is wrapped in a quote character it does not contain; undefined when none fits.
-function quote(v: string): string | undefined {
-  if (/[\r\n\0]/.test(v)) return undefined;
-  const q = ["'", "`", '"'].find((q) => !v.includes(q) && !(q === '"' && /\\[nr]/.test(v)));
-  return q && q + v + q;
-}
-
-// Every line that sets a key (dotenv reads `KEY=`, `export KEY=` and `KEY:`, the last one wins) gets
-// the new value; a key not there yet is appended. Other lines and the file's line endings stay.
-// Keys in `drop` lose every line that sets them.
-function updated(text: string, values: [string, string][], drop: string[] = []): string {
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  let lines = text ? text.split(/\r?\n/) : [];
-  if (lines.at(-1) === "") lines.pop();
-  const setting = (key: string) => new RegExp(`^\\s*(?:export\\s+)?${key.replace(/\./g, "\\.")}\\s*[=:]`); // a skeleton key may hold a dot
-  for (const key of drop) lines = lines.filter((l) => !setting(key).test(l));
-  for (const [key, v] of values) {
-    const sets = setting(key);
-    let found = false;
-    for (let i = 0; i < lines.length; i++) if (sets.test(lines[i])) (lines[i] = `${key}=${quote(v)}`), (found = true);
-    if (!found) lines.push(`${key}=${quote(v)}`);
-  }
-  return lines.join(eol) + eol;
-}
 
 // One raw-mode reader for every prompt: Enter ends, Backspace edits, Ctrl-C cancels; characters
 // pasted past an Enter wait for the next prompt. Raw mode is off again whenever a prompt ends.
@@ -159,22 +103,17 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   const [dir, ...later] = CONFIG_DIRS();
 
   // Company-repo mode: policy.yaml and profiles/ in the current folder; folders above are not searched.
-  const skeletons = join(cwd, "profiles");
-  const repo = isFile(join(cwd, "policy.yaml")) && (statSync(skeletons, { throwIfNoEntry: false })?.isDirectory() ?? false);
-  let partitions: string[] = [];
+  const found = companyRepo(cwd);
+  const repo = found !== undefined;
+  const skeletons = found?.skeletons ?? "";
+  const partitions = found?.partitions ?? [];
   if (repo) {
-    partitions = readdirSync(skeletons, { withFileTypes: true })
-      .filter((d) => d.isFile())
-      .map((d) => serverName(d.name))
-      .filter((n): n is string => n !== undefined && fileFor(n) !== undefined)
-      .sort();
     if (!partitions.length) return err(`the company config repo ${cwd} has no profile skeleton (profiles/.env.<partition>). Nothing was written.\n`), 2;
     if (args[0] !== undefined && !partitions.includes(args[0])) {
       return err(`"${args[0]}" is not a partition of the company config repo ${cwd}; its partitions: ${partitions.join(", ")}. Nothing was written.\n`), 2;
     }
     // The profile (a helper command or store setting included) goes only in the profile folder, so that folder, or a profile linked elsewhere, must not lie in the repo.
-    const root = real(cwd);
-    const leak = [dir, ...partitions.map((p) => join(dir, fileFor(p)!))].find((p) => within(root, real(p)));
+    const leak = repoLeak(cwd, dir, partitions);
     if (leak) {
       return err(`${leak} lies inside the company config repo ${cwd}, so setup would write your profile, with its password source, into the repo. Use a profile folder outside it (IBMI_KIT_CONFIG_DIR) and no profile linked into it. Nothing was written.\n`), 2;
     }
@@ -214,12 +153,10 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
         return cancelled(e);
       }
     }
-    const from = join(skeletons, fileFor(name)!);
-    skeleton = parseProfile(readFileSync(from, "utf8"));
-    const missing = ["IBMI_HOST", "IBMI_PARTITION"].filter((k) => !skeleton[k]?.trim());
-    if (missing.length) return err(`${from} sets no ${missing.join(" and no ")}. Nothing was written.\n`), 2;
-    if (skeleton.IBMI_PASSWORD) err(`warning: ${from} holds a password. It is ignored, never copied: remove it from the repo and its git history, and change that password.\n`);
-    if (skeleton.IBMI_PASSWORD_COMMAND) err(`warning: ${from} holds IBMI_PASSWORD_COMMAND. It is ignored, never copied or run: a command in a repo runs on every colleague's machine. Remove it from the repo.\n`);
+    const read = readSkeleton(skeletons, name);
+    skeleton = read.skeleton;
+    if (read.error) return err(`${read.error}. Nothing was written.\n`), 2;
+    for (const w of read.warnings) err(w);
   }
 
   const file = fileFor(name)!;
@@ -302,13 +239,10 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
 
   // A bad policy stops the server for every profile at startup, so it is checked before the write.
   const policyPath = values.find(([k]) => k === "IBMI_KIT_POLICY")?.[1];
-  if (policyPath) {
-    try {
-      loadPolicy(policyPath);
-    } catch (e) {
-      err(`IBMI_KIT_POLICY ${policyPath}: ${message(e)}. Nothing was written.\n`);
-      return 2;
-    }
+  const badPolicy = policyPath && policyError(policyPath);
+  if (badPolicy) {
+    err(`${badPolicy}. Nothing was written.\n`);
+    return 2;
   }
 
   // The chosen source is the only one left in the file; a plain password line never stays.
@@ -317,41 +251,11 @@ export async function setupCli(args: string[], deps: SetupDeps = realDeps()): Pr
   else if (source === "helper") (values.push(["IBMI_PASSWORD_COMMAND", command]), drop.push("IBMI_PASSWORD_STORE"));
   else drop.push("IBMI_PASSWORD_STORE");
 
-  // Prove the new text reads back as meant, every other setting included, before it touches the disk.
-  const bad = values.find(([, v]) => quote(v) === undefined)?.[0];
-  if (bad) {
-    err(`${bad} cannot be written safely in a profile file (it holds a line break, or all three of ' " and \`). Nothing was written.\n`);
-    return 2;
-  }
-  const next = updated(old, values, drop);
-  const want: Record<string, string> = { ...cur, ...Object.fromEntries(values) };
-  for (const k of drop) delete want[k];
-  const after = parseProfile(next);
-  const drift = [...new Set([...Object.keys(want), ...Object.keys(after)])].find((k) => want[k] !== after[k]);
-  if (drift) {
-    err(`${drift} would not read back unchanged after the update, so ${path} was left as it was. Edit it by hand.\n`);
-    return 2;
-  }
-
-  // The store comes first: when it fails, the file stays as it was.
-  if (password && source === "store") {
-    try {
-      await storeSecret(user, host, password);
-    } catch (e) {
-      return err(`${message(e)}. Nothing was written.\n`), 2;
-    }
-  }
-
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  // A symlinked profile is written through, so the link survives the rename.
-  const target = existsSync(path) ? realpathSync(path) : path;
-  const tmp = join(dirname(target), `setup-${process.pid}-${randomBytes(4).toString("hex")}.tmp`); // never `.env.*`, so never listed
-  try {
-    writeFileSync(tmp, next, { flag: "wx", mode: 0o600 });
-    renameSync(tmp, target);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    err(`cannot write ${path}: ${message(e)}\n`);
+  const plan = planProfile(old, cur, values, drop, path);
+  if ("error" in plan) return err(`${plan.error}\n`), 2;
+  const failed = await writeProfile({ dir, path, next: plan.next, user, host, password, store: source === "store" });
+  if (failed) {
+    err(failed.stored ? `${failed.error}\n` : `${failed.error}. Nothing was written.\n`);
     return 2;
   }
   out(`saved ${path}\n`);

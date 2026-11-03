@@ -5,7 +5,7 @@ and no IBM i. Run `npm run clean && npm run check` after each group.
 
 ## 1. Extract the profile writer
 
-- [ ] 1.1 Move the shared logic listed in design D8 from `packages/server/src/setup-cli.ts` to `packages/server/src/profile-write.ts`, keeping its error handling and validation; `setupCli` calls it. Verify: `setup-selfcheck.ts` passes with no test changed.
+- [x] 1.1 Move the shared logic listed in design D8 from `packages/server/src/setup-cli.ts` to `packages/server/src/profile-write.ts`, keeping its error handling and validation; `setupCli` calls it. Verify: `setup-selfcheck.ts` passes with no test changed.
 
 ## 2. Core seam
 
