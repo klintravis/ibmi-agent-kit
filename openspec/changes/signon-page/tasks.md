@@ -14,8 +14,8 @@ and no IBM i. Run `npm run clean && npm run check` after each group.
 
 ## 3. Page server
 
-- [ ] 3.1 Add `packages/server/src/signon-page.ts`: lazy listener, pages per key, GET form and POST submit with the protections in D4, the password path through `storeSecret`, and the re-offer count in D6. Verify: group 5 selfchecks.
-- [ ] 3.2 Add the first-profile form and submit through `profile-write.ts`: skeleton or typed host, partition list, refusals in D8, no overwrite of a profile that has appeared. Verify: group 5 selfchecks.
+- [x] 3.1 Add `packages/server/src/signon-page.ts`: lazy listener, pages per key, GET form and POST submit with the protections in D4, the password path through `storeSecret`, and the re-offer count in D6. Verify: group 5 selfchecks.
+- [x] 3.2 Add the first-profile form and submit through `profile-write.ts`: skeleton or typed host, partition list, refusals in D8, no overwrite of a profile that has appeared. Verify: group 5 selfchecks.
 
 ## 4. Delivery and wiring
 
@@ -28,13 +28,13 @@ and no IBM i. Run `npm run clean && npm run check` after each group.
 
 New `packages/server/src/signon-selfcheck.ts`, imported by `selfcheck.ts`, in the existing style. HTTP requests go to the real loopback listener.
 
-- [ ] 5.1 Token: GET does not consume; an accepted POST does; a second POST is refused and the fake store is not written; an expired token is refused (injected clock); a new offer gets a new token.
-- [ ] 5.2 Refusals: wrong Host, missing or wrong token, foreign Origin, token only in the query string, GET with values in the query string ignored, oversized body. Headers: no-store, CSP, referrer policy, on every response including refusals.
+- [x] 5.1 Token: GET does not consume; an accepted POST does; a second POST is refused and the fake store is not written; an expired token is refused (injected clock); a new offer gets a new token.
+- [x] 5.2 Refusals: wrong Host, missing or wrong token, foreign Origin, token only in the query string, GET with values in the query string ignored, oversized body. Headers: no-store, CSP, referrer policy, on every response including refusals.
 - [ ] 5.3 Secret absent: submit a marker password, then run accepted, store-failed and rejected paths; assert the marker is in no tool result, notification sent to the client, run log file, captured stderr or page response.
 - [ ] 5.4 Delivery: fake client without `elicitation.url` gets the link and no request; a client with it gets no link in the first error; a decline, a request error and 10 seconds unanswered each print the link for the same page; form mode is never requested; the link holds no host, user or profile name; the completion notification fires after a submit of an elicited page and not after a link-only one.
 - [ ] 5.5 No extra attempt: count `send` calls. Missing entry sends 0; a guarded identity lookup plus query makes one page and sends 0; a submission sends 0; the next call sends 1; a rejected value retried sends 0.
 - [ ] 5.6 Re-offer: stale entry rejected, then page, then rejected, then no page; first-time page, then rejected, then page, then rejected, then no page; an expired offer does not count; helper and plain profiles get no offer.
-- [ ] 5.7 First profile: no repo writes `.env` with `IBMI_PASSWORD_STORE=os` and no password; one skeleton and several skeletons; skeleton password and helper never copied and warned; a skeleton with no host refused; a line break in a value refused; policy path set; store failure writes no file; profile folder in a git work tree and in the repo refused; a profile that appears after the offer is not overwritten; a typo with profiles present stays the existing error; HTML in a value is escaped.
+- [x] 5.7 First profile: no repo writes `.env` with `IBMI_PASSWORD_STORE=os` and no password; one skeleton and several skeletons; skeleton password and helper never copied and warned; a skeleton with no host refused; a line break in a value refused; policy path set; store failure writes no file; profile folder in a git work tree and in the repo refused; a profile that appears after the offer is not overwritten; a typo with profiles present stays the existing error; HTML in a value is escaped.
 - [ ] 5.8 Standalone: with no hook installed, the engines' missing-entry and unknown-server texts are unchanged.
 
 ## 6. Docs

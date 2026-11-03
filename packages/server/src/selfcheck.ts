@@ -18,6 +18,7 @@ import { verbLoader } from "./verbs.js";
 import { createServer, listServersText, onceShutdown, shutdownAll, type Engine, type ServerDeps } from "./server.js";
 import "./verbs-selfcheck.js"; // project-verbs runner and tools
 import "./setup-selfcheck.js"; // the setup command
+import "./signon-selfcheck.js"; // the sign-on page server
 
 const BIN = fileURLToPath(new URL("./index.js", import.meta.url));
 
