@@ -219,6 +219,29 @@ export async function deleteStoredSecret(user: string, host: string): Promise<bo
   }
 }
 
+// The store was read and holds nothing for this account; an unreadable store is a plain Error.
+export class MissingEntryError extends Error {}
+
+// The sign-on page the server installs. It returns text to append to the error; the page is the server's.
+export type SignOnPageHook = (p: SignOnProfile, why: "missing" | "rejected") => Promise<string>;
+let page: SignOnPageHook | undefined;
+export const setSignOnPage = (fn?: SignOnPageHook): void => {
+  page = fn;
+};
+export const signOnPageInstalled = (): boolean => page !== undefined;
+
+// The hook can add to an error, never replace or break it: a throw, or no text, leaves `e` standing.
+async function offered(p: SignOnProfile, why: "missing" | "rejected", e: Error): Promise<Error> {
+  if (!page) return e;
+  try {
+    const t = await page(p, why);
+    if (!t) return e;
+    return e instanceof MissingEntryError ? new MissingEntryError(`${e.message}\n${t}`) : new Error(`${e.message}\n${t}`);
+  } catch {
+    return e;
+  }
+}
+
 async function readStored(user: string, host: string): Promise<string> {
   const account = credentialAccount(user, host);
   let v: string | null;
@@ -229,7 +252,7 @@ async function readStored(user: string, host: string): Promise<string> {
       `the OS credential store cannot be read (${reason(e)}). Fix it, or ${HELPER_HINT}`,
     );
   }
-  if (!v) throw new Error(`no OS credential store entry for ${account}. Run \`ibmi-agent-kit credential set <profile>\`, or ${HELPER_HINT}`);
+  if (!v) throw new MissingEntryError(`no OS credential store entry for ${account}. Run \`ibmi-agent-kit credential set <profile>\`, or ${HELPER_HINT}`);
   return v;
 }
 
@@ -278,11 +301,17 @@ export const lastSecret = (host: string, user: string): string | undefined => la
 export function signOnOnce<T>(p: SignOnProfile, send: (secret: string) => Promise<T>, isRejected: (e: unknown) => boolean): Promise<T> {
   const key = credentialAccount(p.user, p.host);
   const attempt = async (): Promise<T> => {
-    const secret = await fetchSecret(p);
+    let secret: string;
+    try {
+      secret = await fetchSecret(p);
+    } catch (e) {
+      throw e instanceof MissingEntryError ? await offered(p, "missing", e) : e;
+    }
     if (rejected.get(key) === secret) {
-      throw new Error(
+      const refusal = new Error(
         `sign-on for ${key} not sent: that password was rejected earlier in this process and has not changed. Change it in the OS store, the password helper or the profile, then retry; or restart the server to try the same password again`,
       );
+      throw p.passwordStore && !p.passwordCommand ? await offered(p, "rejected", refusal) : refusal;
     }
     try {
       const r = await send(secret);

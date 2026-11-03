@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CONFIG_DIRS, keyringStore, listServers, resolveProfileEnv, credentialAccount, deleteStoredSecret, fetchSecret, lastSecret,
-  parseHelperCommand, passwordSource, resetSignOnState, runHelper, setCredentialStore, signOnOnce, splitCommand,
-  storeSecret, type CredentialStore, type SignOnProfile,
+  MissingEntryError, parseHelperCommand, passwordSource, resetSignOnState, runHelper, setCredentialStore, setSignOnPage, signOnOnce,
+  splitCommand, storeSecret, type CredentialStore, type SignOnProfile,
 } from "./index.js";
 
 // Each test gets an empty fake home; process.env is saved and restored around it.
@@ -32,6 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   setCredentialStore();
+  setSignOnPage();
   resetSignOnState();
   for (const k of Object.keys(process.env)) delete process.env[k];
   Object.assign(process.env, saved);
@@ -492,4 +493,115 @@ test("the real store pins the Secret Service on Linux, never the kernel keyring 
   }
   await keyringStore(async () => Entry).get("BOB@h");
   assert.deepEqual(args, ["ibmi-agent-kit", "BOB@h", { linux: { store: "secret-service" } }]);
+});
+
+// ---- the sign-on page hook ----
+
+const hookCalls = () => {
+  const calls: Array<{ user: string; why: string }> = [];
+  setSignOnPage(async (p, why) => (calls.push({ user: p.user, why }), `OFFER ${why}`));
+  return calls;
+};
+const auth401 = (e: unknown) => /401/.test(String(e));
+
+test("Page hook: a missing store entry gets the offer, nothing is sent, the original text stays", async () => {
+  const { s } = fakeStore();
+  setCredentialStore(s);
+  const bare = await signOnOnce(prof({ passwordStore: "os" }), async () => "x", auth401).catch((e: Error) => e);
+  const calls = hookCalls();
+  let sends = 0;
+  const send = async () => void sends++;
+  const e = await signOnOnce(prof({ passwordStore: "os" }), send, auth401).catch((x: Error) => x);
+  assert.ok(e instanceof MissingEntryError);
+  assert.equal(e.message, `${(bare as Error).message}\nOFFER missing`);
+  assert.deepEqual(calls, [{ user: "u", why: "missing" }]);
+  assert.equal(sends, 0);
+  assert.ok(bare instanceof MissingEntryError, "the typed error exists without a hook too");
+});
+
+test("Page hook: a store profile refused by the latch gets the offer; the refusal text stays", async () => {
+  const { s, m } = fakeStore();
+  setCredentialStore(s);
+  m.set("U@h", "old");
+  const p = prof({ passwordStore: "os" });
+  const sent: string[] = [];
+  const bad = async (x: string) => (sent.push(x), Promise.reject(new Error("401")));
+  const calls = hookCalls();
+  await assert.rejects(signOnOnce(p, bad, auth401), /^Error: 401$/); // the send's own error carries no offer
+  assert.deepEqual(calls, []);
+  const e = await signOnOnce(p, bad, auth401).catch((x: Error) => x);
+  assert.match(e.message, /^sign-on for U@h not sent: .*try the same password again\nOFFER rejected$/s);
+  assert.deepEqual(calls, [{ user: "u", why: "rejected" }]);
+  assert.deepEqual(sent, ["old"]); // the refusal sent nothing
+});
+
+test("Page hook: never called for a helper, a plain profile or an unreadable store", async () => {
+  const calls = hookCalls();
+  let sends = 0;
+  const bad = async () => (sends++, Promise.reject(new Error("401")));
+  const helper = prof({ passwordCommand: helperCmd("out", "hp") });
+  await assert.rejects(signOnOnce(helper, bad, auth401), /401/);
+  await assert.rejects(signOnOnce(helper, bad, auth401), /not sent.*rejected earlier/s);
+  await assert.rejects(signOnOnce(prof({ passwordCommand: helperCmd("fail") }), bad, auth401), /exited with code 1/);
+  await captureStderr(async () => {
+    const plain = prof({ password: "pw" });
+    await assert.rejects(signOnOnce(plain, bad, auth401), /401/);
+    await assert.rejects(signOnOnce(plain, bad, auth401), /not sent.*rejected earlier/s);
+  });
+  setCredentialStore({
+    get: async () => { throw new Error("no Secret Service"); },
+    set: async () => {},
+    delete: async () => true,
+  });
+  const e = await signOnOnce(prof({ passwordStore: "os" }), bad, auth401).catch((x: Error) => x);
+  assert.match(e.message, /cannot be read \(no Secret Service\)/);
+  assert.ok(!(e instanceof MissingEntryError) && !e.message.includes("OFFER"));
+  assert.deepEqual(calls, []);
+  assert.equal(sends, 2); // one helper send and one plain send, nothing else
+});
+
+test("Page hook: a throw, a rejection or empty text leaves the existing error", async () => {
+  const { s } = fakeStore();
+  setCredentialStore(s);
+  const p = prof({ passwordStore: "os" });
+  const bare = (await signOnOnce(p, async () => "x", auth401).catch((e: Error) => e)) as Error;
+  for (const hook of [
+    () => { throw new Error("sync boom"); },
+    async () => { throw new Error("boom"); },
+    async () => "",
+  ]) {
+    setSignOnPage(hook);
+    const e = await signOnOnce(p, async () => "x", auth401).catch((x: Error) => x);
+    assert.ok(e instanceof MissingEntryError);
+    assert.equal(e.message, bare.message);
+  }
+});
+
+test("Page hook: it runs in the account's chain but does not hold it past its await", async () => {
+  const { s, m } = fakeStore();
+  setCredentialStore(s);
+  const p = prof({ passwordStore: "os" });
+  const order: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  setSignOnPage(async () => (order.push("hook"), await gate, "OFFER"));
+  const first = signOnOnce(p, async () => "x", auth401).catch((x: Error) => x);
+  const second = signOnOnce(p, async (x) => (order.push(`send ${x}`), "ok"), auth401);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(order, ["hook"]); // the second call waits behind the first
+  m.set("U@h", "pw"); // the page was submitted while the hook was still open
+  release();
+  assert.match(((await first) as Error).message, /OFFER$/);
+  assert.equal(await second, "ok");
+  assert.deepEqual(order, ["hook", "send pw"]);
+});
+
+test("Page hook: the unknown-server error adds the list_servers line only with no profile and the hook installed", () => {
+  assert.throws(() => resolveProfileEnv("x"), (e: Error) => /Available: none$/.test(e.message)); // no hook: unchanged
+  hookCalls();
+  assert.throws(() => resolveProfileEnv("x"), (e: Error) => /Available: none; list_servers offers a setup page$/.test(e.message));
+  put(kit(), ".env.ok", "IBMI_HOST=h\n");
+  assert.throws(() => resolveProfileEnv("typo"), (e: Error) => /Available: ok$/.test(e.message)); // a typo stays the plain error
+  setSignOnPage();
+  assert.throws(() => resolveProfileEnv("typo"), (e: Error) => /Available: ok$/.test(e.message));
 });

@@ -9,8 +9,8 @@ and no IBM i. Run `npm run clean && npm run check` after each group.
 
 ## 2. Core seam
 
-- [ ] 2.1 Add `setSignOnPage` and a typed missing-entry error to `packages/core/src/credential.ts`, keeping the message text; call the hook on a missing entry and at the latch refusal of a store profile (D1). Verify: core selfcheck, hook gets `missing` and `rejected`, is never called for helper, plain or an unreadable store, and `send` is not called; with no hook every message is unchanged.
-- [ ] 2.2 Add the `list_servers` line to the unknown-server error when no profile exists and the hook is installed. Verify: core selfcheck, and the existing `Available: ...$` checks in core and screen pass unchanged.
+- [x] 2.1 Add `setSignOnPage` and a typed missing-entry error to `packages/core/src/credential.ts`, keeping the message text; call the hook on a missing entry and at the latch refusal of a store profile (D1). Verify: core selfcheck, hook gets `missing` and `rejected`, is never called for helper, plain or an unreadable store, and `send` is not called; with no hook every message is unchanged.
+- [x] 2.2 Add the `list_servers` line to the unknown-server error when no profile exists and the hook is installed. Verify: core selfcheck, and the existing `Available: ...$` checks in core and screen pass unchanged.
 
 ## 3. Page server
 

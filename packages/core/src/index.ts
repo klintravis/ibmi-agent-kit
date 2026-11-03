@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse } from "dotenv";
+import { signOnPageInstalled } from "./credential.js";
 
 // The parser every profile file is read with, so a writer can prove its text reads back as meant.
 export const parseProfile = (text: string): Record<string, string> => parse(text);
@@ -72,7 +73,9 @@ export function resolveProfileEnv(name?: string): Record<string, string> {
   const found = profiles();
   const path = found.get(server);
   if (path === undefined) {
-    throw new Error(`unknown server "${server}". Available: ${[...found.keys()].sort().join(", ") || "none"}`);
+    // The page is the one way to a first profile, so the error says where the offer is (only while it is installed).
+    const hint = found.size === 0 && signOnPageInstalled() ? "; list_servers offers a setup page" : "";
+    throw new Error(`unknown server "${server}". Available: ${[...found.keys()].sort().join(", ") || "none"}${hint}`);
   }
   // Only IBMI_* settings fall back to the environment; everything else in it is not ours.
   const env: Record<string, string> = {};
