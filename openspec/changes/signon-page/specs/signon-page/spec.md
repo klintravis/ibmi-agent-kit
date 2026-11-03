@@ -273,9 +273,12 @@ point at `IBMI_PASSWORD_COMMAND`. Every offer SHALL also name `credential set` o
 browser cannot reach this machine. `setup` and `credential` SHALL NOT serve a page.
 
 #### Scenario: No Secret Service on Linux
-- **WHEN** the page is submitted on a Linux machine with no Secret Service
-- **THEN** the page shows the store message pointing at `IBMI_PASSWORD_COMMAND`, nothing is written, and
-  the next call offers a new page
+- **WHEN** a first-profile page is submitted on a Linux machine with no Secret Service
+- **THEN** the page shows the store message pointing at `IBMI_PASSWORD_COMMAND` and nothing is written
+
+#### Scenario: Store profile with no Secret Service
+- **WHEN** a store profile signs on where the store cannot be read
+- **THEN** the call fails with the existing store error and no page is offered
 
 #### Scenario: Remote session
 - **WHEN** the server runs on a machine whose loopback the user's browser cannot reach
