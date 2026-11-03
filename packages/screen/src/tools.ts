@@ -1,11 +1,11 @@
-// Modified by ibmi-agent-kit (2026): tool definitions split out of index.ts into register(); annotations and titles added; openSessions reports closed; KEYS re-exported; an optional execution guard decides command lines before screen_do and run_tests keys and session_open's program and library before sign on; the sign on System name is kept per server.
+// Modified by ibmi-agent-kit (2026): tool definitions split out of index.ts into register(); annotations and titles added; openSessions reports closed; KEYS re-exported; an optional execution guard decides command lines before screen_do and run_tests keys and session_open's program and library before sign on; the sign on System name is kept per server; session_open stops the viewer of a session the host closed; a tool() wrapper for the simple handlers.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { KEYS } from "./codes.js";
 import { CONFIG_DIRS, listServers, loadProfileFor } from "./config.js";
-import { makeReporter, type ToolReporter } from "./report.js";
+import { makeReporter, type ToolExtra, type ToolReporter } from "./report.js";
 import { Session, type CommandGuard } from "./session.js";
 import { renderSnapshot } from "./snapshot.js";
 import { applyActions, formatSuite, parseAction, parseTest, runSuite } from "./testrun.js";
@@ -155,6 +155,18 @@ export function register(
     drop(key);
   }
 
+  // The reporter, the failure result and dispose, for a handler with nothing to undo on failure.
+  const tool = <A>(name: string, run: (args: A, r: ToolReporter) => Promise<string>) => async (args: A, extra: ToolExtra) => {
+    const r = makeReporter(mcp, extra, name);
+    try {
+      return toolResult(r, await run(args, r));
+    } catch (e) {
+      return r.failResult(e);
+    } finally {
+      r.dispose();
+    }
+  };
+
   mcp.tool(
     "session_open",
     "Open a 5250 session to an IBM i and sign on, then return the first screen. Also starts a live view in the browser so a human can watch what you do. Returns a screen snapshot: the literal 24x80 screen plus a field list with refs you use in screen_do.",
@@ -177,6 +189,7 @@ export function register(
         if (sessions.has(key) && !sessions.get(key)!.session.isClosed) {
           throw new Error(`session "${key}" is already open. Use screen_snapshot, or session_close first.`);
         }
+        drop(key); // a session the host closed: stop its viewer before the new one takes the entry
         created = true;
         const live = await openSession(key, { server, device, signOn, library, program, menu }, r);
         const profile = live.session.profile;
@@ -201,16 +214,7 @@ export function register(
     "Return the current screen without changing anything: the literal screen text, the field list with refs, the cursor position, the keyboard state, any message line, and the stack of screens that led here, which is usually where F3 and F12 lead back to. Use this to look before acting.",
     { session: sessionArg },
     { title: "Screen snapshot", readOnlyHint: true },
-    async ({ session }, extra) => {
-      const r = makeReporter(mcp, extra, "screen_snapshot");
-      try {
-        return toolResult(r, snapshotOf(requireSession(session)));
-      } catch (e) {
-        return r.failResult(e);
-      } finally {
-        r.dispose();
-      }
-    },
+    tool("screen_snapshot", async ({ session }) => snapshotOf(requireSession(session))),
   );
 
   mcp.tool(
@@ -344,28 +348,20 @@ export function register(
       "List the configured IBM i servers, named by the .env.<name> files on disk, plus the keys screen_do accepts.",
       {},
       { title: "List servers", readOnlyHint: true },
-      async (_args, extra) => {
-        const r = makeReporter(mcp, extra, "list_servers");
-        try {
-          const servers = listServers();
-          const open = [...sessions.entries()].map(([k, v]) => `${k}${v.session.isClosed ? " (closed)" : ""}`);
-          const dirs = CONFIG_DIRS()
-            .map((d, i) => `  ${i + 1}. ${d}${existsSync(d) ? "" : "  (does not exist)"}`)
-            .join("\n");
-          return toolResult(
-            r,
-            `Servers: ${servers.join(", ") || "none configured"}\n` +
-              `Open sessions: ${open.join(", ") || "none"}\n\n` +
-              `Profiles are read from these folders, first match wins:\n${dirs}\n` +
-              (servers.length ? "" : `\nNo profiles found. Copy .env.example as .env or .env.<name> into one of the folders above.\n`) +
-              `\nKeys: ${KEYS.join(", ")}`,
-          );
-        } catch (e) {
-          return r.failResult(e);
-        } finally {
-          r.dispose();
-        }
-      },
+      tool("list_servers", async () => {
+        const servers = listServers();
+        const open = [...sessions.entries()].map(([k, v]) => `${k}${v.session.isClosed ? " (closed)" : ""}`);
+        const dirs = CONFIG_DIRS()
+          .map((d, i) => `  ${i + 1}. ${d}${existsSync(d) ? "" : "  (does not exist)"}`)
+          .join("\n");
+        return (
+          `Servers: ${servers.join(", ") || "none configured"}\n` +
+          `Open sessions: ${open.join(", ") || "none"}\n\n` +
+          `Profiles are read from these folders, first match wins:\n${dirs}\n` +
+          (servers.length ? "" : `\nNo profiles found. Copy .env.example as .env or .env.<name> into one of the folders above.\n`) +
+          `\nKeys: ${KEYS.join(", ")}`
+        );
+      }),
     );
   }
 

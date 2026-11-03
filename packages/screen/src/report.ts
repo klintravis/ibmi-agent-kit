@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): ToolExtra exported for the tool wrapper in tools.ts.
 // Per tool call progress. step() becomes an MCP progress notification when the client sent a
 // progressToken, and an info log notification when it did not.
 
@@ -9,7 +10,7 @@ import type { LogLevel, Reporter } from "./types.js";
 const STALL_MS = 8000; // silence before the watchdog speaks
 const POLL_MS = 2000;  // only decides how late the first stall message is
 
-type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+export type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
 interface ReporterIO {
   sendProgress?: (progress: number, message: string) => void;

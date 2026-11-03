@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): added the tools.js import-side-effect check; custom sign on screen tests; execution guard hook tests (command line decided at the key, sign on program and library, System name).
+// Modified by ibmi-agent-kit (2026): added the tools.js import-side-effect check; custom sign on screen tests; execution guard hook tests (command line decided at the key, sign on program and library, System name); session_open over a closed session stops the old viewer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -1486,5 +1486,35 @@ test("6.2: the System name is read from a captured PUB400-style sign on screen, 
     assert.equal(k.engine.systemName("default"), "PUB400");
   } finally {
     await k.close();
+  }
+});
+
+test("session_open over a session the host closed stops the old viewer", async () => {
+  const hosts: ReturnType<typeof fakeHost>[] = [];
+  const mcp = new McpServer({ name: "t", version: "0" });
+  const engine = register(mcp, {
+    listServers: false,
+    newSession: () => {
+      const h = fakeHost();
+      Object.assign(h.s.profile, { viewerEnabled: true, viewerPort: 0 });
+      hosts.push(h);
+      return h.s;
+    },
+  });
+  const client = new Client({ name: "t", version: "0" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([mcp.connect(b), client.connect(a)]);
+  const open = async () =>
+    /Live view: (\S+)/.exec(((await client.callTool({ name: "session_open", arguments: {} })).content as { text: string }[])[0].text)![1];
+  try {
+    const old = await open();
+    assert.equal((await fetch(old)).ok, true, "the first viewer serves");
+    hosts[0].s.close(); // the host closed it
+    await open();
+    await assert.rejects(fetch(old), "the old viewer was stopped, not left listening");
+  } finally {
+    await engine.shutdown(); // stops the last viewer
+    await client.close();
+    await mcp.close();
   }
 });
