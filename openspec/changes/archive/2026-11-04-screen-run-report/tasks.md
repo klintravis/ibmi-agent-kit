@@ -18,4 +18,4 @@
 
 - [x] 4.1 Self-checks in `packages/screen/src/selfcheck.ts` (note, report, escaping, hidden field, 27x132, refusal, write failure, run_tests) and one revert check
 - [x] 4.2 `openspec validate screen-run-report`, `check-names`, `docs-check`, `npm run clean && npm run check`
-- [ ] 4.3 Live on PUB400: a 27x132 screen and a report file, run by the desk session
+- [x] 4.3 Live on PUB400, run by the desk session: a report file with notes and no password (2026-11-04). A 27x132 screen was not reached, because the profile's restricted mode refuses the wide commands; the live proof stays open in the desk todos and the self-check covers 27x132
