@@ -1,6 +1,6 @@
 # @ibmi-agent-kit/screen
 
-<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, mounting, the kit's execution guard hook). -->
+<!-- Modified by ibmi-agent-kit (2026): rewritten for the kit (install, profile folders, protected settings, mounting, the kit's execution guard hook, the run report and the `note:` action). -->
 
 The 5250 screen engine of ibmi-agent-kit, a hard fork of SH4RKKK's ibm-i-5250-mcp.
 
@@ -93,7 +93,7 @@ in the middle of a session still gets the whole history, up to the last 500 scre
 ## The run report
 
 The live view is for watching. To review a fast or unattended run afterwards, set
-`IBMI_5250_REPORT_DIR` to a folder (profile file only). Each 5250 session then writes one HTML file
+`IBMI_5250_REPORT_DIR` to a folder (profile file only; use an absolute path, `~` is not expanded). Each 5250 session then writes one HTML file
 there, named from the UTC time, the server and the session, and `session_open` and `session_close`
 name it in their reply. The file is a block per step, newest last: the step number, the local time, the
 label (the key pressed, and the agent's note for it) and the screen it left, in the 5250 colours. It is

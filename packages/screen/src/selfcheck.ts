@@ -1662,6 +1662,37 @@ test("report: a value typed in a nondisplay field is not in the file", async () 
   });
 });
 
+test("report: run_tests with a hidden field's value, too long or in an expect, leaves it out of the failure and the file", async () => {
+  await inTemp(async (dir) => {
+    const tests = join(dir, "tests");
+    mkdirSync(tests);
+    const md = (title: string, doBlock: string, expect: string) =>
+      ["# " + title, "", "```5250-do", doBlock, "key: Enter", "```", "", "```5250-expect", expect, "```", ""].join("\n");
+    writeFileSync(join(tests, "a.md"), md("Too long", "type f1: HUNTER2OVERLONG", "text: ==="));
+    writeFileSync(join(tests, "b.md"), md("Expect hidden", "note: look", "field f1: HUNTER2EXPECTED"));
+    writeFileSync(join(tests, "c.md"), md("Masked", "note: look", "field f1: <nondisplay>"));
+    const rdir = join(dir, "reports");
+    const k = await reported(rdir);
+    try {
+      // run_tests opens its own session: once past the sign on, the screen has one nondisplay field.
+      const apply = k.s.screen.apply.bind(k.s.screen);
+      k.s.screen.apply = (...a: Parameters<typeof apply>) => {
+        const r = apply(...a);
+        if (!k.s.looksLikeSignOn()) k.s.screen.fields = [field({ row: 7, col: 53, length: 10, attr: 0x27 })];
+        return r;
+      };
+      const r = await k.call("run_tests", { path: tests });
+      const html = readFileSync(onlyReport(rdir), "utf8");
+      assert.match(html, /does not fit field f1/);
+      assert.match(html, /field f1 is nondisplay and cannot be checked/);
+      assert.match(html, /PASS<\/b> Masked/);
+      for (const text of [r.text, html]) assert.equal(/HUNTER2/.test(text), false);
+    } finally {
+      await k.end();
+    }
+  });
+});
+
 test("report: a 27x132 frame shows column 132 inside a scrolling block", () => {
   const dir = mkdtempSync(join(tmpdir(), "ikit-report-"));
   try {

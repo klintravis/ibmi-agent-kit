@@ -1,5 +1,7 @@
 # The sign on lands on a menu with a command line
 
+<!-- Modified by ibmi-agent-kit (2026): a note: line and its explanation. -->
+
 A worked example of the format, and a real test: it proves a session comes up
 where the profile says it should. Copy it as a starting point. The screen titles
 here are the English ones, so change them to whatever your box's language calls

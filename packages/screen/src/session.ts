@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery; pressKey takes an optional `guarded` check of the command line before the key is sent, after the engine's own command check on the same text; the sign on screen's System name is read; the password is typed inside signOnOnce, fetched per send.
+// Modified by ibmi-agent-kit (2026): recognise a two-field custom sign on screen on first contact, and again after recovery; pressKey takes an optional `guarded` check of the command line before the key is sent, after the engine's own command check on the same text; the sign on screen's System name is read; the password is typed inside signOnOnce, fetched per send; the too-long text error does not quote the text, which may be a hidden field's value.
 // One 5250 session: transport, screen, and settle logic. The host says it is done twice, by
 // unlocking the keyboard and then definitively by sending a read command, so nothing here polls.
 
@@ -201,7 +201,7 @@ export class Session extends EventEmitter {
       );
     }
     if (text.length > f.length) {
-      throw new Error(`"${text}" is ${text.length} characters but field ${f.id} holds ${f.length}`);
+      throw new Error(`text of ${text.length} characters does not fit field ${f.id}, which holds ${f.length}`);
     }
     this.screen.typeInto(f, text, this.encoder);
     this.typed.set(f.id, text.trim());

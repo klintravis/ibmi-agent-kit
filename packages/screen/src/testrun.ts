@@ -322,7 +322,12 @@ function checkExpectation(session: Session, e: Expectation, check: (ok: boolean,
       }
       // displayValueOf, so a test that wants to check a password cannot print it.
       const shown = screen.displayValueOf(f);
-      const actual = shown === undefined ? "<nondisplay>" : shown.replace(/\s+$/, "");
+      if (shown === undefined) {
+        // Never echo the expected value: it may be the hidden one.
+        check(e.value === "<nondisplay>", `line ${e.line}: field ${e.field} is nondisplay and cannot be checked`);
+        return;
+      }
+      const actual = shown.replace(/\s+$/, "");
       check(actual === e.value, `line ${e.line}: field ${e.field} is "${e.value}", got "${actual}"`);
       return;
     }
