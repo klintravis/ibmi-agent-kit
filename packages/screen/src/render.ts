@@ -1,3 +1,4 @@
+// Modified by ibmi-agent-kit (2026): the screen CSS is exported as SCREEN_CSS so the run report shares it with the live view.
 // Rendering a screen for humans. The model reads snapshot.ts, not this.
 
 import type { Attr } from "./codes.js";
@@ -86,6 +87,17 @@ export function frameOf(screen: ScreenBuffer): Frame {
   return { rows: rows.join(""), oia };
 }
 
+// The rules that draw a screen, shared by the live view and the run report.
+export const SCREEN_CSS = `.screen { display:inline-block; background:${SCREEN_BG}; padding:10px 12px;
+            border:1px solid #234023; border-radius:4px; white-space:pre; }
+  .row { height:1.35em; }
+  .rn { color:#2f5a2f; user-select:none; margin-right:8px; }
+  .cur .rn { color:#ffdd33; }
+  .nd { color:transparent; }
+  .locked { color:#ff4d4d; font-weight:600; }
+  .ok { color:#33ff44; }
+  .oia { margin-top:6px; color:#9fc09f; font-size:12px; }`;
+
 // The whole page, inlined. No build step, no dependency, no CDN.
 export function viewerPage(title: string): string {
   return `<!doctype html>
@@ -109,15 +121,7 @@ export function viewerPage(title: string): string {
   summary { cursor:pointer; color:#9fc09f; font-size:12px; }
   summary b { color:#e8e8e8; font-size:13px; font-weight:600; margin-right:6px; }
   details[open] summary { margin-bottom:8px; }
-  .screen { display:inline-block; background:${SCREEN_BG}; padding:10px 12px;
-            border:1px solid #234023; border-radius:4px; white-space:pre; }
-  .row { height:1.35em; }
-  .rn { color:#2f5a2f; user-select:none; margin-right:8px; }
-  .cur .rn { color:#ffdd33; }
-  .nd { color:transparent; }
-  .locked { color:#ff4d4d; font-weight:600; }
-  .ok { color:#33ff44; }
-  .oia { margin-top:6px; color:#9fc09f; font-size:12px; }
+  ${SCREEN_CSS}
   .crumbs { display:flex; flex-direction:column; align-items:flex-start; gap:4px; margin-bottom:8px; }
   .crumbs button { font:inherit; font-size:12px; color:#9fc09f; background:#111a11; text-align:left;
                    border:1px solid #234023; border-radius:3px; padding:2px 10px; cursor:pointer; }

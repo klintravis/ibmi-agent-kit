@@ -106,7 +106,7 @@ registration's env cannot override them (`IBMI_KIT_CONFIG_DIR` does choose which
 is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_PASSWORD_COMMAND`, `IBMI_PASSWORD_STORE`,
 `IBMI_PARTITION`, `IBMI_KIT_POLICY` (absolute path), `IBMI_KIT_VERBS` (absolute folders, separated by `;` on Windows and `:`
 elsewhere), `IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`,
-`IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_MAPEPIRE_CA`,
+`IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_5250_REPORT_DIR`, `IBMI_MAPEPIRE_CA`,
 `IBMI_MAPEPIRE_JAR`, and every `IBMI_*_PORT`
 (`IBMI_SSH_PORT`, `IBMI_MAPEPIRE_PORT`, `IBMI_5250_PORT`, `IBMI_5250_VIEWER_PORT`). Other
 `IBMI_*` settings may still come from the environment when the file omits them.

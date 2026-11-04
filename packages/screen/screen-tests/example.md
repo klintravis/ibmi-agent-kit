@@ -26,10 +26,12 @@ fields: 1
 Now start something. Under restricted mode, ten job scoped commands can be typed
 on a command line, plus whatever is in `IBMI_ALLOWED_CL`. The README lists them.
 `type f1` names the field by the ref the snapshot gives it, and `row,col` works
-too.
+too. A `note:` line says why, and labels the key after it in the live view and the run
+report; the host never sees it.
 
 ```5250-do
 type f1: call qsys/qcmd
+note: start the command entry screen
 key: Enter
 ```
 

@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): profiles now resolve through @ibmi-agent-kit/core, which also checks the name; the module-level dotenv loading is removed; the password comes from passwordSource (plain, helper or OS store).
+// Modified by ibmi-agent-kit (2026): profiles now resolve through @ibmi-agent-kit/core, which also checks the name; the module-level dotenv loading is removed; the password comes from passwordSource (plain, helper or OS store); IBMI_5250_REPORT_DIR sets reportDir.
 import { CONFIG_DIRS, listServers, passwordSource, resolveProfileEnv } from "@ibmi-agent-kit/core";
 import { DEFAULT_CCSID } from "./ebcdic.js";
 import type { Profile } from "./types.js";
@@ -65,6 +65,7 @@ export function loadProfile(env: NodeJS.ProcessEnv | Record<string, string> = pr
     blockedCl: list(env.IBMI_BLOCKED_CL),
     viewerEnabled: bool(env.IBMI_5250_VIEWER, false, "IBMI_5250_VIEWER"),
     viewerPort: num(env.IBMI_5250_VIEWER_PORT, 5250),
+    reportDir: env.IBMI_5250_REPORT_DIR?.trim() || undefined,
     initialLibrary: env.IBMI_5250_CURLIB || undefined,
     initialProgram: env.IBMI_5250_PROGRAM || undefined,
     initialMenu: env.IBMI_5250_MENU || undefined,

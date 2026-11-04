@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): tool definitions split out of index.ts into register(); annotations and titles added; openSessions reports closed; KEYS re-exported; an optional execution guard decides command lines before screen_do and run_tests keys and session_open's program and library before sign on; the sign on System name is kept per server; session_open stops the viewer of a session the host closed; a tool() wrapper for the simple handlers.
+// Modified by ibmi-agent-kit (2026): a note: action labels the next key; each session writes an optional run report file (IBMI_5250_REPORT_DIR); tool definitions split out of index.ts into register(); annotations and titles added; openSessions reports closed; KEYS re-exported; an optional execution guard decides command lines before screen_do and run_tests keys and session_open's program and library before sign on; the sign on System name is kept per server; session_open stops the viewer of a session the host closed; a tool() wrapper for the simple handlers.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -6,6 +6,7 @@ import { z } from "zod";
 import { KEYS } from "./codes.js";
 import { CONFIG_DIRS, listServers, loadProfileFor } from "./config.js";
 import { makeReporter, type ToolExtra, type ToolReporter } from "./report.js";
+import { openReport, type RunReport } from "./report-file.js";
 import { Session, type CommandGuard } from "./session.js";
 import { renderSnapshot } from "./snapshot.js";
 import { applyActions, formatSuite, parseAction, parseTest, runSuite } from "./testrun.js";
@@ -20,7 +21,7 @@ const sessionArg = z
   .optional()
   .describe('which open session to act on. Omit unless you opened more than one (default: "default")');
 
-interface OpenSession { session: Session; server: string; viewer?: Viewer; }
+interface OpenSession { session: Session; server: string; viewer?: Viewer; report?: RunReport; }
 
 interface OpenOpts {
   server?: string;
@@ -120,6 +121,17 @@ export function register(
       }
     }
 
+    // Independent of the viewer, before open, so the first screen is in the report.
+    if (profile.reportDir) {
+      const rep = openReport(profile.reportDir, live.server, key, (m) => r.log("warning", m));
+      if (rep) {
+        live.report = rep;
+        s.on("step", (label: string) => rep.step(s.screen, label));
+        s.on("test", (name: string, passed: boolean, failures: string[]) => rep.test(name, passed, failures));
+        r.log("info", `run report at ${rep.path}`);
+      }
+    }
+
     sessions.set(key, live);
     await s.open(r);
     const system = s.signOnSystem();
@@ -169,7 +181,7 @@ export function register(
 
   mcp.tool(
     "session_open",
-    "Open a 5250 session to an IBM i and sign on, then return the first screen. Also starts a live view in the browser so a human can watch what you do. Returns a screen snapshot: the literal 24x80 screen plus a field list with refs you use in screen_do.",
+    "Open a 5250 session to an IBM i and sign on, then return the first screen. Also starts a live view in the browser so a human can watch what you do. Returns a screen snapshot: the literal screen (the host picks 24x80 or 27x132 for each screen) plus a field list with refs you use in screen_do. When the profile sets IBMI_5250_REPORT_DIR, a run report file records every step and the reply names it.",
     {
       server: serverArg,
       session: z.string().optional().describe('a name for this session, so you can open more than one (default: "default")'),
@@ -197,6 +209,7 @@ export function register(
           `Session "${key}" open on ${profile.host} as ${profile.user}` +
           (profile.deviceName ? ` (device ${profile.deviceName})` : "") +
           (live.viewer?.url() ? `\nLive view: ${live.viewer.url()}  <- open this to watch` : "") +
+          (live.report ? `\nRun report: ${live.report.path}` : "") +
           `\n\n`;
         return toolResult(r, header + snapshotOf(live));
       } catch (e) {
@@ -226,6 +239,7 @@ export function register(
     "key: Enter"          Enter, F1 to F24, PageUp, PageDown, Help, Clear, Print, Attn
                           Attn is the Attention key (Esc in ACS): it runs the job's attention program, if it has one
     "cursor: 6,53"        move the cursor, which is an argument to the key: Help on a message line explains that message, Help anywhere else explains the field under it
+    "note: open the order"  say why, in a few words: it labels the next key in the call (the live view and the run report show "Enter: open the order") and is never sent to the host. Put a note before each key. Every note needs a key after it. Never put typed values or passwords in a note
 
   Typing sends nothing to the host. A 5250 holds it locally and transmits only on a key, so ["type f1: ACME", "type f2: 100", "key: Enter"] is one exchange with the box, not three. If an action fails the run stops there and the error names it, with the screen as it stands.`,
     {
@@ -271,13 +285,15 @@ export function register(
       try {
         const live = requireSession(session);
         const clean = signOff === false ? false : await live.session.signOff(r);
+        const report = live.report?.path;
         drop(key);
         return toolResult(
           r,
           `Session "${key}" closed.` +
             (clean
               ? " Signed off cleanly, the device is released."
-              : " No sign off was possible from this screen, so the host may leave a disconnected job pending recovery."),
+              : " No sign off was possible from this screen, so the host may leave a disconnected job pending recovery.") +
+            (report ? `\nRun report: ${report}` : ""),
         );
       } catch (e) {
         drop(key); // a close that throws must still tear down, or it is stuck open forever
@@ -290,7 +306,7 @@ export function register(
 
   mcp.tool(
     "run_tests",
-    "Replay screen regression tests against a program and report what passed. A test is a Markdown file with ```5250-do blocks (the same action lines screen_do takes) and ```5250-expect blocks (checks against the screen that came back), so it reads as a specification. Use this after compiling a change to see whether the display behaviour it was supposed to keep still holds, or before making one to write the expected screens first and watch them fail. Opens its own session and closes it, unless you pass `session` to reuse one that is already open.",
+    "Replay screen regression tests against a program and report what passed. A test is a Markdown file with ```5250-do blocks (the same action lines screen_do takes, including `note: <why>` before a key, which labels it in the live view and run report and is never sent; never put typed values or passwords in a note) and ```5250-expect blocks (checks against the screen that came back), so it reads as a specification. Use this after compiling a change to see whether the display behaviour it was supposed to keep still holds, or before making one to write the expected screens first and watch them fail. Opens its own session and closes it, unless you pass `session` to reuse one that is already open.",
     {
       path: z
         .string()

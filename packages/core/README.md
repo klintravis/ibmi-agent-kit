@@ -23,7 +23,7 @@ The profile loader and the SQL transport type shared by every package in the [ib
 
 Profile files in the folders above. One file supplies the whole profile; files are never merged and nothing is loaded into `process.env`.
 
-Settings that pick the box, the credentials, the transport or a guard are read from the profile file only, never from the environment, so a registration's env cannot override them (`IBMI_KIT_CONFIG_DIR` does choose which profile folder is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_PASSWORD_COMMAND`, `IBMI_PASSWORD_STORE`, `IBMI_PARTITION`, `IBMI_KIT_POLICY`, `IBMI_KIT_VERBS`, `IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_MAPEPIRE_CA`, `IBMI_MAPEPIRE_JAR` and every `IBMI_*_PORT`. Other `IBMI_*` settings fall back to the environment when the file omits them.
+Settings that pick the box, the credentials, the transport or a guard are read from the profile file only, never from the environment, so a registration's env cannot override them (`IBMI_KIT_CONFIG_DIR` does choose which profile folder is read): `IBMI_HOST`, `IBMI_USER`, `IBMI_PASSWORD`, `IBMI_PASSWORD_COMMAND`, `IBMI_PASSWORD_STORE`, `IBMI_PARTITION`, `IBMI_KIT_POLICY`, `IBMI_KIT_VERBS`, `IBMI_SQL_TRANSPORT`, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_BLOCKED_TABLES`, `IBMI_READ_ONLY`, `IBMI_5250_TLS_INSECURE`, `IBMI_5250_REPORT_DIR`, `IBMI_MAPEPIRE_CA`, `IBMI_MAPEPIRE_JAR` and every `IBMI_*_PORT`. Other `IBMI_*` settings fall back to the environment when the file omits them.
 
 See [Profiles in the root README](../../README.md#profiles) for the user-facing description.
 

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,8 @@ import { assertCommandAllowed } from "./guard.js";
 import { KEY_TO_AID, AID, CMD, ESC, FFW, ORDER, attrOf } from "./codes.js";
 import { buildAttention, buildInbound, buildQueryReply, buildSaveScreenReply } from "./inbound.js";
 import { MAX_STEPS, renderFrame } from "./render.js";
-import { formatSuite, parseTest } from "./testrun.js";
+import { formatSuite, parseAction, parseTest } from "./testrun.js";
+import { openReport } from "./report-file.js";
 import { register } from "./tools.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -1517,4 +1518,256 @@ test("session_open over a session the host closed stops the old viewer", async (
     await client.close();
     await mcp.close();
   }
+});
+
+// --- note: and the run report (screen-run-report) ---
+
+const reportFiles = (dir: string) => readdirSync(dir).filter((f) => f.endsWith(".html"));
+const onlyReport = (dir: string) => {
+  const files = reportFiles(dir);
+  assert.equal(files.length, 1, `one report in ${dir}`);
+  return join(dir, files[0]);
+};
+// The tools over a fake host whose profile names a report folder (or none).
+async function reported(reportDir?: string) {
+  const k = await guardedScreen();
+  if (reportDir) k.s.profile.reportDir = reportDir;
+  return { ...k, end: async () => (await k.engine.shutdown(), await k.close()) };
+}
+// A temp folder for one check, removed whatever happens.
+async function inTemp(run: (dir: string) => Promise<void>) {
+  const dir = mkdtempSync(join(tmpdir(), "ikit-report-"));
+  try {
+    await run(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("note: parses, and a note with no text or a field is refused", () => {
+  assert.deepEqual(parseAction("note: open the order list", 3, "action "), { kind: "note", text: "open the order list", line: 3 });
+  assert.throws(() => parseAction("note:    ", 1, "action "), /"note" needs text/);
+  assert.throws(() => parseAction("note f1: why", 1, "action "), /"note" takes no field/);
+});
+
+test("note: labels the next key, never reaches the host, and a note with no key is refused before anything is sent", async () => {
+  const k = await reported();
+  try {
+    await k.call("session_open", {});
+    const labels: string[] = [];
+    k.s.on("step", (l: string) => labels.push(l));
+    const sent = k.sent.length;
+    const ok = await k.call("screen_do", { actions: ["note: run the command", "note: and say why", "type f1: DSPLIBL", "key: Enter", "key: F3"] });
+    assert.equal(ok.error, false);
+    assert.deepEqual(labels, ["Enter: run the command; and say why", "F3"], "the note rides on the next key only");
+    assert.equal(k.sent.length, sent + 2, "one record per key, none for a note");
+
+    // A trailing note is found before the first action runs, so the typed text is not even applied.
+    const bad = await k.call("screen_do", { actions: ["type f1: LEFTOVER", "key: Enter", "note: nothing follows"] });
+    assert.equal(bad.error, true);
+    assert.match(bad.text, /"note" has no key after it/);
+    assert.equal(k.sent.length, sent + 2, "nothing was sent");
+    assert.equal(k.s.screen.valueOf(k.s.screen.fields[0]).includes("LEFTOVER"), false, "the type before it was not applied");
+    const empty = await k.call("screen_do", { actions: ["note:", "key: Enter"] });
+    assert.equal(empty.error, true);
+    assert.equal(k.sent.length, sent + 2);
+
+    // A key that fails keeps its note, and the stopped on an error wording.
+    const failing = k.s.pressKey.bind(k.s);
+    k.s.pressKey = async () => {
+      throw new Error("boom");
+    };
+    labels.length = 0;
+    const r = await k.call("screen_do", { actions: ["note: try it", "key: Enter"] });
+    k.s.pressKey = failing;
+    assert.equal(r.error, true);
+    assert.match(r.text, /"key: Enter" failed: boom/);
+    assert.deepEqual(labels, ["Enter: try it, stopped on an error"]);
+  } finally {
+    await k.end();
+  }
+});
+
+test("note: in a test file with no key after it fails the parse, so run_tests starts nothing", () => {
+  assert.throws(() => parseTest(["# t", "", "```5250-do", "key: Enter", "note: dangling", "```"].join("\n"), "t.md"), /"note" has no key after it/);
+  const t = parseTest(["# t", "", "```5250-do", "note: why", "key: Enter", "```"].join("\n"), "t.md");
+  assert.deepEqual(t.steps[0].actions[0], { kind: "note", text: "why", line: 4 });
+});
+
+test("the report is written only when the setting is set, and holds every step's label and screen", async () => {
+  await inTemp(async (dir) => {
+    const none = await reported();
+    try {
+      assert.doesNotMatch((await none.call("session_open", {})).text, /Run report/);
+    } finally {
+      await none.end();
+    }
+
+    const rdir = join(dir, "made", "on demand"); // missing folders are created
+    const k = await reported(rdir);
+    try {
+      const opened = await k.call("session_open", {});
+      const path = /Run report: (.+)/.exec(opened.text)![1].trim();
+      assert.equal(onlyReport(rdir), path);
+      await k.call("screen_do", { actions: ["note: run the command", "type f1: DSPLIBL", "key: Enter"] });
+
+      // Read while the session is still open: the file is already complete up to the last step.
+      const html = readFileSync(path, "utf8");
+      assert.match(html, /<b>1<\/b> &middot; [^<]* &middot; signed on/);
+      assert.match(html, /<b>2<\/b> &middot; [^<]* &middot; Enter: run the command/);
+      assert.match(html, /===&gt;/, "the screen text is there, escaped");
+      assert.doesNotMatch(html, /<\/body>|<\/html>/, "never closed, so a dead run still reads");
+      assert.doesNotMatch(html, /<script|src=|href=|@import|url\(/i, "no script, no external resource");
+      if (process.platform !== "win32") assert.equal(statSync(path).mode & 0o777, 0o600);
+
+      const closed = await k.call("session_close", {});
+      assert.match(closed.text, new RegExp(`Run report: ${path.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")}`));
+    } finally {
+      await k.end();
+    }
+  });
+});
+
+test("report: a script in a label is escaped and a session name cannot leave the folder", async () => {
+  await inTemp(async (dir) => {
+    const rdir = join(dir, "reports");
+    const k = await reported(rdir);
+    try {
+      await k.call("session_open", { session: "../../x" });
+      k.s.emit("step", "<script>alert(1)</script>");
+      assert.deepEqual(readdirSync(dir), ["reports"], "nothing written beside the folder");
+      const html = readFileSync(onlyReport(rdir), "utf8");
+      assert.doesNotMatch(html, /<script/i);
+      assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    } finally {
+      await k.end();
+    }
+  });
+});
+
+test("report: a value typed in a nondisplay field is not in the file", async () => {
+  await inTemp(async (dir) => {
+    const k = await reported(join(dir, "r"));
+    try {
+      await k.call("session_open", {});
+      k.s.screen.fields = [field({ row: 7, col: 53, length: 10, attr: 0x27 })];
+      k.s.screen.typeInto(k.s.screen.fields[0], "HUNTER2XYZ", enc);
+      k.s.emit("step", "after the hidden field");
+      const html = readFileSync(onlyReport(join(dir, "r")), "utf8");
+      assert.match(html, /after the hidden field/);
+      assert.equal(html.includes("HUNTER2XYZ"), false);
+    } finally {
+      await k.end();
+    }
+  });
+});
+
+test("report: a 27x132 frame shows column 132 inside a scrolling block", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ikit-report-"));
+  try {
+    const rep = openReport(dir, "srv", "s", (m) => assert.fail(m))!;
+    const wide = new ScreenBuffer(27, 132, 37);
+    wide.clearUnit(27, 132);
+    enc("Z").copy(wide.chars, 26 * 132 + 131);
+    rep.step(wide, "wide");
+    const html = readFileSync(rep.path, "utf8");
+    assert.equal((html.match(/class="row/g) ?? []).length, 27);
+    assert.match(html, /Z<\/span><\/div><\/div><\/div>/, "column 132 of row 27");
+    assert.match(html, /\.scroll \{ overflow-x:auto/);
+    assert.match(html, /<div class="scroll"><div class="screen">/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("report: a folder inside a git work tree is refused and the session carries on", async () => {
+  await inTemp(async (dir) => {
+    mkdirSync(join(dir, ".git"));
+    const warns: string[] = [];
+    assert.equal(openReport(join(dir, "reports"), "srv", "s", (m) => warns.push(m)), undefined);
+    assert.equal(warns.length, 1);
+    assert.match(warns[0], /inside the git work tree/);
+
+    const k = await reported(join(dir, "reports"));
+    try {
+      const r = await k.call("session_open", {});
+      assert.equal(r.error, false);
+      assert.doesNotMatch(r.text, /Run report/);
+      assert.equal((await k.call("screen_do", { actions: ["key: Enter"] })).error, false);
+      assert.equal(readdirSync(dir).includes("reports"), false, "nothing was created");
+    } finally {
+      await k.end();
+    }
+  });
+});
+
+test("report: a folder that cannot be created warns and the session carries on", async () => {
+  await inTemp(async (dir) => {
+    const file = join(dir, "afile");
+    writeFileSync(file, "x");
+    const warns: string[] = [];
+    assert.equal(openReport(join(file, "sub"), "srv", "s", (m) => warns.push(m)), undefined);
+    assert.match(warns[0], /run report not written/);
+
+    const k = await reported(join(file, "sub"));
+    try {
+      const r = await k.call("session_open", {});
+      assert.equal(r.error, false);
+      assert.doesNotMatch(r.text, /Run report/);
+      assert.equal((await k.call("screen_do", { actions: ["key: Enter"] })).error, false);
+    } finally {
+      await k.end();
+    }
+  });
+});
+
+test("report: a file that stops being writable warns once and the session carries on", async () => {
+  await inTemp(async (dir) => {
+    const warns: string[] = [];
+    const rep = openReport(dir, "srv", "s", (m) => warns.push(m))!;
+    rmSync(rep.path);
+    mkdirSync(rep.path); // appending to a directory fails on every platform
+    const s = new ScreenBuffer(24, 80, 37);
+    rep.step(s, "a");
+    rep.step(s, "b");
+    assert.equal(warns.length, 1);
+    assert.match(warns[0], /run report stopped/);
+  });
+});
+
+test("report: two sessions opened in the same second get two files, never an overwrite", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ikit-report-"));
+  try {
+    const a = openReport(dir, "srv", "s", assert.fail)!;
+    const b = openReport(dir, "srv", "s", assert.fail)!;
+    assert.notEqual(a.path, b.path);
+    assert.equal(reportFiles(dir).length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("report: run_tests records each test's outcome and its failures between the steps", async () => {
+  await inTemp(async (dir) => {
+    const tests = join(dir, "tests");
+    mkdirSync(tests);
+    const md = (title: string, expect: string) =>
+      ["# " + title, "", "```5250-do", "note: look at the command line", "key: Enter", "```", "", "```5250-expect", expect, "```", ""].join("\n");
+    writeFileSync(join(tests, "a.md"), md("Passing test", "text: ===>"));
+    writeFileSync(join(tests, "b.md"), md("Failing test", "text: NOPE"));
+    const rdir = join(dir, "reports");
+    const k = await reported(rdir);
+    try {
+      const r = await k.call("run_tests", { path: tests });
+      assert.equal(r.error, false);
+      const html = readFileSync(onlyReport(rdir), "utf8");
+      const at = (s: RegExp) => html.search(s);
+      assert.ok(at(/Enter: look at the command line/) > at(/signed on/), "the steps are there");
+      assert.ok(at(/PASS<\/b> Passing test/) > at(/Enter: look at the command line/), "a test's outcome follows its steps");
+      assert.ok(at(/FAIL<\/b> Failing test/) > at(/PASS<\/b> Passing test/));
+      assert.match(html, /<li>line \d+: screen contains &quot;NOPE&quot;<\/li>/);
+    } finally {
+      await k.end();
+    }
+  });
 });

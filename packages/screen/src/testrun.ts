@@ -1,4 +1,4 @@
-// Modified by ibmi-agent-kit (2026): applyActions and runSuite pass an optional command line guard to every key they press.
+// Modified by ibmi-agent-kit (2026): applyActions and runSuite pass an optional command line guard to every key they press; a note: action labels the next key; runTest emits a "test" event with each outcome.
 // Screen regression tests. A test is a Markdown file, so it reads as a specification: two fence
 // tags, and everything outside them is prose the parser ignores.
 //
@@ -12,6 +12,7 @@ import { messageLine, renderSnapshot, structuralSignature } from "./snapshot.js"
 export type Action =
   | { kind: "type"; field: string; text: string; line: number }
   | { kind: "key"; key: string; line: number }
+  | { kind: "note"; text: string; line: number }
   | { kind: "cursor"; row: number; col: number; line: number };
 
 export type Expectation =
@@ -76,7 +77,9 @@ export function parseTest(markdown: string, source: string): ScreenTest {
     }
     if (fence && tag !== undefined) {
       if (tag === "5250-do") {
-        steps.push({ actions: body.map((b) => parseAction(b.text, b.line, `${source}:`)), expectations: [] });
+        const actions = body.map((b) => parseAction(b.text, b.line, `${source}:`));
+        checkNotes(actions, source); // before any test runs, so a bad note sends nothing
+        steps.push({ actions, expectations: [] });
       } else if (tag === "5250-expect") {
         if (!steps.length) steps.push({ actions: [], expectations: [] });
         steps[steps.length - 1].expectations.push(...body.map((b) => parseExpectation(b.text, b.line, fail)));
@@ -125,12 +128,28 @@ export function parseAction(raw: string, line: number, where = ""): Action {
     if (!value.trim()) fail(`"key" needs a key name, e.g. "key: Enter"`);
     return { kind: "key", key: value.trim(), line };
   }
+  if (verb === "note") {
+    if (target) fail(`"note" takes no field, write "note: ${target}"`);
+    if (!value.trim()) fail(`"note" needs text, e.g. "note: open the order list"`);
+    return { kind: "note", text: value.trim(), line };
+  }
   if (verb === "cursor") {
     const m = ROWCOL.exec(value.trim());
     if (!m) fail(`"cursor" needs row,col, got "${value.trim()}"`);
     return { kind: "cursor", row: Number(m[1]), col: Number(m[2]), line };
   }
-  return fail(`unknown action "${verb}". Known: type, key, cursor`);
+  return fail(`unknown action "${verb}". Known: type, key, cursor, note`);
+}
+
+// A note labels the next key, so one with no key after it has nothing to label. Called before any
+// action is sent: a half-run batch is worse than a refused one.
+export function checkNotes(actions: Action[], source?: string): void {
+  let open: Action | undefined;
+  for (const a of actions) {
+    if (a.kind === "note") open ??= a;
+    else if (a.kind === "key") open = undefined;
+  }
+  if (open) throw new Error(`${source ? `${source}:` : "action "}${open.line}: "note" has no key after it in the batch, so it labels nothing`);
 }
 
 function parseExpectation(raw: string, line: number, failAt: (line: number, message: string) => never): Expectation {
@@ -188,13 +207,18 @@ export async function applyActions(
   reporter: Reporter,
   guarded?: CommandGuard,
 ): Promise<void> {
-  // Labelled by the key alone: typed text would carry a value typed into a hidden field. A timed out
-  // key still gets its step, since the screen it stopped on is the one that says why.
+  checkNotes(actions);
+  // Labelled by the key and its note: typed text would carry a value typed into a hidden field. A
+  // timed out key still gets its step, since the screen it stopped on is the one that says why.
   const step = (key: string, move?: string) =>
     session.emit("step", move ? key : `${key}, stopped on an error`);
+  let notes: string[] = [];
+  const named = (key: string) => (notes.length ? `${key}: ${notes.join("; ")}` : key);
   for (const a of actions) {
     try {
-      if (a.kind === "type") {
+      if (a.kind === "note") {
+        notes.push(a.text);
+      } else if (a.kind === "type") {
         const rc = ROWCOL.exec(a.field);
         const f = session.resolveField(rc ? { row: Number(rc[1]), col: Number(rc[2]) } : a.field);
         session.typeInto(f, a.text);
@@ -202,18 +226,24 @@ export async function applyActions(
         session.moveCursor(a.row, a.col);
       } else {
         await session.pressKey(a.key, reporter, { guarded });
-        step(a.key, session.lastMove);
+        step(named(a.key), session.lastMove);
+        notes = [];
       }
     } catch (e) {
-      if (a.kind === "key") step(a.key);
+      if (a.kind === "key") step(named(a.key));
       // In a batch, "which one stopped" is the first thing the caller needs, and the screen omits it.
       throw new Error(`"${label(a)}" failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 }
 
+// A type action names its field, never the text: a failure message reaches the run report, and the
+// text may be a value for a hidden field.
 const label = (a: Action) =>
-  a.kind === "type" ? `type ${a.field}: ${a.text}` : a.kind === "key" ? `key: ${a.key}` : `cursor: ${a.row},${a.col}`;
+  a.kind === "type" ? `type ${a.field}`
+  : a.kind === "key" ? `key: ${a.key}`
+  : a.kind === "note" ? `note: ${a.text}`
+  : `cursor: ${a.row},${a.col}`;
 
 // False once an earlier test attached one: the report only prints the first.
 async function runTest(
@@ -235,6 +265,12 @@ async function runTest(
     checks.push(result);
   };
 
+  // The run report records the outcome right after the test's own steps.
+  const done = (passed: boolean): TestResult => {
+    session.emit("test", test.name, passed, checks.filter((c) => !c.ok).map((c) => c.what));
+    return { name: test.name, passed, checks };
+  };
+
   for (const [n, step] of test.steps.entries()) {
     reporter.step(`${test.name}: step ${n + 1} of ${test.steps.length}`);
     try {
@@ -243,14 +279,14 @@ async function runTest(
       // A broken test or an unexpected screen, so stop: later steps assumed this landed.
       const message = e instanceof Error ? e.message : String(e);
       check(false, `step ${n + 1} could not run: ${message}`);
-      return { name: test.name, passed: false, checks };
+      return done(false);
     }
     for (const e of step.expectations) checkExpectation(session, e, check);
   }
 
   const passed = checks.every((c) => c.ok);
   reporter.log("info", `${test.name}: ${passed ? "passed" : "FAILED"} (${checks.length} check(s))`);
-  return { name: test.name, passed, checks };
+  return done(passed);
 }
 
 function checkExpectation(session: Session, e: Expectation, check: (ok: boolean, what: string) => void): void {

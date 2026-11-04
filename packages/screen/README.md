@@ -90,6 +90,38 @@ in the middle of a session still gets the whole history, up to the last 500 scre
 
 ![The history open on the Programming menu](docs/history.png)
 
+## The run report
+
+The live view is for watching. To review a fast or unattended run afterwards, set
+`IBMI_5250_REPORT_DIR` to a folder (profile file only). Each 5250 session then writes one HTML file
+there, named from the UTC time, the server and the session, and `session_open` and `session_close`
+name it in their reply. The file is a block per step, newest last: the step number, the local time, the
+label (the key pressed, and the agent's note for it) and the screen it left, in the 5250 colours. It is
+plain HTML with inline styles and no script, so it opens from disk in any browser, and it is written as
+the run goes, so a run that dies still leaves everything up to its last step. `run_tests` adds each
+test's name, pass or fail, and the failures between its steps.
+
+The agent says why with a `note:` action, which labels the next key and is never sent to the host:
+
+```
+screen_do(actions: ["note: open the order list", "type f1: 2", "key: Enter"])
+```
+
+The report shows `Enter: open the order list`. Notes are for the reason, not the data: the tool
+description tells the agent not to put typed values or passwords in one. A note must have a key after
+it in the same call, and is refused before anything is sent if it does not.
+
+Things to know:
+
+- **The report holds screen contents.** Anything the host displayed is in the file, customer data
+  included. Fields the host hides, such as a password, are blanked, as in the live view. Keep the folder
+  somewhere you would keep that data, and clear it out yourself: there is no size limit and no retention.
+- A folder inside a git work tree is refused with a warning, so a report is not committed by accident.
+- The folder is created if missing. On Linux and macOS the file is mode `0600`. On Windows it takes
+  the folder's permissions, so choose a folder only you can read.
+- A report never fails a session. If the folder is refused or a write fails, the server logs a warning
+  and carries on without it.
+
 ## Requirements
 
 - Node 20 or newer on the client.
@@ -121,7 +153,7 @@ All configuration lives in a profile file: `.env` for the default server, `.env.
 2. `~/.ibmi-agent-kit/`
 3. `~/.ibm-i-servers/`
 
-Connection and safety settings (host, user, password, ports, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_5250_TLS_INSECURE`) come from the profile file only, never from the environment. See the root `README.md`.
+Connection and safety settings (host, user, password, ports, `IBMI_RESTRICTED`, `IBMI_ALLOWED_CL`, `IBMI_BLOCKED_CL`, `IBMI_5250_TLS_INSECURE`, `IBMI_5250_REPORT_DIR`) come from the profile file only, never from the environment. See the root `README.md`.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -137,6 +169,7 @@ Connection and safety settings (host, user, password, ports, `IBMI_RESTRICTED`, 
 | `IBMI_5250_TLS_INSECURE` | no | `false` | accept any certificate on 992, self signed included |
 | `IBMI_5250_VIEWER` | no | `false` | `true` starts the live view |
 | `IBMI_5250_VIEWER_PORT` | no | `5250` | falls back to a free port when this one is busy |
+| `IBMI_5250_REPORT_DIR` | no | | folder for the run report, one HTML file per session. Profile file only. See [The run report](#the-run-report) |
 | `IBMI_5250_CURLIB` | no | | typed into Current library at sign on |
 | `IBMI_5250_PROGRAM` | no | | typed into Program/procedure at sign on |
 | `IBMI_5250_MENU` | no | | typed into Menu at sign on |
@@ -193,13 +226,14 @@ so "open a session on PROD" loads `.env.PROD`. Say nothing about a box and it us
 ### Drive the screen
 
 - **`screen_do`**: takes a list of actions, runs them in order, and returns only the final screen.
-  Three action forms, the same ones a test file uses:
+  Four action forms, the same ones a test file uses:
 
   | Action | Does |
   |---|---|
   | `type f1: ACME LTD` | put text in a field, by ref, by `row,col`, or by DDS name once known |
   | `key: Enter` | Enter, F1 to F24, PageUp, PageDown, Help, Clear, Print, Attn |
   | `cursor: 6,53` | move the cursor before the key |
+  | `note: open the order list` | say why, for the next `key:` in the same call: the live view and the [run report](#the-run-report) label that key with it. Never sent to the host, and never the place for typed values or passwords. A note with no key after it is an error |
 
   Cursor position is an argument to the key, which is why it has its own action: Help on a message
   line explains that message, Help anywhere else explains the field under it. Attn is the Attention
